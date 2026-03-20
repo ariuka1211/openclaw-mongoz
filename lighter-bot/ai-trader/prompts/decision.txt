@@ -1,0 +1,23 @@
+{context}
+
+Based on this data, output your trading decision as valid JSON:
+
+{{
+  "action": "open" | "close" | "hold",
+  "symbol": "TOKEN" | null,
+  "direction": "long" | "short" | null,
+  "size_pct_equity": 0.0-5.0,
+  "leverage": 1.0-20.0,
+  "stop_loss_pct": 0.5-15.0,
+  "reasoning": "why you chose this — be specific, reference scores, funding, win rate",
+  "confidence": 0.0-1.0
+}}
+
+Field notes:
+- size_pct_equity: PERCENTAGE of total equity (e.g. 3.0 = 3% = $30 on $1000)
+- stop_loss_pct: stop loss distance from entry as a percentage
+- confidence: 0.0 = pure guess, 1.0 = absolute certainty
+- For "close": only symbol is needed, other fields null
+- For "hold": all fields null except reasoning and confidence
+
+Output ONLY the JSON object. No markdown, no explanation.

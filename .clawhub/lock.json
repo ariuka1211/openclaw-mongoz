@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "skills": {
+    "deep-research-pro": {
+      "version": "1.0.2",
+      "installedAt": 1773464412086
+    },
+    "baseline-kit": {
+      "version": "1.0.0",
+      "installedAt": 1773464417104
+    },
+    "mem0-1-0-0": {
+      "version": "1.0.0",
+      "installedAt": 1773609095949
+    }
+  }
+}

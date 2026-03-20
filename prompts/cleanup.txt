@@ -1,0 +1,27 @@
+You are a memory curator. Clean up this MEMORY.md section.
+
+## Section: {{SECTION}}
+
+## Full Content:
+{{BODY}}
+
+## Rules:
+1. Remove noise — memory system meta-items, granular implementation steps, transient bug fixes
+2. Deduplicate — merge items saying the same thing
+3. Move misplaced items to better sections
+4. Cap at 8 items — keep only the most important
+5. Preserve core facts like "- **Server:** ..." unless duplicates
+6. PRESERVE ALL metadata — keep [date], (container:tag), [status], and (source) tags intact
+7. NEVER remove items marked [superseded] or [expired] — those are handled by the versioning system
+8. Keep ⭐ promotion markers
+
+## Available target sections:
+{{SECTIONS}}
+
+## Output (JSON only):
+{
+  "section_content": "cleaned section body",
+  "items_removed": N,
+  "items_moved": [{"item": "- text", "target_section": "## Target [tag]"}],
+  "reason": "what was cleaned"
+}

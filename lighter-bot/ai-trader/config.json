@@ -1,0 +1,45 @@
+{
+  "db_path": "state/trader.db",
+  "decision_file": "../ai-decision.json",
+  "signals_file": "../signals.json",
+  "strategy_memory_file": "state/strategy_memory.md",
+
+  "cycle_interval_seconds": 180,
+  "max_consecutive_failures": 3,
+  "max_rejection_halt_count": 5,
+  "rejection_halt_window_minutes": 30,
+
+  "llm": {
+    "primary_model": "xiaomi/mimo-v2-omni",
+    "fallback_model": "xiaomi/mimo-v2-pro",
+    "reflection_model": "xiaomi/mimo-v2-pro",
+    "api_base": "https://openrouter.ai/api/v1",
+    "timeout_seconds": 30,
+    "max_retries": 2
+  },
+
+  "safety": {
+    "max_positions": 3,
+    "max_leverage": 20.0,
+    "max_size_pct_equity": 5.0,
+    "max_daily_drawdown_pct": 10.0,
+    "max_total_exposure_pct": 15.0,
+    "min_confidence": 0.3,
+    "min_scanner_score": 60,
+    "required_stop_loss": true,
+    "min_stop_loss_pct": 0.5,
+    "max_orders_per_hour": 12,
+    "cooldown_after_loss_seconds": 300
+  },
+
+  "dashboard": {
+    "host": "0.0.0.0",
+    "port": 8080
+  },
+
+  "alerting": {
+    "alert_on_open": true,
+    "alert_on_close": true,
+    "alert_on_halt": true
+  }
+}

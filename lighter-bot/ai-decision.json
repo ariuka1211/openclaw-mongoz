@@ -1,0 +1,12 @@
+{
+  "timestamp": "2026-03-20T07:02:18.794435+00:00",
+  "action": "close",
+  "symbol": "ROBO",
+  "direction": null,
+  "size_pct_equity": null,
+  "leverage": null,
+  "stop_loss_pct": null,
+  "reasoning": "Closing ROBO long position because it conflicts with the scanner signal which indicates dir=short with score 66, and funding of -0.237% where longs collect, but the directional bias is short, making it misaligned. This complies with past decisions to close conflicting positions and helps reduce open positions from 5 to 4, moving towards the max of 3.",
+  "confidence": 0.8,
+  "size_usd": null
+}

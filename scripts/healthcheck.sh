@@ -1,9 +1,8 @@
 #!/bin/bash
-# System Health Dashboard — validates OUTPUT QUALITY, not just uptime
-# Checks: LCM summaries, extensions, watchdog, gateway
+# System Health Dashboard — validates system health
+# Checks: gateway, watchdog, system resources
 # Usage: ./healthcheck.sh [--json] [--quiet]
 
-LCM_DB="/root/.openclaw/lcm.db"
 CONFIG="/root/.openclaw/openclaw.json"
 JSON_MODE=false
 QUIET=false
@@ -45,55 +44,7 @@ else
   check "Gateway" "fail" "HTTP ${GW_HTTP} — gateway not responding"
 fi
 
-# ─── 2. LCM Summary Quality (last 24h) ───
-if [ -f "$LCM_DB" ]; then
-  TOTAL_24H=$(sqlite3 "$LCM_DB" "SELECT COUNT(*) FROM summaries WHERE created_at > datetime('now', '-24 hours')" 2>/dev/null || echo 0)
-  if [ "$TOTAL_24H" -gt 0 ] 2>/dev/null; then
-    BAD_24H=$(sqlite3 "$LCM_DB" "
-      SELECT COUNT(*) FROM summaries 
-      WHERE created_at > datetime('now', '-24 hours') AND (
-        content LIKE 'We need to%' OR
-        content LIKE '%We need to summarize%' OR
-        content LIKE '%We need to produce%' OR
-        content LIKE '%[LCM fallback summary%' OR
-        content LIKE '<!DOCTYPE%' OR
-        token_count < 50
-      )
-    " 2>/dev/null || echo 0)
-    REAL_24H=$((TOTAL_24H - BAD_24H))
-    BAD_PCT=$(( BAD_24H * 100 / TOTAL_24H ))
-    
-    if [ "$BAD_PCT" -gt 50 ]; then
-      check "LCM Quality (24h)" "fail" "${BAD_24H}/${TOTAL_24H} summaries are garbage (${BAD_PCT}% bad)"
-    elif [ "$BAD_PCT" -gt 10 ]; then
-      check "LCM Quality (24h)" "warn" "${BAD_24H}/${TOTAL_24H} summaries degraded (${BAD_PCT}% bad)"
-    else
-      check "LCM Quality (24h)" "ok" "${REAL_24H}/${TOTAL_24H} real summaries (${BAD_PCT}% bad)"
-    fi
-  else
-    check "LCM Quality (24h)" "warn" "No summaries generated in last 24h"
-  fi
-  
-  # LCM DB freshness
-  LCM_AGE=$(( $(date +%s) - $(stat -c %Y "$LCM_DB" 2>/dev/null || echo 0) ))
-  if [ "$LCM_AGE" -gt 3600 ]; then
-    check "LCM Freshness" "warn" "DB not written in $((LCM_AGE/3600))h $((LCM_AGE%3600/60))m"
-  else
-    check "LCM Freshness" "ok" "Last write ${LCM_AGE}s ago"
-  fi
-  
-  # LCM DB size
-  LCM_SIZE=$(du -sh "$LCM_DB" 2>/dev/null | cut -f1)
-  LCM_MSGS=$(sqlite3 "$LCM_DB" "SELECT COUNT(*) FROM messages" 2>/dev/null || echo "?")
-  LCM_SUMS=$(sqlite3 "$LCM_DB" "SELECT COUNT(*) FROM summaries" 2>/dev/null || echo "?")
-  check "LCM Storage" "ok" "${LCM_SIZE}, ${LCM_MSGS} msgs, ${LCM_SUMS} summaries"
-else
-  check "LCM DB" "fail" "Database file not found at ${LCM_DB}"
-fi
-
-# ─── 3. Extensions Check ───
-# Engram removed — no longer used
-
+# ─── 2. Extensions Check ───
 # Check if memory-core plugin is loaded (check config + extension files)
 if [ -d "/root/.openclaw/extensions/memory-core" ] || grep -q '"memory-core"' "$CONFIG" 2>/dev/null; then
   check "Memory-Core Plugin" "ok" "Configured"
@@ -101,31 +52,7 @@ else
   check "Memory-Core Plugin" "warn" "Not configured or not installed"
 fi
 
-# ─── 4. Lossless-Claw Extension ───
-LC_EXT="/root/.openclaw/extensions/lossless-claw"
-if [ -d "$LC_EXT" ]; then
-  # Check if summarize.ts has the thinking fix
-  if grep -q "thinking" "$LC_EXT/src/summarize.ts" 2>/dev/null; then
-    THINKING_EXCLUDED=$(grep -c "thinking" "$LC_EXT/src/summarize.ts" 2>/dev/null || echo 0)
-    # If thinking appears only in comments/type defs but NOT in text extraction = good
-    if grep "content.*thinking\|text.*thinking\|\.thinking" "$LC_EXT/src/summarize.ts" 2>/dev/null | grep -v "//\|type\|interface\|export" | grep -q "thinking"; then
-      check "Lossless-Claw" "fail" "thinking field still in text extraction — needs patch"
-    else
-      check "Lossless-Claw" "ok" "Installed, thinking field excluded from summaries"
-    fi
-  else
-    check "Lossless-Claw" "ok" "Installed, no thinking references (clean)"
-  fi
-  
-  # RAM usage — LCM runs inside gateway, so report gateway RAM
-  GW_PID=$(pgrep -f "openclaw" | head -1)
-  LC_RAM=$(ps -p "$GW_PID" -o rss= 2>/dev/null | awk '{printf "%.0fMB (gateway)", $1/1024}')
-  check "Lossless-Claw RAM" "ok" "${LC_RAM:-N/A}"
-else
-  check "Lossless-Claw" "fail" "Extension not found at ${LC_EXT}"
-fi
-
-# ─── 5. Watchdog ───
+# ─── 3. Watchdog ───
 WD_PID_FILE="/tmp/openclaw-watchdog/daemon.pid"
 if [ -f "$WD_PID_FILE" ]; then
   WD_PID=$(cat "$WD_PID_FILE" 2>/dev/null)
@@ -144,7 +71,7 @@ else
   fi
 fi
 
-# ─── 6. System Resources ───
+# ─── 4. System Resources ───
 DISK_PCT=$(df / | awk 'NR==2 {print $5}' | tr -d '%')
 if [ "$DISK_PCT" -gt 90 ]; then
   check "Disk" "fail" "${DISK_PCT}% used — critical"

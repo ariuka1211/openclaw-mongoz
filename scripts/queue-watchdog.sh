@@ -7,7 +7,6 @@ BOT_TOKEN="8677962428:AAEHnCJsk3g0YXfpXfvwU06-IMx8IbYIbi8"
 CHAT_ID="1736401643"
 LOG="/tmp/openclaw/openclaw-$(date -u +%Y-%m-%d).log"
 STATE_FILE="/tmp/queue-watchdog-last-alert"
-SUMMARY_STATE="/tmp/queue-watchdog-last-summary"
 COOLDOWN=300  # Don't spam - min 5 min between alerts
 
 # Thresholds
@@ -43,7 +42,7 @@ fi
 
 # Look for recent lane wait errors (last 10 min to match cron interval)
 # Use epoch-based filtering instead of fragile date -d
-LOG_LINES=$(tail -500 "$LOG" 2>/dev/null | grep "lane wait exceeded\|lane task error\|embedded run timeout\|FailoverError.*timed out\|empty normalized summary\|all extraction attempts exhausted\|retry succeeded")
+LOG_LINES=$(tail -500 "$LOG" 2>/dev/null | grep "lane wait exceeded\|lane task error\|embedded run timeout\|FailoverError.*timed out\|retry succeeded")
 if [ -z "$LOG_LINES" ]; then
   exit 0
 fi
@@ -66,25 +65,6 @@ $line"
   fi
 done <<< "$LOG_LINES"
 
-# Track successful LCM summaries — alert which model is working
-LCM_SUCCESS=$(tail -100 "$LOG" 2>/dev/null | grep "\[lcm\].*retry succeeded" | tail -1)
-if [ -n "$LCM_SUCCESS" ]; then
-  SUM_TIME=$(echo "$LCM_SUCCESS" | grep -oP '"date":"\K[^"]+')
-  SUM_MODEL=$(echo "$LCM_SUCCESS" | grep -oP 'model=\K[^;, ]+' | tail -1 | sed 's|.*/||;s|:.*||')
-  if [ -f "$SUMMARY_STATE" ]; then
-    LAST_SUM_TIME=$(cat "$SUMMARY_STATE")
-  else
-    LAST_SUM_TIME=""
-  fi
-  if [ "$SUM_TIME" != "$LAST_SUM_TIME" ] && [ -n "$SUM_MODEL" ]; then
-    echo "$SUM_TIME" > "$SUMMARY_STATE"
-    curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
-      -d "chat_id=${CHAT_ID}" \
-      -d "text=📝 *LCM Summary Succeeded*\n\nModel: \`${SUM_MODEL}\`\n(after retry)" \
-      -d "parse_mode=Markdown" > /dev/null 2>&1
-  fi
-fi
-
 if [ -z "$RECENT" ]; then
   exit 0
 fi
@@ -101,7 +81,7 @@ while IFS= read -r line; do
       LANE=$(echo "$line" | grep -oP 'lane=\K[^ ]+')
       QUEUE=$(echo "$line" | grep -oP 'queueAhead=\K\d+')
       WAIT_SEC=$((WAIT_MS / 1000))
-      # Grab model from recent LCM log lines
+      # Grab model from recent log lines
       RECENT_MODEL=$(tail -50 "$LOG" 2>/dev/null | grep -oP 'model=\K[^;, ]+' | tail -1 | sed 's|.*/||;s|:.*||')
       [ -n "$RECENT_MODEL" ] && MODEL_TAG=" (model: \`${RECENT_MODEL}\`)" || MODEL_TAG=""
       ALERT_MSG="⚠️ *Queue Watchdog*\n\nLane \`$LANE\` stuck for *${WAIT_SEC}s*\nQueue ahead: ${QUEUE}${MODEL_TAG}\n\nLLM request may be hanging."
@@ -118,21 +98,6 @@ while IFS= read -r line; do
     fi
   elif echo "$line" | grep -q "embedded run timeout"; then
     ALERT_MSG="🔥 *Queue Watchdog*\n\nEmbedded run timed out.\nSub-agent may be blocking the main lane."
-  elif echo "$line" | grep -q "empty normalized summary"; then
-    FAILED_MODEL=$(echo "$line" | grep -oP 'model=\K[^;, ]+' | head -1 | sed 's|.*/||;s|:.*||')
-    [ -n "$FAILED_MODEL" ] && MODEL_TAG="\`${FAILED_MODEL}\`" || MODEL_TAG="unknown"
-    RETRY_OK=$(echo "$RECENT" | grep "retry succeeded" | wc -l)
-    ALERT_MSG="🔄 *LCM Summary Alert*\n\nModel $MODEL_TAG returning thinking-only blocks.\nRetries this window: $RETRY_OK\n\nSummary model may need changing."
-  elif echo "$line" | grep -q "all extraction attempts exhausted"; then
-    FAILED_MODEL=$(echo "$line" | grep -oP 'model=\K[^;, ]+' | head -1 | sed 's|.*/||;s|:.*||')
-    [ -n "$FAILED_MODEL" ] && MODEL_TAG="\`${FAILED_MODEL}\`" || MODEL_TAG="unknown"
-    # Check if rate limited
-    RATE_LIMITED=$(echo "$RECENT" | grep "429\|rate.limit\|Rate limit" | wc -l)
-    if [ "$RATE_LIMITED" -gt 0 ]; then
-      ALERT_MSG="🔥 *LCM Summary Alert*\n\nModel $MODEL_TAG — rate limited (429).\nAll extraction attempts exhausted.\nFree tier limits hit — need paid model or own API key."
-    else
-      ALERT_MSG="🔥 *LCM Summary Alert*\n\nModel $MODEL_TAG — all extraction attempts exhausted.\nSummary model failing completely."
-    fi
   fi
 done <<< "$RECENT"
 

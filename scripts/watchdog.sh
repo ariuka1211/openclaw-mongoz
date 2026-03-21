@@ -1,6 +1,6 @@
 #!/bin/bash
 # OpenClaw System Watchdog v3
-# Monitors: Gateway, Mission Control, LCM, QMD
+# Monitors: Gateway, Mission Control, Provider Health
 # Alerts via Telegram on failures (one-shot per outage)
 # Run via cron every 2 minutes
 
@@ -48,24 +48,12 @@ GW_HTTP=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 3 --max-time 
 if [ "$GW_HTTP" = "200" ]; then
     send_recovery "Gateway"
     GW_OK=1
-
-    # Track gateway uptime start (for LCM grace period)
-    GW_SINCE_FILE="${STATE_DIR}/gw-up-since"
-    if [ ! -f "$GW_SINCE_FILE" ]; then
-        date +%s > "$GW_SINCE_FILE"
-    fi
-    GW_UP_SINCE=$(cat "$GW_SINCE_FILE" 2>/dev/null || echo 0)
-    GW_UPTIME=$(( $(date +%s) - GW_UP_SINCE ))
 else
-    # Gateway down — clear uptime tracker so grace period resets
-    rm -f "${STATE_DIR}/gw-up-since"
-
     SVC_STATUS=$(systemctl is-active openclaw-gateway 2>/dev/null || echo "unknown")
     send_alert "Gateway" "Down" "HTTP: ${GW_HTTP}
 Service: ${SVC_STATUS}
 Systemd auto-restart should kick in (Restart=always)."
     GW_OK=0
-    GW_UPTIME=0
 fi
 
 # ─── 2. Mission Control (Next.js on port 3000) ───
@@ -77,34 +65,7 @@ else
     fi
 fi
 
-# ─── 3. LCM (check db file is being written to) ───
-LCM_DB="/root/.openclaw/lcm.db"
-LCM_GRACE_SECONDS=5400  # 90 minutes after gateway restart — LCM needs context to fill
-
-if [ -f "$LCM_DB" ]; then
-    LCM_AGE=$(( $(date +%s) - $(stat -c %Y "$LCM_DB" 2>/dev/null || echo 0) ))
-    if [ "$LCM_AGE" -lt 1800 ]; then
-        send_recovery "LCM"
-    else
-        if [ "$GW_OK" = "1" ]; then
-            # Only alert if gateway has been up long enough for LCM to have fired
-            if [ "$GW_UPTIME" -lt "$LCM_GRACE_SECONDS" ]; then
-                # Still in grace period — skip alert
-                : # LCM stale but within grace period, suppress false positive
-            else
-                send_alert "LCM" "Stale" "LCM db not written to in ${LCM_AGE}s (~$((LCM_AGE/60)) min).
-Gateway up for $((GW_UPTIME/60)) min (grace period: $((LCM_GRACE_SECONDS/60)) min).
-LCM should have fired by now — check if summarization is stuck."
-            fi
-        fi
-    fi
-else
-    if [ "$GW_OK" = "1" ]; then
-        send_alert "LCM" "Missing" "LCM database file not found at ${LCM_DB}."
-    fi
-fi
-
-# ─── 4. Provider Health (OpenRouter) ───
+# ─── 3. Provider Health (OpenRouter) ───
 PROVIDER_START=$(date +%s%N)
 PROVIDER_RESP=$(curl -s -w "\n%{http_code}\n%{time_total}" --connect-timeout 5 --max-time 15 "https://openrouter.ai/api/v1/models?per_page=1" 2>&1)
 PROVIDER_HTTP=$(echo "$PROVIDER_RESP" | tail -2 | head -1)
@@ -161,53 +122,8 @@ echo "$NOW" > "$LANE_STATE"
 # Read active model from config
 ACTIVE_MODEL=$(jq -r '.agents.defaults.model // "unknown"' "$CONFIG_FILE" 2>/dev/null | sed 's|.*/||')
 FALLBACK_MODEL=$(jq -r '.agents.defaults.fallbackModels[0] // "none"' "$CONFIG_FILE" 2>/dev/null | sed 's|.*/||')
-LCM_SUMMARY_MODEL=$(jq -r '.plugins.entries["lossless-claw"].config.summaryModel // "unknown"' "$CONFIG_FILE" 2>/dev/null | sed 's|.*/||;s|:.*||')
-
-# Track last successful request by looking at gateway log activity
-# (If lane task completed without error in last 10 min, requests are flowing)
-LAST_LANE_ERROR_TIME=""
-if [ -f "$LANE_LOG" ]; then
-    LAST_LANE_SUCCESS=$(grep "lane task completed\|agent run complete\|embedded run complete" "$LANE_LOG" 2>/dev/null | tail -1 | grep -o 'at=[^ ]*' | head -1 || echo "")
-    LAST_LANE_ERROR_TIME=$(grep "lane task error" "$LANE_LOG" 2>/dev/null | tail -1 | grep -o 'at=[^ ]*' | head -1 || echo "")
-fi
 
 # Build model status line (included in alerts for context)
-MODEL_STATUS="Model: ${ACTIVE_MODEL} (fallback: ${FALLBACK_MODEL}, LCM: ${LCM_SUMMARY_MODEL})"
-
-# ─── 7. LCM Summary Quality Preview + Classification ───
-LAST_SEEN_FILE="${STATE_DIR}/last-summary-seen"
-if [ -f "$LCM_DB" ] && [ "$GW_OK" = "1" ]; then
-    LATEST_ID=$(sqlite3 "$LCM_DB" "SELECT summary_id FROM summaries ORDER BY created_at DESC LIMIT 1" 2>/dev/null)
-    LAST_SEEN=$(cat "$LAST_SEEN_FILE" 2>/dev/null || echo "")
-    if [ -n "$LATEST_ID" ] && [ "$LATEST_ID" != "$LAST_SEEN" ]; then
-        PREVIEW=$(sqlite3 "$LCM_DB" "SELECT substr(replace(substr(content, 1, 400), char(10), ' '), 1, 400) FROM summaries WHERE summary_id = '$LATEST_ID'" 2>/dev/null)
-        TOKENS=$(sqlite3 "$LCM_DB" "SELECT token_count FROM summaries WHERE summary_id = '$LATEST_ID'" 2>/dev/null)
-        CREATED=$(sqlite3 "$LCM_DB" "SELECT created_at FROM summaries WHERE summary_id = '$LATEST_ID'" 2>/dev/null)
-
-        # Classify quality
-        QUALITY_LABEL="✅ Real"
-        if echo "$PREVIEW" | grep -q "^We need to summarize\|^We need to produce"; then
-            QUALITY_LABEL="❌ Prompt Echo"
-        elif echo "$PREVIEW" | grep -q "LCM fallback summary"; then
-            QUALITY_LABEL="⚠️ Fallback Truncation"
-        elif echo "$PREVIEW" | grep -q "^<!DOCTYPE"; then
-            QUALITY_LABEL="⚠️ Raw HTML Fallback"
-        elif [ "$TOKENS" -lt 50 ] 2>/dev/null; then
-            QUALITY_LABEL="⚠️ Too Short"
-        fi
-
-        # Get model name from config (logs unreliable for successful summaries)
-        LCM_MODEL=$(jq -r '.plugins.entries["lossless-claw"].config.summaryModel // "unknown"' "$CONFIG_FILE" 2>/dev/null | sed 's|.*/||;s|:.*||')
-
-        curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
-            -d "chat_id=${CHAT_ID}" \
-            --data-urlencode "text=📝 LCM New Summary ${QUALITY_LABEL} (${TOKENS} tok, ${CREATED})
-ID: ${LATEST_ID}
-Model: ${LCM_MODEL}
-
-${PREVIEW}..." >/dev/null 2>&1
-        echo "$LATEST_ID" > "$LAST_SEEN_FILE"
-    fi
-fi
+MODEL_STATUS="Model: ${ACTIVE_MODEL} (fallback: ${FALLBACK_MODEL})"
 
 exit 0

@@ -13,7 +13,6 @@
 BOT_TOKEN="8677962428:AAEHnCJsk3g0YXfpXfvwU06-IMx8IbYIbi8"
 CHAT_ID="1736401643"
 CONFIG_FILE="/root/.openclaw/openclaw.json"
-LCM_DB="/root/.openclaw/lcm.db"
 STATE_DIR="/tmp/openclaw-watchdog"
 PID_FILE="${STATE_DIR}/daemon.pid"
 LOG_PATTERN="/tmp/openclaw/openclaw-*.log"
@@ -220,88 +219,6 @@ Provider: ${failed_provider:-unknown}" 120
     
     # NOTE: Successful completions (isError=false) handled by check_new_subagents
     # via runs.json + stored state — not here. Log tailer only handles errors.
-
-    # LCM empty normalized summary
-    if echo "$line" | grep -q "empty normalized summary"; then
-        local failed_model
-        failed_model=$(echo "$line" | grep -oP 'model=\K[^;, ]+' | head -1 | sed 's|.*/||;s|:.*||')
-        
-        send_alert "lcm-empty-summary" \
-            "🔄 LCM — Empty Summary
-Model: \`${failed_model:-unknown}\` returning thinking-only blocks.
-Summary model may need changing." 300
-        return
-    fi
-    
-    # All extraction attempts exhausted
-    if echo "$line" | grep -q "all extraction attempts exhausted"; then
-        local failed_model rate_limited
-        failed_model=$(echo "$line" | grep -oP 'model=\K[^;, ]+' | head -1 | sed 's|.*/||;s|:.*||')
-        rate_limited=$(echo "$line" | grep -c "429\|rate.limit")
-        
-        if [ "$rate_limited" -gt 0 ]; then
-            send_alert "lcm-exhausted" \
-                "🔥 LCM — Rate Limited
-Model: \`${failed_model:-unknown}\` — 429 errors.
-All extraction attempts exhausted.
-Free tier limits hit." 300
-        else
-            send_alert "lcm-exhausted" \
-                "🔥 LCM — Extraction Failed
-Model: \`${failed_model:-unknown}\` — all attempts exhausted." 300
-        fi
-        return
-    fi
-}
-
-# ─── LCM Summary Success Alert ───
-LAST_SUMMARY_FILE="${STATE_DIR}/last-summary-seen"
-
-check_new_summaries() {
-    [ ! -f "$LCM_DB" ] && return
-    
-    local latest_id last_seen
-    latest_id=$(sqlite3 "$LCM_DB" "SELECT summary_id FROM summaries ORDER BY created_at DESC LIMIT 1" 2>/dev/null)
-    last_seen=$(cat "$LAST_SUMMARY_FILE" 2>/dev/null || echo "")
-    
-    [ -z "$latest_id" ] && return
-    [ "$latest_id" = "$last_seen" ] && return
-    
-    # New summary found — get details
-    local kind token_count created_at preview lcm_model
-    kind=$(sqlite3 "$LCM_DB" "SELECT kind FROM summaries WHERE summary_id='$latest_id'" 2>/dev/null)
-    token_count=$(sqlite3 "$LCM_DB" "SELECT token_count FROM summaries WHERE summary_id='$latest_id'" 2>/dev/null)
-    created_at=$(sqlite3 "$LCM_DB" "SELECT created_at FROM summaries WHERE summary_id='$latest_id'" 2>/dev/null)
-    preview=$(sqlite3 "$LCM_DB" "SELECT substr(replace(substr(content, 1, 300), char(10), ' '), 1, 300) FROM summaries WHERE summary_id='$latest_id'" 2>/dev/null)
-    lcm_model=$(jq -r '.plugins.entries["lossless-claw"].config.summaryModel // "unknown"' "$CONFIG_FILE" 2>/dev/null | sed 's|.*/||;s|:.*||')
-    
-    # Skip tiny summaries — these are usually the model choking on binary/base64 dumps
-    if [ "$token_count" -lt 50 ] 2>/dev/null; then
-        echo "$latest_id" > "$LAST_SUMMARY_FILE"
-        return
-    fi
-
-    # Classify quality
-    local icon="✅"
-    if echo "$preview" | grep -qi "^we need to summarize\|^we need to produce"; then
-        icon="❌"
-    elif echo "$preview" | grep -q "LCM fallback summary"; then
-        icon="⚠️"
-    elif [ "$token_count" -lt 50 ] 2>/dev/null; then
-        icon="⚠️"
-    fi
-
-    # Trim preview to ~150 chars
-    preview=$(echo "$preview" | cut -c1-150)
-
-    send_alert "lcm-success" \
-        "📝 LCM Summary ${icon}
-${kind} • ${token_count} tok
-
-${preview}" \
-        60  # 60s cooldown between summary alerts
-    
-    echo "$latest_id" > "$LAST_SUMMARY_FILE"
 }
 
 # ─── Sub-Agent Spawn/Completion Monitoring ───
@@ -558,8 +475,7 @@ start_log_tailer() {
         # Only process lines with relevant keywords (fast filter)
         case "$line" in
             *"lane task error"*|*"lane wait exceeded"*|*"embedded run timeout"*|\
-            *"embedded run agent end"*|*"empty normalized summary"*|*"all extraction attempts exhausted"*|\
-            *"Provider returned error"*|*"model fallback decision"*)
+            *"embedded run agent end"*|*"Provider returned error"*|*"model fallback decision"*)
                 process_log_line "$line"
                 ;;
         esac
@@ -665,9 +581,6 @@ start() {
 
             # Check for subagent loops
             monitor_sessions
-
-            # Check for new LCM summaries
-            check_new_summaries
         done
     ) &
 

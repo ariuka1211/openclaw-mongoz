@@ -1,7 +1,10 @@
-# Session Current — 2026-03-20
+# Session Current — 2026-03-21
 
-## Session Summary
-- 07:03 UTC: Delegated GitHub push tasks to all 3 agents (John asleep)
-- 07:05 UTC: Mzinho completed — `lighter-copilot` repo created & pushed (16 files, secrets excluded)
-- Pending: Blitz (openclaw-mongoz)
-- 07:05 UTC: Techno4k completed — both repos verified, global git configured, SSH key generated (needs manual GitHub add)
+## QMD Audit & Cleanup
+- Tested QMD — binary installed but index had 0 docs in main cache, 194 in workspace collection
+- Data audit found ~56% trash: 102 backup duplicates, LCM remnants, venv files, stale paths
+- Cleaned LCM remnants (memory-staging.md, lcm-monitor.log, lcm-cleanup-cron.md)
+- Archived stale SESSION_STATE.md
+- Moved backups from workspace to ~/.openclaw/backups/ — QMD has no exclude syntax
+- QMD re-indexed: 194 → 92 clean docs, search working properly
+- John decided: wrap-up stays manual, not automated

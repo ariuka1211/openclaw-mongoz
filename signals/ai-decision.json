@@ -1,0 +1,12 @@
+{
+  "timestamp": "2026-03-21T03:30:20.568781+00:00",
+  "action": "close",
+  "symbol": "WLFI",
+  "direction": null,
+  "size_pct_equity": null,
+  "leverage": null,
+  "stop_loss_pct": null,
+  "reasoning": "WLFI has no strong signal to hold. Closing to free up a position for potentially better opportunities given the max position limit. I am at max positions.",
+  "confidence": 0.7,
+  "size_usd": null
+}

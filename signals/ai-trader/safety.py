@@ -1,0 +1,233 @@
+"""
+Safety layer — hard rules the LLM cannot override.
+Every decision passes through these checks BEFORE reaching the bot.
+"""
+
+import json
+import logging
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+from db import DecisionDB
+
+log = logging.getLogger("ai-trader.safety")
+
+
+class SafetyLayer:
+    def __init__(self, config: dict, db: DecisionDB):
+        cfg = config.get("safety", {})
+        self.max_positions = cfg.get("max_positions", 3)
+        self.max_leverage = cfg.get("max_leverage", 20.0)
+        self.max_size_pct_equity = cfg.get("max_size_pct_equity", 5.0)
+        self.max_daily_drawdown_pct = cfg.get("max_daily_drawdown_pct", 10.0)
+        self.max_total_exposure_pct = cfg.get("max_total_exposure_pct", 15.0)
+        self.min_confidence = cfg.get("min_confidence", 0.3)
+        self.min_scanner_score = cfg.get("min_scanner_score", 60)
+        self.required_stop_loss = cfg.get("required_stop_loss", True)
+        self.min_stop_loss_pct = cfg.get("min_stop_loss_pct", 0.5)
+        self.max_orders_per_hour = cfg.get("max_orders_per_hour", 12)
+        self.cooldown_after_loss_seconds = cfg.get("cooldown_after_loss_seconds", 300)
+
+        self.db = db
+        self._order_timestamps: list[float] = []
+        self._last_loss_time: float | None = None
+
+    def validate(self, decision: dict, positions: list, signals: list, equity: float = 1000.0) -> tuple[bool, list[str]]:
+        """Validate decision against all safety rules. Returns (approved, reasons)."""
+        reasons = []
+
+        # Hold is always safe
+        if decision.get("action") == "hold":
+            return True, ["hold — always safe"]
+
+        action = decision.get("action", "")
+
+        # ── Schema validation (Rule 11) ──
+        schema_ok, schema_errors = self._validate_schema(decision)
+        if not schema_ok:
+            reasons.extend(schema_errors)
+
+        # ── Confidence check ──
+        confidence = decision.get("confidence", 0)
+        if confidence < self.min_confidence:
+            reasons.append(f"confidence {confidence:.2f} < {self.min_confidence}")
+
+        if action == "open":
+            return self._validate_open(decision, positions, signals, equity, reasons)
+        elif action == "close":
+            return self._validate_close(decision, positions, reasons)
+        elif action == "adjust":
+            return self._validate_adjust(decision, positions, reasons)
+        else:
+            reasons.append(f"unknown action: {action}")
+
+        return len(reasons) == 0, reasons
+
+    def _validate_schema(self, decision: dict) -> tuple[bool, list[str]]:
+        """Rule 11: Validate LLM JSON schema."""
+        errors = []
+        required = ["action", "reasoning", "confidence"]
+        for key in required:
+            if key not in decision:
+                errors.append(f"missing required field: {key}")
+
+        action = decision.get("action", "")
+        if action not in ("open", "close", "hold", "adjust"):
+            errors.append(f"invalid action: {action}")
+
+        if action == "open":
+            open_required = ["symbol", "direction", "size_pct_equity", "leverage", "stop_loss_pct"]
+            for key in open_required:
+                if key not in decision:
+                    errors.append(f"missing open field: {key}")
+
+        if action == "close":
+            if "symbol" not in decision:
+                errors.append("missing symbol for close")
+
+        return len(errors) == 0, errors
+
+    def _validate_open(self, decision: dict, positions: list, signals: list, equity: float, reasons: list) -> tuple[bool, list[str]]:
+        """Validate open position decision."""
+        symbol = decision.get("symbol", "")
+        leverage = decision.get("leverage", 0)
+        size_pct = decision.get("size_pct_equity", 0)
+        sl_pct = decision.get("stop_loss_pct")
+        direction = decision.get("direction", "")
+
+        # Rule 1: Max 3 concurrent positions
+        if len(positions) >= self.max_positions:
+            reasons.append(f"max positions ({self.max_positions}) reached")
+
+        # Rule 9: No opening if same-direction position exists (unless adding)
+        for p in positions:
+            if p.get("symbol") == symbol and p.get("side") == direction:
+                reasons.append(f"already have {direction} position in {symbol}")
+
+        # Already in this market any direction
+        if any(p.get("symbol") == symbol for p in positions):
+            reasons.append(f"already have position in {symbol} (different direction)")
+
+        # Rule 2: Max 20x leverage
+        if leverage > self.max_leverage:
+            reasons.append(f"leverage {leverage}x > max {self.max_leverage}x")
+
+        # Rule 3: Max 5% equity per position
+        if size_pct > self.max_size_pct_equity:
+            reasons.append(f"size {size_pct}% > max {self.max_size_pct_equity}%")
+
+        # Rule 12: All positions need stop losses
+        if self.required_stop_loss and (not sl_pct or sl_pct < self.min_stop_loss_pct):
+            reasons.append(f"stop loss {sl_pct}% invalid (min {self.min_stop_loss_pct}%)")
+
+        # Rule 8: Liquidation distance ≥ 2x stop-loss distance
+        # For safety: max_leverage * sl_pct must leave margin
+        # Simple check: at given leverage, sl_pct must be <= 100/max_leverage/2
+        if leverage > 0 and sl_pct:
+            max_safe_sl = 100.0 / leverage / 2.0
+            if sl_pct > max_safe_sl:
+                reasons.append(
+                    f"sl {sl_pct}% with {leverage}x lev — liquidation at {100/leverage:.1f}%, "
+                    f"need SL < {max_safe_sl:.1f}%"
+                )
+
+        # Rule 4: Max 15% total exposure
+        current_exposure = sum(
+            abs(p.get("size_usd", 0)) for p in positions
+        )
+        new_exposure = equity * size_pct / 100
+        total_exposure_pct = (current_exposure + new_exposure) / equity * 100
+        if total_exposure_pct > self.max_total_exposure_pct:
+            reasons.append(
+                f"total exposure {total_exposure_pct:.1f}% > max {self.max_total_exposure_pct}%"
+            )
+
+        # Rule 5: Daily drawdown check
+        daily_pnl = self.db.get_daily_pnl()
+        if equity > 0:
+            daily_dd = -daily_pnl / equity * 100
+            if daily_dd > self.max_daily_drawdown_pct * 0.8:
+                reasons.append(f"approaching daily drawdown limit ({daily_dd:.1f}%)")
+
+        # Signal score floor
+        matching_signal = next((s for s in signals if s.get("symbol") == symbol), None)
+        if matching_signal and matching_signal.get("compositeScore", 0) < self.min_scanner_score:
+            reasons.append(f"scanner score {matching_signal['compositeScore']} < {self.min_scanner_score}")
+
+        if matching_signal and not matching_signal.get("safetyPass", False):
+            reasons.append(f"scanner safety check failed: {matching_signal.get('safetyReason', '?')}")
+
+        # Rule 10: Rate limiting
+        if not self._check_rate_limit():
+            reasons.append("rate limit exceeded")
+
+        # Cooldown after loss
+        if self._in_cooldown():
+            reasons.append(f"cooldown after recent loss ({self.cooldown_after_loss_seconds}s)")
+
+        return len(reasons) == 0, reasons
+
+    def _validate_close(self, decision: dict, positions: list, reasons: list) -> tuple[bool, list[str]]:
+        """Validate close decision."""
+        symbol = decision.get("symbol", "")
+        if not any(p.get("symbol") == symbol for p in positions):
+            reasons.append(f"no position in {symbol} to close")
+        return len(reasons) == 0, reasons
+
+    def _validate_adjust(self, decision: dict, positions: list, reasons: list) -> tuple[bool, list[str]]:
+        """Validate adjust decision (simplified)."""
+        symbol = decision.get("symbol", "")
+        if not any(p.get("symbol") == symbol for p in positions):
+            reasons.append(f"no position in {symbol} to adjust")
+        # Additional adjust-specific checks can go here
+        return len(reasons) == 0, reasons
+
+    def _check_rate_limit(self) -> bool:
+        """Rule 10: Max orders per hour."""
+        now = time.time()
+        # Clean old entries
+        self._order_timestamps = [t for t in self._order_timestamps if now - t < 3600]
+        return len(self._order_timestamps) < self.max_orders_per_hour
+
+    def record_order(self):
+        """Record an order execution for rate limiting."""
+        self._order_timestamps.append(time.time())
+
+    def record_loss(self):
+        """Record a loss for cooldown timer."""
+        self._last_loss_time = time.time()
+
+    def _in_cooldown(self) -> bool:
+        """Check if we're in cooldown after a recent loss."""
+        if self._last_loss_time is None:
+            return False
+        return (time.time() - self._last_loss_time) < self.cooldown_after_loss_seconds
+
+    def get_daily_drawdown(self, equity: float = 0) -> float:
+        """Calculate today's realized PnL as % drawdown."""
+        daily_pnl = self.db.get_daily_pnl()
+        if daily_pnl >= 0:
+            return 0.0
+        if equity <= 0:
+            return 0.0  # Can't calculate drawdown without equity
+        return abs(daily_pnl) / equity * 100
+
+    def check_kill_switch(self, consecutive_failures: int, rejection_window_count: int, equity: float = 0) -> list[str]:
+        """Check all kill switch conditions. Returns list of triggered reasons."""
+        triggers = []
+
+        # Daily drawdown
+        dd = self.get_daily_drawdown(equity)
+        if dd > self.max_daily_drawdown_pct:
+            triggers.append(f"Daily drawdown {dd:.1f}% > {self.max_daily_drawdown_pct}%")
+
+        # Consecutive failures
+        if consecutive_failures >= 5:
+            triggers.append(f"{consecutive_failures} consecutive LLM failures")
+
+        # Too many rejections
+        if rejection_window_count >= 5:
+            triggers.append(f"{rejection_window_count} safety rejections in 30 min")
+
+        return triggers

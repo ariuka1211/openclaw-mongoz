@@ -89,14 +89,6 @@ UPTIME=$(uptime -p 2>/dev/null || uptime | sed 's/.*up /up /' | sed 's/,.*//')
 RAM_USED=$(free -h | awk '/Mem:/{print $3}')
 RAM_TOTAL=$(free -h | awk '/Mem:/{print $2}')
 
-# ─── LCM status ───
-LCM_SUMMARIES="N/A"
-LCM_MESSAGES="N/A"
-if [ -f /root/.openclaw/lcm.db ]; then
-  LCM_SUMMARIES=$(sqlite3 /root/.openclaw/lcm.db "SELECT COUNT(*) FROM summaries;" 2>/dev/null || echo "N/A")
-  LCM_MESSAGES=$(sqlite3 /root/.openclaw/lcm.db "SELECT COUNT(*) FROM messages;" 2>/dev/null || echo "N/A")
-fi
-
 # ─── Build message ───
 MSG="☀️ Daily Summary — ${DATE}
 
@@ -113,10 +105,6 @@ MSG="☀️ Daily Summary — ${DATE}
   RAM: ${RAM_USED}/${RAM_TOTAL}
   Load: ${LOAD}
   Uptime: ${UPTIME}
-
-🧠 LCM
-  Summaries: ${LCM_SUMMARIES}
-  Messages: ${LCM_MESSAGES}
 
 Generated at ${NOW}"
 

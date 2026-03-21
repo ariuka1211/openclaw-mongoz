@@ -3,7 +3,7 @@
 set -euo pipefail
 
 WORKSPACE="/root/.openclaw/workspace"
-BACKUP_DIR="/root/.openclaw/workspace/backups/memory"
+BACKUP_DIR="/root/.openclaw/backups/memory"
 TIMESTAMP=$(date -u +"%Y-%m-%dT%H%M%S")
 DEST="$BACKUP_DIR/$TIMESTAMP"
 

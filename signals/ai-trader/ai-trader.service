@@ -1,0 +1,20 @@
+[Unit]
+Description=AI Trading Decision Engine
+After=network.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/.openclaw/workspace/signals/ai-trader
+ExecStart=/usr/bin/python3 ai_trader.py
+Restart=always
+RestartSec=10
+MemoryMax=512M
+EnvironmentFile=/root/.openclaw/workspace/signals/ai-trader/ai-trader.env
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

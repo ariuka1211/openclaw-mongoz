@@ -63,25 +63,16 @@ Things like:
 - Fast (0.7s), structured results with relevance scores
 - Best for: finding info across the web (replaces DDG in deep-research-pro)
 
-### LCM (Lossless Claw) Tools
-- `lcm_grep` — search conversation history with full-text search
-- `lcm_describe` — get summary of topics/threads
-- `lcm_expand_query` — deep recall, spawns sub-agent to expand DAG, returns answer with cited summary IDs
-
 ### Memory System v2 (Supermemory-inspired, 9 scripts + 3 prompts)
 - `mem-version.py` — relational versioning (facts supersede old versions) + TTL decay
 - `mem-append.py` — appends new items with structured metadata (date, status, source)
 - `mem-cleanup.py` — LLM-powered dedup + reorg of MEMORY.md sections
-- `mem-promote.py` — promotes recurring themes from LCM summaries
 - `mem-profile.sh` — generates 200-word user profile → `memory/profile.md`
-- `memory-search.sh` — unified search across MEMORY.md, LCM, daily files, LEARNINGS.md
-- `memory-daily.sh` — 10-step pipeline (pull LCM → distill → extract → version → TTL → append → cleanup → profile → promote → report)
+- `memory-search.sh` — unified search across MEMORY.md, daily files, LEARNINGS.md
+- `memory-session-extract.sh` — 9-step pipeline (distill → extract → version → append → cleanup → profile → report)
 - `memory-llm.sh` — OpenRouter API wrapper for LLM calls
 - **Config:** `memory/ttl-config.json` (decay settings), `memory/containers.json` (container tags)
 - **Prompts:** `prompts/extract.txt`, `prompts/distill.txt`, `prompts/cleanup.txt`
-
-### LCM Fixes
-- Patched `lossless-claw/src/summarize.ts` — "Expand for details" footer only included when details actually dropped (prevents gemini-2.5-flash hallucination)
 
 ## Why Separate?
 

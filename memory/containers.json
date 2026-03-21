@@ -15,7 +15,7 @@
     },
     "system": {
       "description": "Infrastructure, OpenClaw config, scripts, tools, memory system",
-      "keywords": ["server", "gateway", "config", "script", "memory", "LCM", "OpenClaw"]
+      "keywords": ["server", "gateway", "config", "script", "memory", "OpenClaw"]
     },
     "philosophy": {
       "description": "Consciousness, non-duality, Rupert Spira, worldview",

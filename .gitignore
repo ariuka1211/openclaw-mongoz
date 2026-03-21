@@ -62,6 +62,8 @@ build/
 
 # Session transcripts (runtime, not source)
 *.jsonl
+memory/2026-*.md
+memory/session-current.md
 
 # Runtime JSON
 .openclaw/workspace-state.json

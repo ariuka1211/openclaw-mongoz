@@ -1,0 +1,11 @@
+Clean and distill these conversation summaries. Remove:
+- System/tool messages and compaction logs
+- Repeated context boilerplate
+- Granular edit details (file paths, line numbers, code diffs)
+- Error/debug noise
+
+Keep ONLY substantive discussion topics, decisions, lessons, preferences, and patterns.
+Output a concise bullet list. One bullet per topic. No fluff.
+
+## Raw Summaries:
+{{SUMMARIES}}

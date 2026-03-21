@@ -1,0 +1,23 @@
+# Lighter Copilot Config
+# Copy to config.yml and fill in your values
+
+# Lighter API (mainnet)
+lighter_url: "https://mainnet.zklighter.elliot.ai"
+account_index: 719758
+api_key_index: 3
+api_key_private: "e7e2049561bd671759d30994e2a14bd468cdaac2f04c5ff13cebce7ab7956b05a3fcbc0854f58b54"
+
+# Webshare proxy (for geo-restricted servers)
+proxy_url: "http://nhzvkgat:icy51s2qjgqd@64.137.96.74:6641/"
+
+# Trading config
+trailing_tp_trigger_pct: 0.0    # 0 = trailing SL starts immediately from peak
+trailing_tp_delta_pct: 1.0      # Trail by 1% from peak
+sl_pct: 2.0                     # Stop loss at -2% from entry
+
+# Telegram alerts (optional)
+telegram_token: "8658895503:AAGbLn_mOZGRf_w7r-ZT4NrZZiOCZ6h19cU"
+telegram_chat_id: "1736401643"
+
+# Polling
+price_poll_interval: 5          # seconds between price checks

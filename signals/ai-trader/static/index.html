@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Trader Dashboard</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      background: #0a0a0f;
+      color: #e0e0e0;
+      padding: 16px;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    h1 { color: #00ff88; font-size: 1.4em; margin-bottom: 16px; }
+    h2 { color: #88aaff; font-size: 1.1em; margin: 16px 0 8px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+    .card {
+      background: #12121a;
+      border: 1px solid #2a2a3a;
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .card-title { color: #88aaff; font-size: 0.85em; margin-bottom: 6px; text-transform: uppercase; }
+    .stat { font-size: 1.6em; font-weight: bold; }
+    .stat.green { color: #00ff88; }
+    .stat.red { color: #ff4466; }
+    .stat.yellow { color: #ffaa00; }
+    .stat.dim { color: #666; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.8em; }
+    th { text-align: left; padding: 6px 8px; color: #88aaff; border-bottom: 1px solid #2a2a3a; }
+    td { padding: 5px 8px; border-bottom: 1px solid #1a1a2a; }
+    .pos { color: #00ff88; }
+    .neg { color: #ff4466; }
+    .badge {
+      display: inline-block;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 0.75em;
+      font-weight: bold;
+    }
+    .badge.open { background: #00ff8822; color: #00ff88; }
+    .badge.close { background: #ff446622; color: #ff4466; }
+    .badge.hold { background: #66666622; color: #888; }
+    .badge.safe { background: #00ff8822; color: #00ff88; }
+    .badge.rejected { background: #ff446622; color: #ff4466; }
+    .reasoning {
+      font-size: 0.75em;
+      color: #888;
+      max-width: 400px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .refresh-bar {
+      text-align: right;
+      color: #444;
+      font-size: 0.7em;
+      margin-bottom: 8px;
+    }
+  </style>
+</head>
+<body>
+  <h1>🤖 AI Trader Dashboard</h1>
+  <div class="refresh-bar">Auto-refresh: 10s | <span id="last-update">-</span></div>
+
+  <div class="grid" id="status-cards"></div>
+  <h2>Decisions</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Time</th>
+        <th>Action</th>
+        <th>Symbol</th>
+        <th>Confidence</th>
+        <th>Safety</th>
+        <th>Executed</th>
+        <th>Reasoning</th>
+      </tr>
+    </thead>
+    <tbody id="decisions-body"></tbody>
+  </table>
+
+  <script>
+    async function refresh() {
+      try {
+        const [status, decisions, performance] = await Promise.all([
+          fetch('/api/status').then(r => r.json()),
+          fetch('/api/decisions?n=30').then(r => r.json()),
+          fetch('/api/performance').then(r => r.json()),
+        ]);
+        renderStatus(status, performance);
+        renderDecisions(decisions);
+        document.getElementById('last-update').textContent = new Date().toLocaleTimeString();
+      } catch (e) {
+        console.error('Refresh failed:', e);
+      }
+    }
+
+    function renderStatus(status, perf) {
+      const cards = document.getElementById('status-cards');
+      const winRate = perf.win_rate || 0;
+      const totalPnl = perf.total_pnl || 0;
+      cards.innerHTML = `
+        <div class="card">
+          <div class="card-title">Status</div>
+          <div class="stat green">● ALIVE</div>
+          <div style="color:#666;font-size:0.8em">Uptime: ${formatDuration(status.uptime_seconds || 0)}</div>
+          <div style="color:#666;font-size:0.8em">Model: ${status.model || '-'}</div>
+        </div>
+        <div class="card">
+          <div class="card-title">Total PnL</div>
+          <div class="stat ${totalPnl >= 0 ? 'green' : 'red'}">$${totalPnl.toFixed(2)}</div>
+          <div style="color:#666;font-size:0.8em">Daily: $${(perf.daily_pnl || 0).toFixed(2)}</div>
+        </div>
+        <div class="card">
+          <div class="card-title">Win Rate</div>
+          <div class="stat ${winRate >= 50 ? 'green' : 'yellow'}">${winRate.toFixed(1)}%</div>
+          <div style="color:#666;font-size:0.8em">${perf.wins || 0}/${perf.total_trades || 0} trades</div>
+        </div>
+        <div class="card">
+          <div class="card-title">Trades Today</div>
+          <div class="stat">${perf.trades_today || 0}</div>
+          <div style="color:#666;font-size:0.8em">Avg win: $${(perf.avg_win || 0).toFixed(2)} | Avg loss: $${(perf.avg_loss || 0).toFixed(2)}</div>
+        </div>
+      `;
+    }
+
+    function renderDecisions(decisions) {
+      const tbody = document.getElementById('decisions-body');
+      tbody.innerHTML = decisions.map(d => {
+        const time = d.timestamp ? d.timestamp.substring(11, 16) : '-';
+        const actionClass = d.action || 'hold';
+        const safeClass = d.safety_approved ? 'safe' : 'rejected';
+        return `<tr>
+          <td>${time}</td>
+          <td><span class="badge ${actionClass}">${(d.action || 'hold').toUpperCase()}</span></td>
+          <td>${d.symbol || '-'}</td>
+          <td>${(d.confidence || 0).toFixed(2)}</td>
+          <td><span class="badge ${safeClass}">${d.safety_approved ? '✅' : '❌'}</span></td>
+          <td>${d.executed ? '✅' : '-'}</td>
+          <td class="reasoning" title="${(d.reasoning || '').replace(/"/g, '&quot;')}">${d.reasoning || '-'}</td>
+        </tr>`;
+      }).join('');
+    }
+
+    function formatDuration(seconds) {
+      const h = Math.floor(seconds / 3600);
+      const m = Math.floor((seconds % 3600) / 60);
+      return h > 0 ? `${h}h ${m}m` : `${m}m`;
+    }
+
+    refresh();
+    setInterval(refresh, 10000);
+  </script>
+</body>
+</html>

@@ -1,0 +1,19 @@
+# Secrets
+.env
+config.yml
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Logs
+bot.log
+
+# Runtime state
+state/
+
+# Databases
+*.db
+*.sqlite

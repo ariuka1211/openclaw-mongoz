@@ -1,0 +1,46 @@
+Extract NEW items from these distilled topic bullets. Skip anything already in Current Memory or too granular.
+
+## Current Memory (dedup reference):
+{{CURRENT}}
+
+## Distilled Topics:
+{{DISTILLED}}
+
+## Available Containers:
+- personal: Personal details, family, health, emotional context
+- trading: Crypto perps trading system, market data, strategies
+- career: Job search, resume, portfolio, professional development
+- system: Infrastructure, OpenClaw config, scripts, tools
+- philosophy: Consciousness, non-duality, worldview
+
+## Output (JSON only):
+{
+  "items": [
+    {
+      "tag": "decision|lesson|pattern|rule|fact|open",
+      "content": "1-2 sentences",
+      "date": "YYYY-MM-DD",
+      "status": "active",
+      "source": "brief source context",
+      "container": "personal|trading|career|system|philosophy"
+    }
+  ],
+  "updates": [
+    {
+      "original": "exact text of old item being superseded (from Current Memory)",
+      "updated": "new version of this fact",
+      "tag": "same section tag as original",
+      "date": "YYYY-MM-DD"
+    }
+  ],
+  "summary": "N topics, M new, K skipped, U updated"
+}
+
+## Rules:
+- "status" defaults to "active" unless the item is already outdated (then use "expired")
+- "source" is optional — only include when it adds context (e.g. "from John", "from research")
+- "container" is required — pick the best matching container based on content
+- "updates" is for FACT CONTRADICTIONS — when new info supersedes an existing item
+  - Example: memory says "John's timezone: MDT" but new conversation reveals "MST" → add to updates
+  - Example: memory says "currently unemployed" but conversation suggests new job → add to updates
+  - Only update when you're confident the old fact is wrong/outdated, not just related

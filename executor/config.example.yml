@@ -1,0 +1,57 @@
+# Lighter Copilot — Config Template
+# Copy to config.yml and fill in your values.
+# Secrets use ${ENV_VAR} — see .env.example for required variables.
+
+# Lighter API (mainnet)
+lighter_url: "https://mainnet.zklighter.elliot.ai"
+account_index: ${LIGHTER_ACCOUNT_INDEX}
+api_key_index: 3
+api_key_private: "${LIGHTER_API_PRIVATE_KEY}"
+
+# Webshare proxy (for geo-restricted servers)
+proxy_url: "http://${LIGHTER_PROXY_USER}:${LIGHTER_PROXY_PASS}@${LIGHTER_PROXY_HOST}:${LIGHTER_PROXY_PORT}/"
+
+# Trailing take profit
+trailing_tp_trigger_pct: 0.0    # 0 = trailing SL starts immediately from peak
+trailing_tp_delta_pct: 1.0      # Trail by 1% from peak
+
+# Stop loss
+sl_pct: 2.0                     # Hard stop loss at -2% from entry (DSL: absolute floor)
+
+# DSL (Dynamic Stop Loss) — tiered trailing stop loss
+dsl_enabled: true               # false = use legacy flat trailing
+default_leverage: 10.0          # Leverage for ROE calculation
+stagnation_roe_pct: 8.0         # Exit if ROE ≥ this but no progress for stagnation_minutes
+stagnation_minutes: 60          # Minutes of stagnation before auto-exit
+
+# DSL tiers — progressively tighter as profit grows
+dsl_tiers:
+  - trigger_pct: 7
+    lock_hw_pct: 40
+    consecutive_breaches: 3
+  - trigger_pct: 12
+    lock_hw_pct: 55
+    consecutive_breaches: 2
+  - trigger_pct: 15
+    lock_hw_pct: 75
+    consecutive_breaches: 2
+  - trigger_pct: 20
+    lock_hw_pct: 85
+    consecutive_breaches: 1
+
+# Telegram alerts (optional)
+telegram_token: "${TELEGRAM_BOT_TOKEN}"
+telegram_chat_id: "${TELEGRAM_CHAT_ID}"
+
+# Polling
+price_poll_interval: 5          # seconds between price checks
+price_call_delay: 5.0           # seconds between sequential get_price() calls within loops
+
+# Signal integration
+signals_file: "../signals/signals.json"
+
+# AI Autopilot mode
+ai_mode: true
+ai_decision_file: "../signals/ai-decision.json"
+ai_result_file: "../signals/ai-result.json"
+ai_trader_dir: "../signals/ai-trader"

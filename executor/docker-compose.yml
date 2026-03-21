@@ -1,0 +1,23 @@
+version: "3.8"
+
+services:
+  lighter-copilot:
+    build: .
+    container_name: lighter-copilot
+    restart: unless-stopped
+    volumes:
+      # Mount config as volume (secrets stay on host)
+      - ./config.yml:/app/config/config.yml:ro
+      # Persist logs on host
+      - ./bot.log:/app/bot.log
+    environment:
+      - BOT_CONFIG=/app/config/config.yml
+      - BOT_LOG=/app/bot.log
+      - PYTHONUNBUFFERED=1
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # Stop gracefully
+    stop_grace_period: 10s

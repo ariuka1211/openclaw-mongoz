@@ -13,6 +13,7 @@
 - NEVER restart gateway without explicit permission
 - Update memory after every agent completion or milestone
 - Agents never push to main. Branch + PR only. Format: `[agent-id] description`
+- **ASK BEFORE ACTING.** Show what you're about to do, wait for yes. This rule has been broken 40+ times in a week. John is angry and frustrated. Not another apology — actual behavior change.
 
 ## Constraints
 - Don't commit secrets to git

@@ -81,7 +81,18 @@ CONTEXT: [relevant background, paste from John's request]
 EXISTING CODE: [file paths if relevant — check first]
 DELIVERABLE: [measurable output — what "done" looks like]
 NOTES: [constraints, dependencies, things to watch]
+
+GIT:
+1. Create branch first: git checkout -b <agent-id>/<short-description>
+2. Commit with: ./scripts/git-agent-commit.sh <your-agent-id> "what you did" <file1> <file2>
+3. Only list files YOU changed. Do NOT push.
+4. After committing, push branch: git push origin <branch-name>
+5. Report branch name to Maaraa. Do NOT create PR or merge.
+6. Before committing: run git status + git diff --cached to verify staged files.
+7. Never commit runtime files: signals/*.json, state/*, *.log, *.db, *.jsonl
 ```
+
+> ⚠️ **Agents don't read AGENTS.md.** The GIT block above MUST be included in every task prompt. Copy it verbatim.
 
 ## On Failure
 

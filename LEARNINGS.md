@@ -72,5 +72,5 @@
 
 ## 🟢 Retired
 
-- **M060:** Say I dont know without checking LCM (graduated: N/A)
+_(empty — nothing graduated yet)_
 

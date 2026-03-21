@@ -189,19 +189,30 @@ Quality > quantity. If you wouldn't send it in a real group chat with friends, d
 
 ## Git Protocol
 
-All agent work gets committed locally. Nothing reaches GitHub until Maaraa reviews and pushes.
+All agent work goes through branches and PRs. Nothing reaches `main` without review.
 
-**Rules for agents:**
-- After completing any task that changes files → `git add` + `git commit`
-- Commit message format: `[agent-id] short description of what you did`
-- Example: `[mzinho] fix: add cooldown check to bot.py`
-- NEVER `git push` — Maaraa reviews, then pushes
-- If unsure what to include, commit only the files you changed
+### Branch + PR Workflow
 
-**Maaraa's push protocol:**
-- Before pushing: run `git log --oneline -10` and review new commits
-- If something looks wrong: `git revert <hash>` before pushing
-- Push to GitHub = published record. Local commits = drafts.
+**Agents:**
+1. Before starting work, create a branch: `git checkout -b <agent-id>/<short-description>` (e.g., `mzinho/fix-memory-extraction`)
+2. Do work, commit with `[agent-id] description` format
+3. When done, push branch: `git push origin <branch-name>`
+4. Report branch name to Maaraa — do NOT merge or create PR yourself
+
+**Maaraa (coordinator):**
+1. After agent finishes, review: `git log main..<branch> --oneline`
+2. Check the diff: `git diff main..<branch> --stat`
+3. If clean, create PR: `gh pr create --base main --head <branch> --title "[agent-id] description" --body "summary"`
+4. Merge PR (squash if messy commits, merge if clean)
+5. Delete branch after merge: `git branch -d <branch>` + `git push origin --delete <branch>`
+
+**Never push directly to main.** All changes go through branches + PRs.
+
+**Branch naming:** `<agent-id>/<verb>-<description>` (e.g., `mzinho/fix-extraction`, `blitz/research-lighter-api`, `techno4k/deploy-scanner`)
+
+**For trivial one-line changes by Maaraa:** Can push directly to main (docs, memory updates, typo fixes). Anything with code changes goes through PR.
+
+> ⚠️ **Note:** `gh` CLI is not currently installed. Install it (`apt install gh` or see https://cli.github.com) before using `gh pr create`.
 
 **Task prompt inclusion:**
 Every agent task must include this line:
@@ -213,6 +224,9 @@ GIT: After finishing, commit your changes:
 
 ### Git Safety Rules
 
+- **Never push to main directly** — always use branches + PRs
+- **Branch names:** `<agent-id>/<short-description>`
+- **After finishing work:** push branch and tell Maaraa, don't create PR yourself
 - **Never commit auto-generated files:** signals/*.json, state/*, *.log, *.db, *.jsonl
 - **Run `git status` before staging** — check for unrelated changes
 - **Run `git diff --cached` before committing** — verify only intended files are staged

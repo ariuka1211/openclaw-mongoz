@@ -10,12 +10,12 @@
 #   6. Cleanup      — delete processed files, remove .reset.* and .deleted.*
 #   7. Report       — log summary
 #
-# Requires: OPENROUTER_API_KEY, memory-llm.sh, jq
+# Requires: KILOCODE_API_KEY, memory-llm.sh, jq
 set -euo pipefail
 
 W="/root/.openclaw/workspace"
 source "$W/.env" 2>/dev/null || true
-[ -z "${OPENROUTER_API_KEY:-}" ] && echo "⚠️ No API key" && exit 1
+[ -z "${KILOCODE_API_KEY:-}" ] && echo "⚠️ No API key" && exit 1
 
 LOG="/tmp/memory-session-extract.log"
 OBS="$W/scripts/learning/obs-log.sh"
@@ -28,7 +28,7 @@ retry_llm() {
   local sys_prompt="$1" model="$2" max_tokens="$3"
   local attempt=1 result=""
   while (( attempt <= MAX_RETRIES )); do
-    if result=$(bash "$W/scripts/memory-llm.sh" "$sys_prompt" "$model" "$max_tokens" 2>/dev/null); then
+    if result=$(bash "$W/scripts/memory/memory-llm.sh" "$sys_prompt" "$model" "$max_tokens" 2>/dev/null); then
       echo "$result"
       return 0
     fi
@@ -51,7 +51,7 @@ declare -a AGENTS=(
 )
 
 PROCESSED_FILE="$W/data/.memory-processed-sessions"
-DAILY_DIR="$W/memory/daily"
+DAILY_DIR="$W/memory"
 DELETION_CMD="trash"  # prefer recoverable deletion
 command -v trash &>/dev/null || DELETION_CMD="rm -f"
 

@@ -1,0 +1,61 @@
+{
+  "description": "Memory TTL configuration. Items older than ttl_days are marked [expired] and archived after archive_after_days.",
+  "defaults": {
+    "ttl_days": null,
+    "archive_after_days": 30
+  },
+  "sections": {
+    "Open Items [open]": {
+      "ttl_days": 60,
+      "reason": "Open items go stale after 2 months"
+    },
+    "Key Conversations [fact]": {
+      "ttl_days": 90,
+      "reason": "Conversation details fade, keep only recent"
+    },
+    "Key Findings [fact]": {
+      "ttl_days": 90,
+      "reason": "System findings change over time"
+    },
+    "Active Projects [active]": {
+      "ttl_days": null,
+      "reason": "Never expire — manually managed"
+    },
+    "Decisions [decision]": {
+      "ttl_days": null,
+      "reason": "Permanent record"
+    },
+    "Lessons [lesson]": {
+      "ttl_days": null,
+      "reason": "Lessons persist"
+    },
+    "Patterns [pattern]": {
+      "ttl_days": null,
+      "reason": "Behavioral patterns persist"
+    },
+    "Key Rules [rule]": {
+      "ttl_days": null,
+      "reason": "Rules persist"
+    },
+    "Setup [fact]": {
+      "ttl_days": null,
+      "reason": "Infrastructure facts — manually updated"
+    },
+    "Preferences [pref]": {
+      "ttl_days": null,
+      "reason": "Preferences persist until changed"
+    },
+    "Philosophical Framework [fact]": {
+      "ttl_days": null,
+      "reason": "Core beliefs — permanent"
+    },
+    "Lessons [lesson]": {
+      "ttl_days": null,
+      "reason": "Lessons persist"
+    },
+    "Pocket Ideas [active]": {
+      "ttl_days": 120,
+      "reason": "Ideas expire after 4 months if not acted on"
+    }
+  }
+}

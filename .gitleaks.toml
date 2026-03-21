@@ -1,0 +1,28 @@
+[extend]
+useDefault = true
+
+[[rules]]
+id = "lighter-private-key"
+description = "Lighter API private key"
+regex = '''[a-f0-9]{96,}'''
+tags = ["key", "lighter"]
+
+[[rules]]
+id = "kilocode-jwt"
+description = "Kilo Gateway JWT token"
+regex = '''eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}'''
+tags = ["token", "jwt"]
+
+[[rules]]
+id = "telegram-bot-token"
+description = "Telegram bot token"
+regex = '''[0-9]{8,10}:[A-Za-z0-9_-]{35}'''
+tags = ["token", "telegram"]
+
+# Allowlist: ignore .env.example files and config examples
+[allowlist]
+paths = [
+  '''.*\.env\.example''',
+  '''.*config\.example\.yml''',
+  '''.*\.gitleaks\.toml''',
+]

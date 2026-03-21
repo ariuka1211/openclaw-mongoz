@@ -23,9 +23,6 @@ cd "$WORKSPACE"
 
 # Set git user based on agent
 case "$AGENT_ID" in
-        ;;
-        ;;
-        ;;
     maaraa)
         git config user.name "maaraa"
         git config user.email "maaraa@openclaw.local"

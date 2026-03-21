@@ -16,10 +16,13 @@
 - **Rollback**: `git revert <hash>` for broken commits
 - **Format**: `[agent-id] description` (e.g. `[mzinho] fix: add cooldown to bot.py`)
 
-### Next Steps
-- Include git commit instruction in every agent task prompt going forward
-- Test the workflow on next agent task
-- Push baseline commits to GitHub when ready
+### Wrap Up
+Session focused on establishing git workflow for agent attribution. All agents now commit locally with proper author attribution. Maaraa reviews before pushing to GitHub. Tested and working.
+
+### Next Session
+- Monitor git workflow in real agent tasks
+- Consider refining `git-agent-commit.sh` if edge cases emerge
+- Trading bot and AI trader running (since midnight UTC)
 
 ### Files Changed
 - `AGENTS.md`: Git Protocol section added

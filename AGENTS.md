@@ -206,7 +206,9 @@ All agent work gets committed locally. Nothing reaches GitHub until Maaraa revie
 **Task prompt inclusion:**
 Every agent task must include this line:
 ```
-GIT: After finishing, commit your changes locally (git add + git commit -m "[agent-id] description"). Do NOT push.
+GIT: After finishing, commit your changes:
+  ./scripts/git-agent-commit.sh <your-agent-id> "what you did" <file1> <file2>
+  Only list files YOU changed. Do NOT push.
 ```
 
 ## Make It Yours

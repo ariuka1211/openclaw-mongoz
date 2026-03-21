@@ -3,10 +3,9 @@
 #
 # Steps:
 #   1. Daily → MEMORY.md distillation (promote daily buffer to permanent memory)
-#   2. Clean MEMORY.md, LEARNINGS.md, TOOLS.md (dedup, trim, archive removed items)
+#   2. Surgical cleanup of MEMORY.md (dedup, trim — no LLM rewrite)
 #
-# Uses memory-llm.sh for LLM-powered cleanup decisions.
-# Requires: KILOCODE_API_KEY, memory-llm.sh, jq
+# Requires: KILOCODE_API_KEY (for Step 1 distillation)
 set -euo pipefail
 
 W="/root/.openclaw/workspace"
@@ -31,7 +30,7 @@ bash "$OBS" "info" "memory-nightly-cleanup" "Nightly cleanup started"
 # ── Helper: LLM call with retry ──
 MAX_RETRIES=3
 call_llm() {
-  local sys_prompt="$1" model="${2:-google/gemini-2.5-flash}" max_tokens="${3:-4096}"
+  local sys_prompt="$1" model="${2:-xiaomi/mimo-v2-pro}" max_tokens="${3:-4096}"
   local attempt=1 result=""
   while (( attempt <= MAX_RETRIES )); do
     if result=$(bash "$W/scripts/memory/memory-llm.sh" "$sys_prompt" "$model" "$max_tokens" 2>/dev/null); then
@@ -79,7 +78,7 @@ $DAILY_CONTENT
 ## Output:
 List only the items worth permanently keeping. No commentary. If nothing is worth keeping, output 'NONE'."
 
-    DISTILLED=$(echo "$DISTILL_PROMPT" | call_llm "Distill daily notes into permanent memory items. Be selective." "google/gemini-2.5-flash" 4096) || true
+    DISTILLED=$(echo "$DISTILL_PROMPT" | call_llm "Distill daily notes into permanent memory items. Be selective." "xiaomi/mimo-v2-pro" 4096) || true
 
     if [ -n "${DISTILLED:-}" ] && [ "$DISTILLED" != "NONE" ]; then
       # Strip markdown fences if present
@@ -106,77 +105,41 @@ else
   log "No daily file for today ($DAILY_FILE), skipping distillation"
 fi
 
-# ── Step 2: CLEANUP — MEMORY.md, LEARNINGS.md, TOOLS.md ──
+# ── Step 2: Surgical cleanup — MEMORY.md only ──
 cleanup_file() {
   local FILE="$1" LABEL="$2" MAX_LINES="$3"
   local FILENAME=$(basename "$FILE")
 
-  [ ! -f "$FILE" ] && log "SKIP $LABEL: not found" && return
+  [ ! -f "$FILE" ] && return
 
   local LINES=$(wc -l < "$FILE")
-  log "Processing $LABEL: $LINES lines"
 
-  if [ "$LINES" -le "$MAX_LINES" ]; then
-    log "$LABEL is under $MAX_LINES lines, minimal cleanup only"
+  # Step A: Dedup — remove exact duplicate lines (preserve order, keep first occurrence)
+  awk '!seen[tolower($0)]++' "$FILE" > "$FILE.tmp"
+  mv "$FILE.tmp" "$FILE"
+
+  # Step B: If over target, trim from the bottom (oldest auto-extracted items first)
+  local NEW_LINES=$(wc -l < "$FILE")
+  if [ "$NEW_LINES" -gt "$MAX_LINES" ]; then
+    # Archive overflow before trimming
+    tail -n $(( NEW_LINES - MAX_LINES )) "$FILE" >> "$ARCHIVE_DIR/${FILENAME%.md}-${TODAY}-trimmed.md"
+    head -n "$MAX_LINES" "$FILE" > "$FILE.tmp"
+    mv "$FILE.tmp" "$FILE"
+    log "Trimmed $LABEL to $MAX_LINES lines (archived overflow)"
   fi
 
-  # Backup before cleanup
-  cp "$FILE" "$FILE.bak"
-
-  local CONTENT=$(cat "$FILE")
-
-  local PROMPT="You are a memory file cleaner. Clean up this $LABEL file.
-
-Rules:
-1. REMOVE: duplicate entries, obsolete config notes, transient debug info
-2. KEEP: active items, recent decisions, important rules, emotional weight
-3. PRESERVE: all metadata tags ([date], [status], container:*, (source))
-4. If file exceeds $MAX_LINES lines, prioritize cutting the least important items
-5. Output ONLY the cleaned file content — no commentary, no markdown fences
-
-## Current $LABEL ($LINES lines):
-$CONTENT"
-
-  local CLEANED
-  if CLEANED=$(echo "$PROMPT" | call_llm "Clean up $LABEL. Output only the cleaned file content." "google/gemini-2.5-flash" 16384); then
-    # Strip markdown fences if present
-    CLEANED=$(echo "$CLEANED" | sed '/^```/,/^```/d')
-    [ -z "$CLEANED" ] && log "WARN: LLM returned empty for $LABEL, keeping original" && return
-
-    # Archive the diff (items removed)
-    diff "$FILE.bak" <(echo "$CLEANED") > "$ARCHIVE_DIR/${FILENAME%.md}-${TODAY}.diff" 2>/dev/null || true
-
-    # Archive removed lines
-    comm -23 <(sort "$FILE.bak") <(sort <(echo "$CLEANED")) \
-      > "$ARCHIVE_DIR/${FILENAME%.md}-${TODAY}-removed.md" 2>/dev/null || true
-
-    echo "$CLEANED" > "$FILE"
-
-    local NEW_LINES=$(wc -l < "$FILE")
-    local REMOVED=$(( LINES - NEW_LINES ))
-    log "Cleaned $LABEL: $LINES → $NEW_LINES lines (removed ~$REMOVED)"
-
-    # If still over target, truncate from the bottom (preamble/header preserved)
-    if [ "$NEW_LINES" -gt "$MAX_LINES" ]; then
-      head -n "$MAX_LINES" "$FILE" > "$FILE.tmp"
-      mv "$FILE.tmp" "$FILE"
-      log "Truncated $LABEL to $MAX_LINES lines"
-    fi
-  else
-    log "WARN: LLM cleanup failed for $LABEL, keeping original"
-  fi
+  local FINAL_LINES=$(wc -l < "$FILE")
+  log "Cleaned $LABEL: $LINES → $FINAL_LINES lines"
 }
 
 cleanup_file "$W/MEMORY.md" "MEMORY.md" "$TARGET_LINES"
-cleanup_file "$W/LEARNINGS.md" "LEARNINGS.md" 100
-cleanup_file "$W/TOOLS.md" "TOOLS.md" 150
 
 # ── Clean up old archives (keep 30 days) ──
 find "$ARCHIVE_DIR" -name '*.diff' -mtime +30 -delete 2>/dev/null || true
 find "$ARCHIVE_DIR" -name '*-removed.md' -mtime +30 -delete 2>/dev/null || true
 
 # ── Clean up .bak files ──
-rm -f "$W/MEMORY.md.bak" "$W/LEARNINGS.md.bak" "$W/TOOLS.md.bak"
+rm -f "$W/MEMORY.md.bak"
 
 log "=== nightly cleanup done ==="
 bash "$OBS" "info" "memory-nightly-cleanup" "Nightly cleanup completed"

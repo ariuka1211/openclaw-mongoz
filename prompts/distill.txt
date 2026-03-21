@@ -4,7 +4,24 @@ Clean and distill these conversation summaries. Remove:
 - Granular edit details (file paths, line numbers, code diffs)
 - Error/debug noise
 
-Keep ONLY substantive discussion topics, decisions, lessons, preferences, and patterns.
+## Durability Filter — SKIP these:
+- File/script deletions or renames already completed
+- One-time fixes already applied (syntax errors, path corrections)
+- Routine status checks, "done" confirmations, or debug output
+- Infrastructure changes already documented elsewhere
+- Anything transient that will be irrelevant in 7 days
+
+## Keep these:
+- Decisions with rationale (why, not just what)
+- Lessons learned from failures
+- Preferences and patterns John has expressed
+- Open questions or unresolved issues
+- Facts about John (timezone, style, tools, workflows)
+- Recurring themes across sessions
+
+## Quality bar:
+If a bullet describes something that will be irrelevant in 7 days, skip it.
+
 Output a concise bullet list. One bullet per topic. No fluff.
 
 ## Raw Summaries:

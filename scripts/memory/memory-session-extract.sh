@@ -15,6 +15,7 @@ set -euo pipefail
 
 W="/root/.openclaw/workspace"
 source "$W/.env" 2>/dev/null || true
+source "$W/scripts/memory/.env" 2>/dev/null || true
 [ -z "${KILOCODE_API_KEY:-}" ] && echo "⚠️ No API key" && exit 1
 
 LOG="/tmp/memory-session-extract.log"
@@ -35,7 +36,7 @@ retry_llm() {
     bash "$OBS" "warn" "memory-session-extract" "LLM call failed, retrying" "attempt=$attempt" "model=$model"
     log "LLM retry $attempt/$MAX_RETRIES (model=$model)"
     sleep $(( RETRY_BACKOFF * attempt ))
-    (( attempt++ ))
+    (( attempt++ )) || true
   done
   bash "$OBS" "error" "memory-session-extract" "LLM call failed after $MAX_RETRIES attempts" "model=$model"
   return 1
@@ -237,9 +238,9 @@ for item in data.get('items', []):
   log "[$AGENT_NAME] === $REPORT ==="
   echo "Memory [$AGENT_NAME]: ✅ $ICOUNT items → $MEMORY_FILE ($REPORT)"
 
-  (( TOTAL_ITEMS += ICOUNT ))
-  (( TOTAL_FILES += ${#NEW_FILES[@]} ))
-  (( AGENTS_DONE++ ))
+  (( TOTAL_ITEMS += ICOUNT )) || true
+  (( TOTAL_FILES += ${#NEW_FILES[@]} )) || true
+  (( AGENTS_DONE++ )) || true
 done
 
 # ── Final report ──
@@ -252,4 +253,3 @@ else
 fi
 
 log "=== done: $AGENTS_DONE agents, $TOTAL_ITEMS items, $TOTAL_FILES files ==="
-="

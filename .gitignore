@@ -63,6 +63,11 @@ build/
 # Session transcripts (runtime, not source)
 *.jsonl
 
+# Runtime JSON
+.openclaw/workspace-state.json
+memory/projects/
+memory/session-watchdog-state.json
+
 # Signals runtime
 signals/signals.json
 signals/ai-decision.json

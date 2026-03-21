@@ -1,13 +1,16 @@
 #!/bin/bash
-# memory-llm.sh — OpenRouter API wrapper for memory operations
+# memory-llm.sh — Kilo Gateway API wrapper for memory operations
 # Usage: echo "prompt" | memory-llm.sh [system_prompt] [model] [max_tokens]
 set -euo pipefail
 
-API_KEY="${OPENROUTER_API_KEY:-}"
-MODEL="${2:-google/gemini-2.5-flash}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/.env" 2>/dev/null || true
+
+API_KEY="${KILOCODE_API_KEY:-}"
+MODEL="${2:-xiaomi/mimo-v2-pro}"
 MAX_TOKENS="${3:-4096}"
 
-[ -z "$API_KEY" ] && echo '{"error": "OPENROUTER_API_KEY not set"}' >&2 && exit 1
+[ -z "$API_KEY" ] && echo '{"error": "KILOCODE_API_KEY not set"}' >&2 && exit 1
 
 USER_PROMPT=$(cat)
 SYSTEM_PROMPT="${1:-You are a memory extraction assistant. Respond only with valid JSON.}"
@@ -25,7 +28,7 @@ payload = {
 print(json.dumps(payload))
 " "$SYSTEM_PROMPT" <<< "$USER_PROMPT")
 
-RESPONSE=$(curl -s -X POST "https://openrouter.ai/api/v1/chat/completions" \
+RESPONSE=$(curl -s -X POST "https://api.kilo.ai/api/gateway/chat/completions" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $API_KEY" \
   -d "$PAYLOAD" \

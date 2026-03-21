@@ -6,17 +6,18 @@
 #   2. Clean MEMORY.md, LEARNINGS.md, TOOLS.md (dedup, trim, archive removed items)
 #
 # Uses memory-llm.sh for LLM-powered cleanup decisions.
-# Requires: OPENROUTER_API_KEY, memory-llm.sh, jq
+# Requires: KILOCODE_API_KEY, memory-llm.sh, jq
 set -euo pipefail
 
 W="/root/.openclaw/workspace"
 source "$W/.env" 2>/dev/null || true
-[ -z "${OPENROUTER_API_KEY:-}" ] && echo "⚠️ No API key" && exit 1
+source "$W/scripts/memory/.env" 2>/dev/null || true
+[ -z "${KILOCODE_API_KEY:-}" ] && echo "⚠️ No API key" && exit 1
 
 LOG="/tmp/memory-nightly-cleanup.log"
-OBS="$W/scripts/obs-log.sh"
+OBS="$W/scripts/learning/obs-log.sh"
 TODAY=$(date -u '+%Y-%m-%d')
-DAILY_DIR="$W/memory/daily"
+DAILY_DIR="$W/memory"
 ARCHIVE_DIR="$W/memory/archived"
 TARGET_LINES=200
 
@@ -182,4 +183,3 @@ bash "$OBS" "info" "memory-nightly-cleanup" "Nightly cleanup completed"
 echo "Nightly cleanup: ✅ done"
 
 # Cron: memory-nightly-cleanup (daily 05:00 UTC)
-)

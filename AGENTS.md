@@ -50,7 +50,7 @@ NOTES: [constraints, dependencies]
 
 GIT:
 1. Create branch first: git checkout -b <agent-id>/<short-description>
-2. Commit with: ./scripts/git-agent-commit.sh <your-agent-id> "what you did" <file1> <file2>
+2. Commit with: ./scripts/git/git-agent-commit.sh <your-agent-id> "what you did" <file1> <file2>
 3. Only list files YOU changed. Do NOT push.
 4. After committing, push branch: git push origin <branch-name>
 5. Report branch name to Maaraa. Do NOT create PR or merge.

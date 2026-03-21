@@ -4,11 +4,11 @@ Environment-specific tools and scripts. Skills define _how_; this is _your_ setu
 
 ## Web Search (fallback chain)
 
-1. **Tavily** (primary) — `scripts/search-tavily.sh "query" num_results`
+1. **Tavily** (primary) — `scripts/search/search-tavily.sh "query" num_results`
    - AI-optimized, 0.7s, 1000 free/month. Key in script + `TAVILY_API_KEY` env
-2. **DuckDuckGo** (secondary) — `bun scripts/search-ddg.ts "query" num_results`
+2. **DuckDuckGo** (secondary) — `bun scripts/search/search-ddg.ts "query" num_results`
    - Free, no key, datacenter-friendly lite HTML endpoint
-3. **Exa** (tertiary) — `EXA_API_KEY=... bun scripts/search-exa.ts "query" num_results`
+3. **Exa** (tertiary) — `EXA_API_KEY=... bun scripts/search/search-exa.ts "query" num_results`
    - Semantic search, 1000 free/month. Best for nuanced/research queries
 
 **Rule:** Tavily first → DDG fallback → Exa for deep research.

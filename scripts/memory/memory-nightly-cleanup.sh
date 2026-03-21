@@ -33,7 +33,7 @@ call_llm() {
   local sys_prompt="$1" model="${2:-google/gemini-2.5-flash}" max_tokens="${3:-4096}"
   local attempt=1 result=""
   while (( attempt <= MAX_RETRIES )); do
-    if result=$(bash "$W/scripts/memory-llm.sh" "$sys_prompt" "$model" "$max_tokens" 2>/dev/null); then
+    if result=$(bash "$W/scripts/memory/memory-llm.sh" "$sys_prompt" "$model" "$max_tokens" 2>/dev/null); then
       echo "$result"
       return 0
     fi
@@ -182,3 +182,4 @@ bash "$OBS" "info" "memory-nightly-cleanup" "Nightly cleanup completed"
 echo "Nightly cleanup: ✅ done"
 
 # Cron: memory-nightly-cleanup (daily 05:00 UTC)
+)

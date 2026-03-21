@@ -18,7 +18,7 @@ source "$W/.env" 2>/dev/null || true
 [ -z "${OPENROUTER_API_KEY:-}" ] && echo "⚠️ No API key" && exit 1
 
 LOG="/tmp/memory-session-extract.log"
-OBS="$W/scripts/obs-log.sh"
+OBS="$W/scripts/learning/obs-log.sh"
 log() { echo "[$(date -u '+%Y-%m-%d %H:%M:%S UTC')] $*" >> "$LOG"; }
 
 # ── Retry wrapper for LLM calls ──

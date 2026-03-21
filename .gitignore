@@ -60,6 +60,9 @@ build/
 # Docker
 .lighter-copilot-data/
 
+# Session transcripts (runtime, not source)
+*.jsonl
+
 # Signals runtime
 signals/signals.json
 signals/ai-decision.json

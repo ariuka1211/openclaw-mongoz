@@ -211,6 +211,15 @@ GIT: After finishing, commit your changes:
   Only list files YOU changed. Do NOT push.
 ```
 
+### Git Safety Rules
+
+- **Never commit auto-generated files:** signals/*.json, state/*, *.log, *.db, *.jsonl
+- **Run `git status` before staging** — check for unrelated changes
+- **Run `git diff --cached` before committing** — verify only intended files are staged
+- **One logical change per commit** — don't bundle unrelated fixes
+- **Never force push** — if history looks wrong, tell Maaraa, don't fix it yourself
+- **If unsure whether to commit a file, don't commit it** — ask Maaraa
+
 ## Make It Yours
 
 This is a starting point. Add your own conventions, style, and rules as you figure out what works.

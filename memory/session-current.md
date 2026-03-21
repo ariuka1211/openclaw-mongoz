@@ -1,10 +1,26 @@
-# Session Current — 2026-03-21
+# Session Current - 2026-03-21
 
-## QMD Audit & Cleanup
-- Tested QMD — binary installed but index had 0 docs in main cache, 194 in workspace collection
-- Data audit found ~56% trash: 102 backup duplicates, LCM remnants, venv files, stale paths
-- Cleaned LCM remnants (memory-staging.md, lcm-monitor.log, lcm-cleanup-cron.md)
-- Archived stale SESSION_STATE.md
-- Moved backups from workspace to ~/.openclaw/backups/ — QMD has no exclude syntax
-- QMD re-indexed: 194 → 92 clean docs, search working properly
-- John decided: wrap-up stays manual, not automated
+## Git Workflow Implementation (03:35 UTC)
+
+### Completed
+- ✅ **Baseline commit**: All 179 files committed as clean slate (`fcee433` + `25c352a` + `6d85348`)
+- ✅ **AGENTS.md updated**: Added Git Protocol section with commit rules
+- ✅ **Git helper script**: `scripts/git-agent-commit.sh` for proper agent attribution
+- ✅ **Repo unified**: executor/ merged into workspace (no more submodule confusion)
+- ✅ **Backups cleaned**: Old backup directories removed (moved to ~/.openclaw/backups)
+
+### Protocol Established
+- **Agents commit locally**: Use `./scripts/git-agent-commit.sh <agent-id> "description"`
+- **Maaraa reviews then pushes**: `git log --oneline -10` → `git push` when clean
+- **Rollback**: `git revert <hash>` for broken commits
+- **Format**: `[agent-id] description` (e.g. `[mzinho] fix: add cooldown to bot.py`)
+
+### Next Steps
+- Include git commit instruction in every agent task prompt going forward
+- Test the workflow on next agent task
+- Push baseline commits to GitHub when ready
+
+### Files Changed
+- `AGENTS.md`: Git Protocol section added
+- `scripts/git-agent-commit.sh`: New helper script
+- All workspace files: Baseline committed (executor/, signals/, memory/, scripts/)

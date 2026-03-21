@@ -48,10 +48,6 @@ bash "$OBS" "info" "memory-session-extract" "Pipeline started"
 # Format: agent_name:sessions_dir:memory_file
 declare -a AGENTS=(
   "main:/root/.openclaw/agents/main/sessions:$W/MEMORY.md"
-  "blitz:/root/.openclaw/agents/blitz/sessions:/root/.openclaw/agents/blitz/agent/MEMORY.md"
-  "coder:/root/.openclaw/agents/coder/sessions:/root/.openclaw/agents/coder/agent/MEMORY.md"
-  "system:/root/.openclaw/agents/system/sessions:/root/.openclaw/agents/system/agent/MEMORY.md"
-  "techno4k:/root/.openclaw/agents/techno4k/sessions:"
 )
 
 PROCESSED_FILE="$W/data/.memory-processed-sessions"
@@ -125,7 +121,7 @@ for agent_def in "${AGENTS[@]}"; do
     continue
   fi
 
-  # ── Skip agents with no MEMORY.md target (e.g. techno4k) ──
+  # ── Skip agents with no MEMORY.md target ──
   if [ -z "$MEMORY_FILE" ] || [ ! -f "$MEMORY_FILE" ]; then
     log "[$AGENT_NAME] No MEMORY.md found, marking files as processed but skipping extraction"
     for f in "${NEW_FILES[@]}"; do

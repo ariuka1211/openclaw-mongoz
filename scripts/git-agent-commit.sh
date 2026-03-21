@@ -3,9 +3,6 @@
 # Usage: ./scripts/git-agent-commit.sh <agent-id> <message> [files...]
 #
 # Examples:
-#   ./scripts/git-agent-commit.sh mzinho "fix: add cooldown to bot.py" executor/bot.py
-#   ./scripts/git-agent-commit.sh mzinho "fix: add cooldown" executor/bot.py executor/dsl.py
-#   ./scripts/git-agent-commit.sh mzinho "chore: update config" --all    (stage everything)
 
 set -e
 
@@ -18,9 +15,7 @@ WORKSPACE="/root/.openclaw/workspace"
 if [[ -z "$AGENT_ID" || -z "$MESSAGE" ]]; then
     echo "Usage: $0 <agent-id> <message> [files...]"
     echo "  Stage only specific files (recommended):"
-    echo "    $0 mzinho 'fix: description' path/to/file.py"
     echo "  Stage everything (use sparingly):"
-    echo "    $0 mzinho 'big refactor' --all"
     exit 1
 fi
 
@@ -28,24 +23,14 @@ cd "$WORKSPACE"
 
 # Set git user based on agent
 case "$AGENT_ID" in
-    mzinho)
-        git config user.name "mzinho"
-        git config user.email "mzinho@openclaw.local"
         ;;
-    techno4k)
-        git config user.name "techno4k"
-        git config user.email "techno4k@openclaw.local"
         ;;
-    blitz)
-        git config user.name "blitz"
-        git config user.email "blitz@openclaw.local"
         ;;
     maaraa)
         git config user.name "maaraa"
         git config user.email "maaraa@openclaw.local"
         ;;
     *)
-        echo "Unknown agent: $AGENT_ID (valid: mzinho, techno4k, blitz, maaraa)"
         exit 1
         ;;
 esac

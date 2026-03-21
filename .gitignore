@@ -11,7 +11,6 @@ __pycache__/
 .env.*
 
 # Runtime config (may contain API keys)
-lighter-copilot/config.yml
 lighter-bot/config.yml
 
 # Logs
@@ -58,7 +57,6 @@ dist/
 build/
 
 # Docker
-.lighter-copilot-data/
 
 # Session transcripts (runtime, not source)
 *.jsonl
@@ -71,9 +69,9 @@ memory/projects/
 memory/session-watchdog-state.json
 
 # Signals runtime
-signals/signals.json
-signals/ai-decision.json
-signals/ai-result.json
+projects/autopilot-trader/signals/signals.json
+projects/autopilot-trader/signals/ai-decision.json
+projects/autopilot-trader/signals/ai-result.json
 
 # Secrets
 auth-profiles.json

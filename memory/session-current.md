@@ -3,11 +3,12 @@
 ## Git Workflow Implementation (03:35 UTC)
 
 ### Completed
-- ✅ **Baseline commit**: All 179 files committed as clean slate (`fcee433` + `25c352a` + `6d85348`)
-- ✅ **AGENTS.md updated**: Added Git Protocol section with commit rules
-- ✅ **Git helper script**: `scripts/git-agent-commit.sh` for proper agent attribution
-- ✅ **Repo unified**: executor/ merged into workspace (no more submodule confusion)
-- ✅ **Backups cleaned**: Old backup directories removed (moved to ~/.openclaw/backups)
+- ✅ **Baseline commit**: All files committed, unified repo (`fcee433`)
+- ✅ **Executor merged**: Removed submodule, added as regular directory (`25c352a`)
+- ✅ **AGENTS.md updated**: Git Protocol section with commit rules (`b3e687f`)
+- ✅ **Git helper script**: `scripts/git-agent-commit.sh` with explicit file list (`b4a1964`)
+- ✅ **Workflow tested**: Mzinho committed test file, attribution works (`118560f`)
+- ✅ **All pushed to GitHub**: 6 commits total on main branch
 
 ### Protocol Established
 - **Agents commit locally**: Use `./scripts/git-agent-commit.sh <agent-id> "description"`

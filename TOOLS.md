@@ -18,7 +18,9 @@ Environment-specific tools and scripts. Skills define _how_; this is _your_ setu
 - YouTube: full timestamped transcript, title, channel, publish date
 - Rule: John sends a link → use Defuddle first, never say "I can't watch videos"
 
-## Memory System v2 (Supermemory-inspired)
-- **Scripts:** `mem-version.py` (relational versioning + TTL), `mem-append.py` (structured append), `mem-cleanup.py` (LLM dedup/reorg), `mem-profile.sh` (200-word profile → `memory/profile.md`), `memory-search.sh` (unified search), `memory-session-extract.sh` (9-step pipeline), `memory-llm.sh` (OpenRouter wrapper)
-- **Config:** `memory/ttl-config.json` (decay), `memory/containers.json` (tags)
-- **Prompts:** `prompts/extract.txt`, `prompts/distill.txt`, `prompts/cleanup.txt`
+## Memory Pipeline
+- `memory-session-extract.sh` — LLM-powered session → MEMORY.md (every 2hrs via cron)
+- `memory-nightly-cleanup.sh` — dedup/reorg (daily)
+- `memory-archive-dailies.sh` — weekly archive
+- `memory-search.sh` — unified search across MEMORY.md + daily files
+- `memory-llm.sh` — OpenRouter wrapper

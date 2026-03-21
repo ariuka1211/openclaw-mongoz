@@ -73,6 +73,15 @@
 
 ## Recent Decisions (2026-03-21)
 
+- **Git workflow established:** All agent work committed locally with attribution, Maaraa reviews before pushing to GitHub.
+- **Unified repo:** Abandoned lighter-copilot repo. executor/ and signals/ are now part of openclaw-mongoz workspace.
+- **Git helper script:** `scripts/git-agent-commit.sh` requires explicit file list (no more `git add -A`).
+- **Commit format:** `[agent-id] description` (e.g., `[mzinho] fix: add cooldown to bot.py`).
+- **Push protocol:** Agents never push. Maaraa reviews `git log` then pushes.
+- **Tested:** Mzinho committed test file, attribution works correctly.
+
+## Recent Decisions (2026-03-21)
+
 - **QMD audit complete:** Binary works, was unconfigured. Data had ~56% trash (102 backup duplicates, LCM remnants, venv files, stale paths). Cleaned and re-indexed: 194 → 92 docs.
 - **Backups moved:** `workspace/backups/` → `~/.openclaw/backups/`. QMD has no native exclude syntax, so moving backups out of workspace is the cleanest solution.
 - **Wrap-up stays manual:** Not worth automating — MEMORY.md extraction needs editorial judgment, not mechanical concatenation. Existing cron (every 2hrs extract, daily cleanup) handles the mechanical parts.

@@ -71,6 +71,16 @@
 - Bot token: in memory file (not in public memory)
 - Connected to OpenClaw Gateway
 
+## Recent Decisions (2026-03-21 evening)
+
+- **Agent workspace files merged to main:** All agent AGENTS.md, SOUL.md, MEMORY.md, etc. now in main repo under `agents/blitz`, `agents/coder`, `agents/techno4k` subdirectories. PR #5 merged (49 files).
+- **Git rule for all agents:** NEVER push to main. Always branch + PR. Maaraa creates PRs and merges.
+- **Branch naming:** `<agent-id>/<verb>-<description>` (e.g., `mzinho/fix-cooldown`, `techno4k/fix-watchdog`)
+- **Commit format:** `[agent-id] description` with plain git commands, no script dependency
+- **Secrets excluded:** auth-profiles.json, models.json, API keys, tokens — all in .gitignore
+- **Future PRs:** Must be small and focused. One logical change per branch. No more dumping everything at once.
+- **Agent branches maintained:** blitz/workspace, coder/workspace, techno4k/workspace on GitHub with their own git rules
+
 ## Recent Decisions (2026-03-21)
 
 - **Git workflow established:** All agent work committed locally with attribution, Maaraa reviews before pushing to GitHub.

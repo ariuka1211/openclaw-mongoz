@@ -63,12 +63,13 @@ Run the Pre-Flight Gate from `SOP-BIG-TASK-GATE.md` if ANY of these are true:
 
 **Repo:** `https://github.com/ariuka1211/openclaw-mongoz.git` (remote already configured as `origin`)
 
-**Branch + PR — never push to main directly:**
-1. Create branch before work: `git checkout -b <agent-id>/<short-description>`
-2. Do work, commit with `[agent-id] description` format
-3. Push branch: `git push origin <branch-name>`
-4. Report branch name to Maaraa — do NOT create PR or merge yourself
-5. Use `./scripts/git-agent-commit.sh <agent-id> "message" <files>` for staging+commit
+**How to commit and push:**
+1. Create branch: `git checkout -b <your-id>/<short-description>`
+2. Stage files: `git add <file1> <file2>` (only files YOU changed)
+3. Verify: `git status` + `git diff --cached`
+4. Commit: `git commit -m "[your-id] description"`
+5. Push: `git push origin <branch-name>`
+6. Report branch name — do NOT create PR or merge yourself
 
 **Branch naming:** `<agent-id>/<verb>-<description>` (e.g., `mzinho/fix-extraction`, `blitz/research-lighter-api`, `techno4k/deploy-scanner`)
 

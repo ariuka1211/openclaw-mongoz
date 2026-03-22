@@ -524,6 +524,10 @@ class LighterAPI:
         self._tracked_markets_file = self._state_dir / "tracked_markets.json"
         self.tracked_market_ids: list[int] = self._load_tracked_markets()
 
+        # Mark price cache — derived from unrealized_pnl during position sync
+        # More accurate than recent_trades for ROE/stop-loss calculations
+        self._mark_prices: dict[int, float] = {}  # market_id → mark_price
+
     async def _ensure_client(self):
         """Lazy initialization of API clients in async context."""
         if self._client is not None:
@@ -595,12 +599,15 @@ class LighterAPI:
                         market_id = pos.market_id if hasattr(pos, 'market_id') else (pos.market_index if hasattr(pos, 'market_index') else 0)
                         # Get symbol from market_id
                         symbol = await self._get_symbol(market_id)
+                        # Extract unrealized_pnl for mark price derivation
+                        unrealized_pnl = float(pos.unrealized_pnl) if hasattr(pos, 'unrealized_pnl') and pos.unrealized_pnl else 0.0
                         positions.append({
                             "market_id": market_id,
                             "symbol": symbol,
                             "size": size,
                             "side": "long" if size > 0 else "short",
                             "entry_price": entry,
+                            "unrealized_pnl": unrealized_pnl,
                         })
             return positions
         except Exception as e:
@@ -674,6 +681,46 @@ class LighterAPI:
             if i < len(self.tracked_market_ids) - 1:
                 await asyncio.sleep(self.cfg.price_call_delay)
         return prices
+
+    def update_mark_prices_from_positions(self, positions: list[dict]):
+        """Cache mark prices derived from unrealized_pnl (from account API).
+
+        This is the authoritative price the exchange uses for PnL calculations.
+        More accurate than recent_trades for ROE and stop-loss evaluation.
+        """
+        for pos in positions:
+            mid = pos["market_id"]
+            entry = pos.get("entry_price", 0)
+            size = pos.get("size", 0)
+            pnl = pos.get("unrealized_pnl", 0)
+            if entry <= 0 or size == 0:
+                continue
+            # Reverse-engineer mark price from unrealized PnL
+            # For longs: pnl = size * (mark - entry) → mark = entry + pnl/size
+            # For shorts: pnl = size * (entry - mark) → mark = entry - pnl/size
+            # But pnl sign already encodes direction (positive = profit),
+            # and size is signed (positive = long, negative = short).
+            # Unified formula: mark = entry + pnl / abs(size)
+            abs_size = abs(size)
+            mark_price = entry + (pnl / abs_size)
+            if mark_price > 0:
+                self._mark_prices[mid] = mark_price
+
+    def get_mark_price(self, market_id: int) -> float | None:
+        """Get mark price for a position. Uses cached mark price from account API
+        (derived from unrealized_pnl), falls back to recent_trades."""
+        cached = self._mark_prices.get(market_id)
+        if cached and cached > 0:
+            return cached
+        # Fallback to recent trades (may be stale, but better than nothing)
+        return None
+
+    async def get_price_with_mark_fallback(self, market_id: int) -> float | None:
+        """Get price for ROE evaluation. Tries mark price first, falls back to recent_trades."""
+        mark = self.get_mark_price(market_id)
+        if mark:
+            return mark
+        return await self.get_price(market_id)
 
     def set_tracked_markets(self, market_ids: list[int]):
         """Set which markets to poll prices for."""
@@ -1464,6 +1511,9 @@ class LighterCopilot:
         live_positions = await self.api.get_positions()
         live_mids = {p["market_id"] for p in live_positions}
 
+        # Cache mark prices from unrealized_pnl (authoritative exchange price for PnL)
+        self.api.update_mark_prices_from_positions(live_positions)
+
         # Detect new positions (skip markets opened this tick to avoid race)
         # Two-cycle confirmation: position must appear in 2 consecutive syncs before tracking
         for pos in live_positions:
@@ -1550,7 +1600,7 @@ class LighterCopilot:
 
     async def _process_position_tick(self, mid: int, pos: TrackedPosition):
         """Process a single position's tick — fetch price, evaluate triggers, execute if needed."""
-        price = await self.api.get_price(mid)
+        price = await self.api.get_price_with_mark_fallback(mid)
         if not price:
             return
 

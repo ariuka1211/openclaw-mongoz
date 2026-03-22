@@ -53,7 +53,7 @@ class LLMClient:
         self.fallback_model = config["fallback_model"]
         self.timeout_seconds = config.get("timeout_seconds", 30)
         self.max_retries = config.get("max_retries", 2)
-        self.api_key = os.environ.get("OPENROUTER_API_KEY", "")
+        self.api_key = os.environ.get("KILOCODE_API_KEY", "")
         self.stats = LLMStats()
         self._session: aiohttp.ClientSession | None = None
 

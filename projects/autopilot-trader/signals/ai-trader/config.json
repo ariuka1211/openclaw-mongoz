@@ -10,10 +10,10 @@
   "rejection_halt_window_minutes": 30,
 
   "llm": {
-    "primary_model": "google/gemini-2.0-flash-001",
-    "fallback_model": "google/gemini-2.0-flash-001",
-    "reflection_model": "google/gemini-2.0-flash-001",
-    "api_base": "https://openrouter.ai/api/v1",
+    "primary_model": "xiaomi/mimo-v2-pro",
+    "fallback_model": "xiaomi/mimo-v2-pro",
+    "reflection_model": "xiaomi/mimo-v2-pro",
+    "api_base": "https://api.kilo.ai/v1",
     "timeout_seconds": 30,
     "max_retries": 2
   },

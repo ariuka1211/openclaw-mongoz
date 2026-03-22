@@ -54,3 +54,10 @@
 - [open] (system) API key location mismatch: memory-session-extract.sh sources $W/.env for KILOCODE_API_KEY, but the key actually lives in scripts/memory/.env. Need to copy key to workspace root .env or update the script path. — end-to-end test of memory-session-extract.sh
 - [fact] (system) memory-session-extract.sh returns exit code 1 despite successful output — processes transcripts and extracts items correctly but exits non-zero. — end-to-end test with 7 session transcripts
 
+
+## Session Extract — 2026-03-22 [auto]
+
+- [fact] (trading) John is studying the trading bot architecture in depth, starting with the big picture of file connections and planning deeper dives. — distilled topics
+- [decision] (trading) Switched the trading bot's LLM provider from OpenRouter to Kilo Gateway using the xiaomi/mimo-v2-pro model, with updates to config.json and llm_client.py. — distilled topics
+- [open] (system) The ai-trader.service systemd service has a stale path reference and missing env file, requiring path update and KILOCODE_API_KEY addition before running. — distilled topics
+

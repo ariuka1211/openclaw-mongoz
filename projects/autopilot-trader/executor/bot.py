@@ -911,30 +911,6 @@ class LighterAPI:
             logging.error(f"Failed to execute SL: {e}")
             return False, None
 
-    async def _check_active_orders(self, market_id: int) -> list[dict]:
-        """Check if there are any active (unfilled) orders for this market on our account."""
-        try:
-            await self.api._ensure_client()
-            orders = await self.api._order_api.account_active_orders(
-                account_index=self.cfg.account_index,
-                market_id=market_id,
-            )
-            active = []
-            if hasattr(orders, 'orders') and orders.orders:
-                for o in orders.orders:
-                    active.append({
-                        'order_index': getattr(o, 'order_index', None),
-                        'price': getattr(o, 'price', None),
-                        'base_amount': getattr(o, 'base_amount', None),
-                        'is_ask': getattr(o, 'is_ask', None),
-                        'order_type': getattr(o, 'order_type', None),
-                        'status': getattr(o, 'status', None),
-                    })
-            return active
-        except Exception as e:
-            logging.warning(f"⚠️ Could not check active orders for market {market_id}: {e}")
-            return []
-
     async def close(self):
         """Close all aiohttp sessions."""
         errors = []
@@ -1304,6 +1280,42 @@ class LighterCopilot:
             )
             logging.info(f"AI opened: {direction} {symbol} ${size_usd:.2f}")
         return success
+
+    async def _check_active_orders(self, market_id: int) -> list[dict]:
+        """Check if there are any active (unfilled) orders for this market on our account."""
+        try:
+            await self.api._ensure_client()
+            # Generate auth token for the request
+            auth = None
+            try:
+                await self.api._ensure_signer()
+                if self.api._signer is not None:
+                    auth, err = self.api._signer.create_auth_token_with_expiry()
+                    if err:
+                        logging.warning(f"⚠️ Auth token generation error: {err}")
+                        auth = None
+            except Exception as auth_err:
+                logging.debug(f"Auth generation skipped: {auth_err}")
+            orders = await self.api._order_api.account_active_orders(
+                account_index=self.cfg.account_index,
+                market_id=market_id,
+                auth=auth,
+            )
+            active = []
+            if hasattr(orders, 'orders') and orders.orders:
+                for o in orders.orders:
+                    active.append({
+                        'order_index': getattr(o, 'order_index', None),
+                        'price': getattr(o, 'price', None),
+                        'base_amount': getattr(o, 'base_amount', None),
+                        'is_ask': getattr(o, 'is_ask', None),
+                        'order_type': getattr(o, 'order_type', None),
+                        'status': getattr(o, 'status', None),
+                    })
+            return active
+        except Exception as e:
+            logging.warning(f"⚠️ Could not check active orders for market {market_id}: {e}")
+            return []
 
     async def _verify_position_closed(self, market_id: int, symbol: str) -> bool:
         """Poll the Lighter API to verify a position is actually closed after a close order.
@@ -1816,6 +1828,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
-
     main()

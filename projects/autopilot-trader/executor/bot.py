@@ -857,9 +857,8 @@ class LighterAPI:
             best_price_int = await self._signer.get_best_price(market_id, is_ask=is_long)
             client_order_index = self._next_client_order_index()
 
-            # Use create_market_order_if_slippage which pre-validates the order book
-            # before submitting. This ensures the order will actually fill.
-            result = await self._signer.create_market_order_if_slippage(
+            # Use create_market_order_limited_slippage — no pre-check, direct submit with 2% slippage
+            result = await self._signer.create_market_order_limited_slippage(
                 market_index=market_id,
                 client_order_index=client_order_index,
                 base_amount=base_amount,
@@ -871,7 +870,7 @@ class LighterAPI:
             logging.info(
                 f"🔍 SL order: market={market_id}, size={size}, base_amount={base_amount}, "
                 f"best_price={best_price_int}, max_slippage=0.02, is_ask={is_long}, "
-                f"reduce_only=True, client_order_index={client_order_index}"
+                f"reduce_only=True, coi={client_order_index}"
             )
             # SDK returns Union[Tuple[CreateOrder, RespSendTx, None], Tuple[None, None, str]]
             if isinstance(result, tuple):

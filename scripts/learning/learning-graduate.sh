@@ -3,15 +3,15 @@
 # Active → Watch after 14 days no repeat
 # Watch → Retired after 30 days no repeat
 # Any repeat within tier period → stays at current tier
-# Runs weekly via cron
+# Runs every 3 days via cron
 
 set -euo pipefail
 
 DB="/root/.openclaw/workspace/data/freddy.db"
 LEARNINGS_MD="/root/.openclaw/workspace/LEARNINGS.md"
-TODAY=$(date -u +%Y-%m-%d)
-D14=$(date -u -d "14 days ago" +"%Y-%m-%d" 2>/dev/null || date -u -v-14d +"%Y-%m-%d")
-D30=$(date -u -d "30 days ago" +"%Y-%m-%d" 2>/dev/null || date -u -v-30d +"%Y-%m-%d")
+TODAY=$(TZ='America/Denver' date +%Y-%m-%d)
+D14=$(TZ='America/Denver' date -d "14 days ago" +"%Y-%m-%d" 2>/dev/null || TZ='America/Denver' date -v-14d +"%Y-%m-%d")
+D30=$(TZ='America/Denver' date -d "30 days ago" +"%Y-%m-%d" 2>/dev/null || TZ='America/Denver' date -v-30d +"%Y-%m-%d")
 
 CHANGES=0
 

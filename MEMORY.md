@@ -21,6 +21,7 @@
 - No public tweets about security findings
 
 ## Recent
+- **2026-03-22:** Mark price fix (use unrealized_pnl). Per-position leverage from exchange (3x/5x vs hardcoded 10x). SOCKS5 proxy confirmed working. SL verification added to DSL/legacy paths. Branches merged to main, stale branches cleaned. SL execution issue: `create_market_order_limited_slippage` accepted by API (code=200) but not executed — "didn't use volume quota". Switched from `if_slippage` to `limited_slippage`. John manually closed WLFI. Market orders work, limit orders don't. Root cause: exchange-level issue with `avg_execution_price` acting as hard limit. Need to test if new method works on next SL trigger.
 - **2026-03-21:** Git workflow established, agent workspaces merged (PR #5). QMD cleaned (194→92 docs). LCM disabled. Workspace files trimmed. Backups → `~/.openclaw/backups/`
 - **2026-03-20:** Bot deployed 00:06 UTC. Close/reopen loop fixed (cooldown). Geo-restriction resolved (`mainnet.zklighter.elliot.ai` works from US VPS). Prompt rewritten with research-backed structure
 

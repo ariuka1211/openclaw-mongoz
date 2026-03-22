@@ -12,7 +12,7 @@ const maxResults = parseInt(process.argv[3] || "5", 10);
 const apiKey = process.env.EXA_API_KEY || "<REDACTED>";
 
 if (!query) {
-  console.error('Usage: EXA_API_KEY="${EXA_API_KEY:-}"
+  console.error('Usage: EXA_API_KEY="${EXA_API_KEY:-}"');
   process.exit(1);
 }
 if (!apiKey) {

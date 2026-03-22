@@ -19,8 +19,8 @@ source "$W/scripts/memory/.env" 2>/dev/null || true
 [ -z "${KILOCODE_API_KEY:-}" ] && echo "⚠️ No API key" && exit 1
 
 LOG="/tmp/memory-session-extract.log"
-OBS="$W/scripts/learning/obs-log.sh"
-log() { echo "[$(date -u '+%Y-%m-%d %H:%M:%S UTC')] $*" >> "$LOG"; }
+OBS="$W/scripts/memory/obs-log.sh"
+log() { echo "[$(TZ='America/Denver' date '+%Y-%m-%d %H:%M:%S %Z')] $*" >> "$LOG"; }
 
 # ── Retry wrapper for LLM calls ──
 MAX_RETRIES=3
@@ -203,7 +203,7 @@ for agent_def in "${AGENTS[@]}"; do
   # Append extracted items as a new section
   {
     echo ""
-    echo "## Session Extract — $(date -u '+%Y-%m-%d') [auto]"
+    echo "## Session Extract — $(TZ='America/Denver' date '+%Y-%m-%d') [auto]"
     echo ""
     echo "$RESP" | python3 -c "
 import json, sys
@@ -253,3 +253,4 @@ else
 fi
 
 log "=== done: $AGENTS_DONE agents, $TOTAL_ITEMS items, $TOTAL_FILES files ==="
+

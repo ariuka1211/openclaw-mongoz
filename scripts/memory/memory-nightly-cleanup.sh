@@ -14,13 +14,13 @@ source "$W/scripts/memory/.env" 2>/dev/null || true
 [ -z "${KILOCODE_API_KEY:-}" ] && echo "⚠️ No API key" && exit 1
 
 LOG="/tmp/memory-nightly-cleanup.log"
-OBS="$W/scripts/learning/obs-log.sh"
-TODAY=$(date -u '+%Y-%m-%d')
+OBS="$W/scripts/memory/obs-log.sh"
+TODAY=$(TZ='America/Denver' date '+%Y-%m-%d')
 DAILY_DIR="$W/memory"
 ARCHIVE_DIR="$W/memory/archived"
 TARGET_LINES=200
 
-log() { echo "[$(date -u '+%Y-%m-%d %H:%M:%S UTC')] $*" >> "$LOG"; }
+log() { echo "[$(TZ='America/Denver' date '+%Y-%m-%d %H:%M:%S %Z')] $*" >> "$LOG"; }
 
 mkdir -p "$ARCHIVE_DIR" "$DAILY_DIR"
 

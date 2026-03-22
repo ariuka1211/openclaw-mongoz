@@ -28,7 +28,8 @@ case "$AGENT_ID" in
         git config user.email "maaraa@openclaw.local"
         ;;
     *)
-        exit 1
+        git config user.name "$AGENT_ID"
+        git config user.email "$AGENT_ID@openclaw.local"
         ;;
 esac
 

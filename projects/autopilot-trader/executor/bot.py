@@ -842,50 +842,99 @@ class LighterAPI:
             logging.error(f"Failed to open position: {e}")
             return False
 
-    async def execute_sl(self, market_id: int, size: float, trigger_price: float, is_long: bool) -> bool:
-        """Execute a stop loss as a market order (reduce-only, IOC)."""
+    async def execute_sl(self, market_id: int, size: float, trigger_price: float, is_long: bool) -> tuple[bool, str | None]:
+        """Execute a stop loss as a market order (reduce-only, IOC).
+        Returns (success, client_order_index_or_none).
+        Uses create_market_order_if_slippage which pre-checks the order book
+        to ensure the order will actually fill at acceptable slippage.
+        """
         try:
             size_dec, price_dec = await self._ensure_decimals(market_id)
             base_amount = self._to_lighter_amount(size, size_dec)
 
-            # Get best price and add 2% slippage for worst-case execution
+            # Get best price for reference
             await self._ensure_signer()
             best_price_int = await self._signer.get_best_price(market_id, is_ask=is_long)
+            client_order_index = self._next_client_order_index()
 
-            result = await self._signer.create_market_order_limited_slippage(
+            # Use create_market_order_if_slippage which pre-validates the order book
+            # before submitting. This ensures the order will actually fill.
+            result = await self._signer.create_market_order_if_slippage(
                 market_index=market_id,
-                client_order_index=self._next_client_order_index(),
+                client_order_index=client_order_index,
                 base_amount=base_amount,
                 max_slippage=0.02,
                 is_ask=is_long,      # close long = sell = ask
                 reduce_only=True,
                 ideal_price=best_price_int,
             )
-            logging.info(f"🔍 SL order details: market={market_id}, size={size}, base_amount={base_amount}, best_price={best_price_int}, max_slippage=0.02, is_ask={is_long}, reduce_only=True")
+            logging.info(
+                f"🔍 SL order: market={market_id}, size={size}, base_amount={base_amount}, "
+                f"best_price={best_price_int}, max_slippage=0.02, is_ask={is_long}, "
+                f"reduce_only=True, client_order_index={client_order_index}"
+            )
             # SDK returns Union[Tuple[CreateOrder, RespSendTx, None], Tuple[None, None, str]]
             if isinstance(result, tuple):
                 if len(result) >= 3 and result[2] is not None:
-                    logging.error(f"❌ SL order rejected by exchange: {result[2]}")
-                    return False
+                    error_msg = result[2]
+                    logging.error(f"❌ SL order rejected by exchange: {error_msg}")
+                    # Check for specific error types
+                    if "slippage" in str(error_msg).lower():
+                        logging.error(f"❌ SL order rejected: excessive slippage — market may have moved beyond 2%")
+                    return False, None
                 if result[0] is None:
                     logging.error("❌ SL order returned None (no order created)")
-                    return False
-                # Log response details
+                    return False, None
+                # Log full response details for debugging
                 tx = result[0]
                 resp = result[1] if len(result) > 1 else None
                 if resp is not None:
                     resp_code = getattr(resp, 'code', None)
                     resp_msg = getattr(resp, 'msg', None) or getattr(resp, 'message', None)
-                    logging.info(f"✅ SL market order submitted: tx={tx}, resp_code={resp_code}, resp_msg={resp_msg}")
+                    resp_tx_hash = getattr(resp, 'tx_hash', None)
+                    resp_pred_ms = getattr(resp, 'predicted_execution_time_ms', None)
+                    resp_quota = getattr(resp, 'volume_quota_remaining', None)
+                    logging.info(
+                        f"✅ SL order submitted: code={resp_code}, msg={resp_msg}, "
+                        f"tx_hash={resp_tx_hash}, predicted_exec_ms={resp_pred_ms}, "
+                        f"vol_quota={resp_quota}, coi={client_order_index}"
+                    )
+                    # Warn if code is not the expected OK value
+                    if resp_code is not None and resp_code != 200:
+                        logging.warning(f"⚠️ SL order response code is {resp_code} (expected 200)")
                 else:
-                    logging.info(f"✅ SL market order submitted: {tx}")
-                return True
+                    logging.info(f"✅ SL order submitted (no response object): coi={client_order_index}")
+                return True, str(client_order_index)
             # Fallback: if SDK returns something unexpected, treat as success with warning
             logging.warning(f"⚠️ SL order unexpected return type: {type(result)} — {result}")
-            return True
+            return True, str(client_order_index)
         except Exception as e:
             logging.error(f"Failed to execute SL: {e}")
-            return False
+            return False, None
+
+    async def _check_active_orders(self, market_id: int) -> list[dict]:
+        """Check if there are any active (unfilled) orders for this market on our account."""
+        try:
+            await self.api._ensure_client()
+            orders = await self.api._order_api.account_active_orders(
+                account_index=self.cfg.account_index,
+                market_id=market_id,
+            )
+            active = []
+            if hasattr(orders, 'orders') and orders.orders:
+                for o in orders.orders:
+                    active.append({
+                        'order_index': getattr(o, 'order_index', None),
+                        'price': getattr(o, 'price', None),
+                        'base_amount': getattr(o, 'base_amount', None),
+                        'is_ask': getattr(o, 'is_ask', None),
+                        'order_type': getattr(o, 'order_type', None),
+                        'status': getattr(o, 'status', None),
+                    })
+            return active
+        except Exception as e:
+            logging.warning(f"⚠️ Could not check active orders for market {market_id}: {e}")
+            return []
 
     async def close(self):
         """Close all aiohttp sessions."""
@@ -936,8 +985,8 @@ class LighterCopilot:
         self._close_attempt_cooldown: dict[str, float] = {}  # symbol → monotonic() deadline (skip LLM during this)
         self._max_close_attempts = 3  # after N failed close attempts, escalate and cooldown
         self._close_cooldown_seconds = 900  # 15 minutes cooldown after max attempts
-        self._close_verify_delay = 5.0  # seconds to wait before verifying position closure
-        self._close_verify_retries = 3  # number of times to poll API for closure verification
+        self._close_verify_delay = 5.0  # base delay for position closure verification (progressive delays used)
+        self._close_verify_retries = 4  # number of verification attempts with progressive delays (5+10+15+20=50s total)
 
 
     async def start(self):
@@ -1258,16 +1307,25 @@ class LighterCopilot:
         return success
 
     async def _verify_position_closed(self, market_id: int, symbol: str) -> bool:
-        """Poll the Lighter API to verify a position is actually closed after a close order."""
-        for attempt in range(self._close_verify_retries):
-            await asyncio.sleep(self._close_verify_delay)
+        """Poll the Lighter API to verify a position is actually closed after a close order.
+        Uses progressively longer delays to account for exchange processing time.
+        """
+        delays = [5, 10, 15, 20]  # progressive delays: 5s, 10s, 15s, 20s = 50s total
+        for attempt, delay in enumerate(delays):
+            await asyncio.sleep(delay)
             try:
                 live_positions = await self.api.get_positions()
-                still_open = any(p["market_id"] == market_id and p.get("size", 0) != 0 for p in live_positions)
+                still_open = any(p["market_id"] == market_id and abs(p.get("size", 0)) > 0.001 for p in live_positions)
                 if not still_open:
-                    logging.info(f"✅ {symbol}: position closure verified (attempt {attempt + 1})")
+                    logging.info(f"✅ {symbol}: position closure verified (attempt {attempt + 1}, after {delay}s)")
                     return True
-                logging.info(f"⏳ {symbol}: position still open after close order (attempt {attempt + 1}/{self._close_verify_retries})")
+                # Also check if there are any active orders (the close order might still be pending)
+                active_orders = await self._check_active_orders(market_id)
+                sl_orders = [o for o in active_orders if o.get('is_ask') == True]  # sell orders for long close
+                logging.info(
+                    f"⏳ {symbol}: position still open (attempt {attempt + 1}/{len(delays)}), "
+                    f"active_orders={len(active_orders)}, sl_orders={len(sl_orders)}"
+                )
             except Exception as e:
                 logging.warning(f"⚠️ {symbol}: error verifying closure (attempt {attempt + 1}): {e}")
         return False
@@ -1304,7 +1362,7 @@ class LighterCopilot:
         if not current_price:
             return False
 
-        sl_success = await self.api.execute_sl(mid_to_close, pos.size, current_price, is_long)
+        sl_success, sl_coi = await self.api.execute_sl(mid_to_close, pos.size, current_price, is_long)
         if not sl_success:
             logging.warning(f"⚠️ Failed to submit close order for {pos.side} {symbol} — keeping in tracker")
             return False
@@ -1371,7 +1429,7 @@ class LighterCopilot:
             if i < len(self.tracker.positions) - 1:
                 await asyncio.sleep(self.cfg.price_call_delay)
             if current_price:
-                sl_success = await self.api.execute_sl(mid, pos.size, current_price, is_long)
+                sl_success, sl_coi = await self.api.execute_sl(mid, pos.size, current_price, is_long)
                 if sl_success:
                     self._log_outcome(pos, current_price, "ai_close_all")
                     roe = ((current_price - pos.entry_price) / pos.entry_price * 100) if is_long \
@@ -1678,14 +1736,17 @@ class LighterCopilot:
             )
             logging.info(msg)
             await self.alerts.send(msg)
-            sl_success = await self.api.execute_sl(mid, pos.size, price, is_long)
+            sl_success, sl_coi = await self.api.execute_sl(mid, pos.size, price, is_long)
             if sl_success:
                 position_closed = await self._verify_position_closed(mid, pos.symbol)
                 if not position_closed:
                     logging.warning(f"⚠️ {pos.symbol}: DSL SL submitted but position still open — keeping in tracker")
                     return  # Don't remove from tracker, will retry next tick
+            else:
+                logging.warning(f"⚠️ {pos.symbol}: DSL SL order rejected — keeping in tracker")
+                return  # Don't remove from tracker, will retry next tick
             self._log_outcome(pos, price, f"dsl_{action}")
-            self._recently_closed[mid] = time.monotonic() + 60  # 1 min phantom guard (debug)
+            self._recently_closed[mid] = time.monotonic() + 300  # 5 min phantom guard
             self.tracker.remove_position(mid)
             return
 
@@ -1710,15 +1771,18 @@ class LighterCopilot:
         if action == "trailing_take_profit":
             await self.api.execute_tp(mid, pos.size, price, is_long)
         else:
-            sl_success = await self.api.execute_sl(mid, pos.size, price, is_long)
+            sl_success, sl_coi = await self.api.execute_sl(mid, pos.size, price, is_long)
             if sl_success:
                 position_closed = await self._verify_position_closed(mid, pos.symbol)
                 if not position_closed:
                     logging.warning(f"⚠️ {pos.symbol}: SL submitted but position still open — keeping in tracker")
                     return  # Don't remove from tracker, will retry next tick
+            else:
+                logging.warning(f"⚠️ {pos.symbol}: SL order rejected — keeping in tracker")
+                return  # Don't remove from tracker, will retry next tick
 
         self._log_outcome(pos, price, action)
-        self._recently_closed[mid] = time.monotonic() + 60  # 1 min phantom guard (debug)
+        self._recently_closed[mid] = time.monotonic() + 300  # 5 min phantom guard
         self.tracker.remove_position(mid)
 
         # Clear pending sync set at end of tick

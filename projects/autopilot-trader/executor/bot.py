@@ -39,6 +39,7 @@ from dsl import DSLConfig, DSLState, DSLTier, evaluate_dsl
 
 import lighter.rest as _lighter_rest
 import aiohttp_socks as _aiohttp_socks
+import aiohttp as _aiohttp
 
 _original_rest_client_init = _lighter_rest.RESTClientObject.__init__
 
@@ -72,16 +73,17 @@ def _patched_rest_client_init(self, configuration):
         self.proxy_headers = configuration.proxy_headers
 
         # Create pool manager
-        self.pool_manager = aiohttp.ClientSession(
+        self.pool_manager = _aiohttp.ClientSession(
             connector=connector, trust_env=True
         )
 
         # Set up retry client if configured
         retries = configuration.retries
         if retries is not None:
-            self.retry_client = aiohttp_retry.RetryClient(
+            import aiohttp_retry as _aiohttp_retry
+            self.retry_client = _aiohttp_retry.RetryClient(
                 client_session=self.pool_manager,
-                retry_options=aiohttp_retry.ExponentialRetry(
+                retry_options=_aiohttp_retry.ExponentialRetry(
                     attempts=retries,
                     factor=0.0,
                     start_timeout=0.0,

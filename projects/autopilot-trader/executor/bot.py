@@ -851,24 +851,17 @@ class LighterAPI:
             # Get best price and add 2% slippage for worst-case execution
             await self._ensure_signer()
             best_price_int = await self._signer.get_best_price(market_id, is_ask=is_long)
-            # best_price_int is the raw integer price from order book
-            slippage = int(best_price_int * 0.02)
-            if is_long:
-                # closing long = sell, worst case is lower price
-                worst_price = best_price_int - slippage
-            else:
-                # closing short = buy, worst case is higher price
-                worst_price = best_price_int + slippage
 
-            result = await self._signer.create_market_order(
+            result = await self._signer.create_market_order_limited_slippage(
                 market_index=market_id,
                 client_order_index=self._next_client_order_index(),
                 base_amount=base_amount,
-                avg_execution_price=worst_price,
+                max_slippage=0.02,
                 is_ask=is_long,      # close long = sell = ask
                 reduce_only=True,
+                ideal_price=best_price_int,
             )
-            logging.info(f"🔍 SL order details: market={market_id}, size={size}, base_amount={base_amount}, worst_price={worst_price}, is_ask={is_long}, reduce_only=True")
+            logging.info(f"🔍 SL order details: market={market_id}, size={size}, base_amount={base_amount}, best_price={best_price_int}, max_slippage=0.02, is_ask={is_long}, reduce_only=True")
             # SDK returns Union[Tuple[CreateOrder, RespSendTx, None], Tuple[None, None, str]]
             if isinstance(result, tuple):
                 if len(result) >= 3 and result[2] is not None:
@@ -1692,7 +1685,7 @@ class LighterCopilot:
                     logging.warning(f"⚠️ {pos.symbol}: DSL SL submitted but position still open — keeping in tracker")
                     return  # Don't remove from tracker, will retry next tick
             self._log_outcome(pos, price, f"dsl_{action}")
-            self._recently_closed[mid] = time.monotonic() + 300  # 5 min phantom guard
+            self._recently_closed[mid] = time.monotonic() + 60  # 1 min phantom guard (debug)
             self.tracker.remove_position(mid)
             return
 
@@ -1725,7 +1718,7 @@ class LighterCopilot:
                     return  # Don't remove from tracker, will retry next tick
 
         self._log_outcome(pos, price, action)
-        self._recently_closed[mid] = time.monotonic() + 300  # 5 min phantom guard
+        self._recently_closed[mid] = time.monotonic() + 60  # 1 min phantom guard (debug)
         self.tracker.remove_position(mid)
 
         # Clear pending sync set at end of tick

@@ -426,13 +426,14 @@ class PositionTracker:
 
         return None
 
-    def add_position(self, market_id: int, symbol: str, side: str, entry: float, size: float):
+    def add_position(self, market_id: int, symbol: str, side: str, entry: float, size: float, leverage: float = None):
+        lev = leverage or self.cfg.default_leverage
         dsl_state = None
         if self.cfg.dsl_enabled:
             dsl_state = DSLState(
                 side=side,
                 entry_price=entry,
-                leverage=self.cfg.default_leverage,
+                leverage=lev,
                 high_water_price=entry,
                 high_water_time=datetime.now(timezone.utc),
             )
@@ -446,7 +447,7 @@ class PositionTracker:
             dsl_state=dsl_state,
         )
         self.positions[market_id] = pos
-        mode = f"DSL (lev={self.cfg.default_leverage}x)" if self.cfg.dsl_enabled else "legacy trailing"
+        mode = f"DSL (lev={lev}x)" if self.cfg.dsl_enabled else "legacy trailing"
         logging.info(f"📌 Tracking: {side.upper()} {symbol} @ ${entry:,.2f}, size={size}, mode={mode}")
 
     def remove_position(self, market_id: int):
@@ -601,6 +602,12 @@ class LighterAPI:
                         symbol = await self._get_symbol(market_id)
                         # Extract unrealized_pnl for mark price derivation
                         unrealized_pnl = float(pos.unrealized_pnl) if hasattr(pos, 'unrealized_pnl') and pos.unrealized_pnl else 0.0
+                        # Extract initial_margin_fraction and compute effective leverage
+                        margin_fraction = float(pos.initial_margin_fraction) if hasattr(pos, 'initial_margin_fraction') and pos.initial_margin_fraction else 0
+                        if margin_fraction > 0:
+                            effective_leverage = min(100.0 / margin_fraction, self.cfg.default_leverage)
+                        else:
+                            effective_leverage = self.cfg.default_leverage
                         positions.append({
                             "market_id": market_id,
                             "symbol": symbol,
@@ -608,6 +615,7 @@ class LighterAPI:
                             "side": "long" if size > 0 else "short",
                             "entry_price": entry,
                             "unrealized_pnl": unrealized_pnl,
+                            "leverage": effective_leverage,
                         })
             return positions
         except Exception as e:
@@ -1108,7 +1116,7 @@ class LighterCopilot:
                     self._pending_sync.add(mid)
                     # Track in position tracker — entry at current price
                     actual_size = size_usd / current_price
-                    self.tracker.add_position(mid, symbol, direction, current_price, actual_size)
+                    self.tracker.add_position(mid, symbol, direction, current_price, actual_size, leverage=self.cfg.default_leverage)
                     await self.alerts.send(
                         f"📡 *SIGNAL → OPENED*\n"
                         f"{direction.upper()} {symbol}\n"
@@ -1242,7 +1250,7 @@ class LighterCopilot:
         if success:
             self._pending_sync.add(market_id)
             actual_size = size_usd / current_price
-            self.tracker.add_position(market_id, symbol, direction, current_price, actual_size)
+            self.tracker.add_position(market_id, symbol, direction, current_price, actual_size, leverage=self.cfg.default_leverage)
             # Reset close attempt tracking for this symbol
             self._close_attempts.pop(symbol, None)
             self._close_attempt_cooldown.pop(symbol, None)
@@ -1553,7 +1561,8 @@ class LighterCopilot:
             # Second consecutive sync — confirm and track
             logging.info(f"📌 API POSITION CONFIRMED: {pos['side'].upper()} {symbol}")
             self.tracker.add_position(
-                mid, pos["symbol"], pos["side"], pos["entry_price"], pos["size"]
+                mid, pos["symbol"], pos["side"], pos["entry_price"], pos["size"],
+                leverage=pos.get("leverage")
             )
             self._pending_positions.pop(mid, None)
             await self.alerts.send(

@@ -253,4 +253,5 @@ else
 fi
 
 log "=== done: $AGENTS_DONE agents, $TOTAL_ITEMS items, $TOTAL_FILES files ==="
+touch /tmp/cron-state/memory-extract.last-run
 

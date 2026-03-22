@@ -4,7 +4,7 @@ set -euo pipefail
 
 WORKSPACE="/root/.openclaw/workspace"
 BACKUP_DIR="/root/.openclaw/backups/memory"
-TIMESTAMP=$(date -u +"%Y-%m-%dT%H%M%S")
+TIMESTAMP=$(TZ='America/Denver' date +"%Y-%m-%dT%H%M%S")
 DEST="$BACKUP_DIR/$TIMESTAMP"
 
 mkdir -p "$DEST"
@@ -23,4 +23,5 @@ fi
 cd "$BACKUP_DIR"
 ls -1dt */ 2>/dev/null | tail -n +15 | xargs -r rm -rf
 
-echo "[$(date -u +"%Y-%m-%d %H:%M:%S UTC")] Backup complete → $DEST"
+echo "[$(TZ='America/Denver' date +"%Y-%m-%d %H:%M:%S %Z")] Backup complete → $DEST"
+touch /tmp/cron-state/backup.last-run

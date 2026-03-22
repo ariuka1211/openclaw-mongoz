@@ -142,6 +142,7 @@ find "$ARCHIVE_DIR" -name '*-removed.md' -mtime +30 -delete 2>/dev/null || true
 rm -f "$W/MEMORY.md.bak"
 
 log "=== nightly cleanup done ==="
+touch /tmp/cron-state/memory-cleanup.last-run
 bash "$OBS" "info" "memory-nightly-cleanup" "Nightly cleanup completed"
 echo "Nightly cleanup: ✅ done"
 

@@ -1684,7 +1684,12 @@ class LighterCopilot:
             )
             logging.info(msg)
             await self.alerts.send(msg)
-            await self.api.execute_sl(mid, pos.size, price, is_long)
+            sl_success = await self.api.execute_sl(mid, pos.size, price, is_long)
+            if sl_success:
+                position_closed = await self._verify_position_closed(mid, pos.symbol)
+                if not position_closed:
+                    logging.warning(f"⚠️ {pos.symbol}: DSL SL submitted but position still open — keeping in tracker")
+                    return  # Don't remove from tracker, will retry next tick
             self._log_outcome(pos, price, f"dsl_{action}")
             self._recently_closed[mid] = time.monotonic() + 300  # 5 min phantom guard
             self.tracker.remove_position(mid)
@@ -1711,7 +1716,12 @@ class LighterCopilot:
         if action == "trailing_take_profit":
             await self.api.execute_tp(mid, pos.size, price, is_long)
         else:
-            await self.api.execute_sl(mid, pos.size, price, is_long)
+            sl_success = await self.api.execute_sl(mid, pos.size, price, is_long)
+            if sl_success:
+                position_closed = await self._verify_position_closed(mid, pos.symbol)
+                if not position_closed:
+                    logging.warning(f"⚠️ {pos.symbol}: SL submitted but position still open — keeping in tracker")
+                    return  # Don't remove from tracker, will retry next tick
 
         self._log_outcome(pos, price, action)
         self._recently_closed[mid] = time.monotonic() + 300  # 5 min phantom guard

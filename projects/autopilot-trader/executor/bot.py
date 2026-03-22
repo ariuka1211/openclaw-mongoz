@@ -868,6 +868,7 @@ class LighterAPI:
                 is_ask=is_long,      # close long = sell = ask
                 reduce_only=True,
             )
+            logging.info(f"🔍 SL order details: market={market_id}, size={size}, base_amount={base_amount}, worst_price={worst_price}, is_ask={is_long}, reduce_only=True")
             # SDK returns Union[Tuple[CreateOrder, RespSendTx, None], Tuple[None, None, str]]
             if isinstance(result, tuple):
                 if len(result) >= 3 and result[2] is not None:

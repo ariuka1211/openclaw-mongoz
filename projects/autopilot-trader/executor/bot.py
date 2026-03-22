@@ -608,11 +608,13 @@ class LighterAPI:
                             effective_leverage = round(min(100.0 / margin_fraction, self.cfg.default_leverage), 1)
                         else:
                             effective_leverage = self.cfg.default_leverage
+                        sign = int(pos.sign) if hasattr(pos, 'sign') else 1
+                        side = "long" if sign > 0 else "short"
                         positions.append({
                             "market_id": market_id,
                             "symbol": symbol,
                             "size": size,
-                            "side": "long" if size > 0 else "short",
+                            "side": side,
                             "entry_price": entry,
                             "unrealized_pnl": unrealized_pnl,
                             "leverage": effective_leverage,
@@ -962,6 +964,9 @@ class LighterCopilot:
         self._close_cooldown_seconds = 900  # 15 minutes cooldown after max attempts
         self._close_verify_delay = 5.0  # base delay for position closure verification (progressive delays used)
         self._close_verify_retries = 4  # number of verification attempts with progressive delays (5+10+15+20=50s total)
+        # DSL close circuit breaker — mirror of AI close tracking
+        self._dsl_close_attempts: dict[str, int] = {}  # symbol → consecutive DSL close attempts
+        self._dsl_close_attempt_cooldown: dict[str, float] = {}  # symbol → monotonic() deadline
 
 
     async def start(self):
@@ -1566,6 +1571,10 @@ class LighterCopilot:
         expired_close_cd = [s for s, t in self._close_attempt_cooldown.items() if t < now]
         for s in expired_close_cd:
             del self._close_attempt_cooldown[s]
+        # Prune DSL close attempt cooldowns
+        expired_dsl_close_cd = [s for s, t in self._dsl_close_attempt_cooldown.items() if t < now]
+        for s in expired_dsl_close_cd:
+            del self._dsl_close_attempt_cooldown[s]
         # Prune symbol cache (entries older than TTL)
         if self.api:
             expired_symbols = [mid for mid, (ts, _) in self.api._symbol_cache.items() if (now - ts) > self.api._symbol_cache_ttl]
@@ -1747,12 +1756,38 @@ class LighterCopilot:
             )
             logging.info(msg)
             await self.alerts.send(msg)
+            # Check DSL close attempt cooldown
+            cooldown_until = self._dsl_close_attempt_cooldown.get(pos.symbol)
+            if cooldown_until and time.monotonic() < cooldown_until:
+                remaining = int(cooldown_until - time.monotonic())
+                logging.info(f"🧊 DSL close: {pos.symbol} in DSL close cooldown ({remaining}s remaining) — skipping. Position may need manual intervention.")
+                return  # Don't remove from tracker, but stop retrying
+
             sl_success, sl_coi = await self.api.execute_sl(mid, pos.size, price, is_long)
             if sl_success:
                 position_closed = await self._verify_position_closed(mid, pos.symbol)
                 if not position_closed:
-                    logging.warning(f"⚠️ {pos.symbol}: DSL SL submitted but position still open — keeping in tracker")
-                    return  # Don't remove from tracker, will retry next tick
+                    # Increment DSL close attempt counter
+                    attempts = self._dsl_close_attempts.get(pos.symbol, 0) + 1
+                    self._dsl_close_attempts[pos.symbol] = attempts
+                    logging.warning(f"⚠️ {pos.symbol}: DSL SL submitted but position still open (attempt {attempts}/{self._max_close_attempts})")
+
+                    if attempts >= self._max_close_attempts:
+                        # Escalate: set cooldown and alert
+                        self._dsl_close_attempt_cooldown[pos.symbol] = time.monotonic() + self._close_cooldown_seconds
+                        await self.alerts.send(
+                            f"🚨 *DSL CLOSE FAILED ×{attempts}*\n"
+                            f"{pos.side.upper()} {pos.symbol}\n"
+                            f"ROE: {roe:+.1f}%\n"
+                            f"Action: {labels.get(action, action)}\n"
+                            f"Order submitted but NOT filled after {attempts} attempts.\n"
+                            f"Cooldown: {self._close_cooldown_seconds // 60}min — MANUAL INTERVENTION REQUIRED."
+                        )
+                        logging.error(f"🚨 {pos.symbol}: max DSL close attempts ({self._max_close_attempts}) reached. Setting {self._close_cooldown_seconds}s cooldown.")
+                    return  # Don't remove from tracker, will retry next tick (unless cooldown active)
+                # Position successfully closed — reset DSL attempt counter
+                self._dsl_close_attempts.pop(pos.symbol, None)
+                self._dsl_close_attempt_cooldown.pop(pos.symbol, None)
             else:
                 logging.warning(f"⚠️ {pos.symbol}: DSL SL order rejected — keeping in tracker")
                 return  # Don't remove from tracker, will retry next tick

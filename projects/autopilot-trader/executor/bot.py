@@ -605,7 +605,7 @@ class LighterAPI:
                         # Extract initial_margin_fraction and compute effective leverage
                         margin_fraction = float(pos.initial_margin_fraction) if hasattr(pos, 'initial_margin_fraction') and pos.initial_margin_fraction else 0
                         if margin_fraction > 0:
-                            effective_leverage = min(100.0 / margin_fraction, self.cfg.default_leverage)
+                            effective_leverage = round(min(100.0 / margin_fraction, self.cfg.default_leverage), 1)
                         else:
                             effective_leverage = self.cfg.default_leverage
                         positions.append({

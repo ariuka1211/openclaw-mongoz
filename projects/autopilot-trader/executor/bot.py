@@ -1138,6 +1138,10 @@ class LighterCopilot:
         except Exception as e:
             logging.warning(f"⚠️ Account tier check failed: {e}")
 
+        # Test quota response structure (debugging)
+        if logging.getLogger().getEffectiveLevel() <= logging.DEBUG:
+            await self._test_quota_response()
+
         # Check balance
         logging.info("💰 Checking balance...")
         # TODO: Re-enable once API rate limits are resolved
@@ -1828,27 +1832,6 @@ class LighterCopilot:
             if time_since_last < 16:  # 16s to be safe
                 logging.debug(f"⏱️ Pacing orders (quota={self.api.volume_quota_remaining}, last_order={time_since_last:.1f}s ago)")
                 return True
-        return False
-
-    def _should_skip_open_for_quota(self) -> bool:
-        """Skip new opens when quota is low to preserve it for SL orders."""
-        quota = self.api.volume_quota_remaining if self.api else None
-        if quota is not None and quota < 50:
-            logging.debug(f"🚫 Skipping new opens (quota={quota} < 50, preserving for SL)")
-            return True
-        return False
-
-    def _is_quota_emergency(self) -> bool:
-        """Emergency mode when quota is critically low."""
-        quota = self.api.volume_quota_remaining if self.api else None
-        return quota is not None and quota < 10
-
-    def _should_skip_non_critical_orders(self) -> bool:
-        """In emergency mode, only allow SL orders."""
-        if self._is_quota_emergency():
-            quota = self.api.volume_quota_remaining if self.api else None
-            logging.warning(f"🚨 Quota emergency mode (remaining={quota}), SL only")
-            return True
         return False
 
     def _mark_order_submitted(self):

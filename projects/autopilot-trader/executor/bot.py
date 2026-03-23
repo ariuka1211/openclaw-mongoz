@@ -399,6 +399,10 @@ class PositionTracker:
         trailing_just_activated = False
         if pos.side == "long" and price > pos.high_water_mark:
             pos.high_water_mark = price
+            # Keep DSL state in sync for potential mode switch
+            if pos.dsl_state:
+                pos.dsl_state.high_water_price = pos.high_water_mark
+                pos.dsl_state.high_water_time = datetime.now(timezone.utc)
             if not pos.trailing_active:
                 trigger = pos.entry_price * (1 + self.cfg.trailing_tp_trigger_pct / 100)
                 if price >= trigger:
@@ -407,6 +411,10 @@ class PositionTracker:
                     logging.info(f"🎯 {pos.symbol} trailing TP ACTIVE at ${price:,.2f}")
         elif pos.side == "short" and price < pos.high_water_mark:
             pos.high_water_mark = price
+            # Keep DSL state in sync for potential mode switch
+            if pos.dsl_state:
+                pos.dsl_state.high_water_price = pos.high_water_mark
+                pos.dsl_state.high_water_time = datetime.now(timezone.utc)
             if not pos.trailing_active:
                 trigger = pos.entry_price * (1 - self.cfg.trailing_tp_trigger_pct / 100)
                 if price <= trigger:
@@ -592,7 +600,7 @@ class LighterAPI:
             )
 
         # Volume quota tracking
-        self._volume_quota_remaining: int | None = None
+        self._volume_quota_remaining = None
 
     def _extract_quota_from_response(self, resp) -> tuple[int | None, str]:
         """Extract quota with detailed field analysis."""

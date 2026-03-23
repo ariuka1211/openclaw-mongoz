@@ -115,27 +115,12 @@ except Exception as _e:
     logging.warning(f"⚠️ Could not init DecisionDB: {_e} — outcomes will not be logged")
     _db = None
 
-# ── Safe JSON reader ────────────────────────────────────────────────
+# Add shared/ to path for IPC utilities
+_shared_dir = Path(__file__).resolve().parent.parent / "shared"
+if str(_shared_dir) not in sys.path:
+    sys.path.insert(0, str(_shared_dir))
+from ipc_utils import safe_read_json
 
-def safe_read_json(path: Path, retries: int = 2, delay: float = 0.1) -> dict | None:
-    """Read JSON with retry — handles race conditions from concurrent writes.
-
-    os.replace (used in atomic_write) is atomic, but we can still catch a file
-    mid-flush. 1 retry with a tiny delay is almost always enough.
-    """
-    for attempt in range(retries + 1):
-        try:
-            with open(path) as f:
-                return json.load(f)
-        except (json.JSONDecodeError, OSError) as e:
-            if attempt < retries:
-                time.sleep(delay)
-            else:
-                # Only log non-"file not found" errors (permission, disk full, etc.)
-                if not isinstance(e, FileNotFoundError):
-                    logging.warning(f"Failed to read {path}: {e}")
-                return None
-    return None
 
 # ── Config ───────────────────────────────────────────────────────────
 
@@ -1126,6 +1111,9 @@ class LighterCopilot:
         self._last_quota_alert_time: float = 0  # periodic quota status alert (20min)
         self._quota_alert_interval: float = 1200  # 20 minutes in seconds
         self._last_quota_emergency_warn: float = 0  # rate-limit for quota emergency warnings
+        # Orphaned position detection — track consecutive no-price ticks per market
+        self._no_price_ticks: dict[int, int] = {}  # market_id → consecutive no-price tick count
+        self._no_price_alert_threshold: int = 3  # alert after N consecutive no-price ticks
 
 
     async def start(self):
@@ -1376,7 +1364,8 @@ class LighterCopilot:
                 return f"Missing or invalid symbol: {symbol!r}"
 
         if action == "open":
-            size_usd = decision.get("size_usd", 0)
+        # IPC-03: use requested_size_usd (new) with fallback to size_usd (legacy)
+            size_usd = decision.get("requested_size_usd", 0) or decision.get("size_usd", 0)
             if not isinstance(size_usd, (int, float)) or size_usd <= 0:
                 return f"Invalid size_usd: {size_usd!r}"
             direction = decision.get("direction")
@@ -1454,7 +1443,8 @@ class LighterCopilot:
         """Execute an AI-recommended open. Returns True on success."""
         symbol = decision.get("symbol")
         direction = decision.get("direction")
-        size_usd = decision.get("size_usd", 0)
+        # IPC-03: use requested_size_usd (new) with fallback to size_usd (legacy)
+        size_usd = decision.get("requested_size_usd", 0) or decision.get("size_usd", 0)
 
         if not symbol or not direction or size_usd <= 0:
             logging.warning(f"AI open: invalid decision fields")
@@ -1869,7 +1859,7 @@ class LighterCopilot:
                     "entry_price": pos.entry_price,
                     "current_price": current_price if current_price and current_price > 0 else pos.entry_price,
                     "size": pos.size,
-                    "size_usd": pos.size * pos.entry_price,
+                    "position_size_usd": pos.size * pos.entry_price,
                 })
             result = {
                 "timestamp": datetime.now(timezone.utc).isoformat(),

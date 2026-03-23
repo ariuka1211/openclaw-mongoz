@@ -20,34 +20,12 @@ from db import DecisionDB
 from llm_client import LLMClient
 from safety import SafetyLayer
 
-# ── Atomic write helper ─────────────────────────────────────────────
+# Add shared/ to path for IPC utilities
+_shared_dir = Path(__file__).resolve().parent.parent / "shared"
+if str(_shared_dir) not in sys.path:
+    sys.path.insert(0, str(_shared_dir))
+from ipc_utils import atomic_write, safe_read_json
 
-def atomic_write(path: Path, data: dict):
-    """Atomic JSON write — prevents partial reads by other processes."""
-    tmp = str(path) + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(data, f, indent=2)
-    os.replace(tmp, str(path))
-
-def safe_read_json(path: Path, retries: int = 2, delay: float = 0.1) -> dict | None:
-    """Read JSON with retry — handles race conditions from concurrent atomic_write.
-
-    If we catch a file mid-write (partial JSON), retry after a short delay.
-    os.replace is atomic, so 1 retry is almost always enough.
-    """
-    for attempt in range(retries + 1):
-        try:
-            with open(path) as f:
-                return json.load(f)
-        except (json.JSONDecodeError, OSError) as e:
-            if attempt < retries:
-                time.sleep(delay)
-            else:
-                # Log non-"file not found" errors (permission, disk full, etc.)
-                if not isinstance(e, FileNotFoundError):
-                    log.warning(f"Failed to read {path}: {e}")
-                return None
-    return None
 
 # ── Logging setup ────────────────────────────────────────────────────
 
@@ -350,13 +328,13 @@ class AITrader:
                 "reasoning": decision.get("reasoning", ""),
                 "confidence": decision.get("confidence", 0),
             }
-            # Convert size_pct_equity to size_usd for the bot (only for open actions)
+            # Convert size_pct_equity to requested_size_usd for the bot (only for open actions)
             if decision.get("action") == "open" and decision.get("size_pct_equity") is not None:
                 signals, signals_config = self.context_builder.read_signals()
                 equity = signals_config.get("accountEquity", 1000)
-                output["size_usd"] = equity * decision["size_pct_equity"] / 100
+                output["requested_size_usd"] = equity * decision["size_pct_equity"] / 100
             else:
-                output["size_usd"] = None
+                output["requested_size_usd"] = None
 
             self.decision_file.parent.mkdir(parents=True, exist_ok=True)
             atomic_write(self.decision_file, output)

@@ -1126,6 +1126,9 @@ class LighterCopilot:
         self._last_quota_alert_time: float = 0  # periodic quota status alert (20min)
         self._quota_alert_interval: float = 1200  # 20 minutes in seconds
         self._last_quota_emergency_warn: float = 0  # rate-limit for quota emergency warnings
+        # Kill switch — file-based emergency stop
+        self._kill_switch_active = False
+        self._kill_switch_path = Path(__file__).parent / "state" / "KILL_SWITCH"
 
 
     async def start(self):
@@ -1247,6 +1250,10 @@ class LighterCopilot:
 
     async def _process_signals(self):
         """Read signals.json and open positions for new, unopened signals."""
+        if self._kill_switch_active:
+            logging.warning("🚫 Kill switch active — _process_signals() skipping new opens")
+            return
+
         signals_path = Path(self._signals_file)
         if not signals_path.exists():
             return
@@ -1452,6 +1459,10 @@ class LighterCopilot:
 
     async def _execute_ai_open(self, decision: dict) -> bool:
         """Execute an AI-recommended open. Returns True on success."""
+        if self._kill_switch_active:
+            logging.warning(f"🚫 Kill switch active — AI open blocked for {decision.get('symbol', '?')}")
+            return False
+
         symbol = decision.get("symbol")
         direction = decision.get("direction")
         size_usd = decision.get("size_usd", 0)
@@ -1975,6 +1986,17 @@ class LighterCopilot:
 
     async def _tick(self):
         """One cycle: sync positions, update prices, check triggers."""
+        # ── Kill switch check ──
+        kill_switch_now = self._kill_switch_path.exists()
+        if kill_switch_now and not self._kill_switch_active:
+            self._kill_switch_active = True
+            logging.critical("🚨 KILL SWITCH ACTIVE — no new positions")
+            await self.alerts.send("🚨 *KILL SWITCH ACTIVE*\nNo new positions will be opened.\nExisting positions still managed.")
+        elif not kill_switch_now and self._kill_switch_active:
+            self._kill_switch_active = False
+            logging.info("✅ Kill switch deactivated")
+            await self.alerts.send("✅ *Kill switch deactivated*\nBot resumed normal operation.")
+
         # NOTE: Don't skip entire tick during quota cooldown —
         # position sync, DSL evaluation, and AI decisions still need to run.
         # Order submission points handle quota errors individually via VolumeQuotaError.

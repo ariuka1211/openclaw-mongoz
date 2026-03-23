@@ -2009,8 +2009,8 @@ class LighterCopilot:
                 f"🔒 *DSL TIER LOCKED*\n"
                 f"Symbol: {pos.symbol}\n"
                 f"Side: {pos.side}\n"
-                f"ROE: {details['roe']:+.1f}%\n"
-                f"Floor: {details['floor_roe']:+.1f}% ROE (~${details['floor_price']:,.2f})\n"
+                f"ROE (at trigger): {details['roe']:+.1f}%\n"
+                f"Lock floor: {details['floor_roe']:+.1f}% ROE (~${details['floor_price']:,.2f})\n"
                 f"Tier: +{details['tier']}% ({details['breaches']}x)"
             )
             logging.info(msg)
@@ -2042,7 +2042,7 @@ class LighterCopilot:
                 f"{labels.get(action, action)}\n"
                 f"Symbol: {pos.symbol}\n"
                 f"Side: {pos.side}\n"
-                f"Exit: ${price:,.2f}\n"
+                f"Trigger: ${price:,.2f}\n"
                 f"Entry: ${pos.entry_price:,.2f}\n"
                 f"ROE: {roe:+.1f}%\n"
                 f"{hw_str}"

@@ -12,20 +12,12 @@ from db import DecisionDB
 
 log = logging.getLogger("ai-trader.context")
 
-# ── Safe JSON reader ────────────────────────────────────────────────
+# Add shared/ to path for IPC utilities
+_shared_dir = Path(__file__).resolve().parent.parent / "shared"
+if str(_shared_dir) not in sys.path:
+    sys.path.insert(0, str(_shared_dir))
+from ipc_utils import safe_read_json
 
-def safe_read_json(path: Path, retries: int = 2, delay: float = 0.1) -> dict | None:
-    """Read JSON with retry — handles race conditions from concurrent atomic_write."""
-    for attempt in range(retries + 1):
-        try:
-            with open(path) as f:
-                return json.load(f)
-        except (json.JSONDecodeError, OSError) as e:
-            if attempt < retries:
-                time.sleep(delay)
-            else:
-                return None
-    return None
 
 # ── Prompt injection sanitizer ──────────────────────────────────────
 

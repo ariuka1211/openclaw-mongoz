@@ -324,21 +324,11 @@ class AITrader:
 
         log.info(f"--- Cycle {cycle_id} done (latency={latency_ms}ms, executed={executed}) ---")
 
-    async def _check_bot_result(self, decision_id):
-        """Check bot result file for correlation with sent decision."""
-        if not self.result_file.exists():
-            return None
-        result = safe_read_json(self.result_file)
-        if not result:
-            return None
-        # IPC-02: Correlate via processed_decision_id
-        if result.get("processed_decision_id") != decision_id:
-            log.debug(f"Result file exists but processed_decision_id does not match sent {decision_id}")
-            return None
-        return result
+    async def _check_bot_result(self, decision_id: str) -> dict | None:
+        """Check bot result file for correlation with sent decision.
 
-    async def _check_bot_result(self, decision_id):
-        """Check bot result file for correlation with sent decision."""
+        Returns result dict if found with matching processed_decision_id, else None.
+        """
         if not self.result_file.exists():
             return None
         result = safe_read_json(self.result_file)
@@ -346,7 +336,8 @@ class AITrader:
             return None
         # IPC-02: Correlate via processed_decision_id
         if result.get("processed_decision_id") != decision_id:
-            log.debug(f"Result file exists but processed_decision_id does not match sent {decision_id}")
+            log.debug(f"Result file exists but processed_decision_id={result.get('processed_decision_id')} "
+                       f"doesn't match sent {decision_id}")
             return None
         return result
 

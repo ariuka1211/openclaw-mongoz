@@ -208,7 +208,6 @@ class DecisionDB:
                 "roe_pct": r[8],
                 "hold_time_seconds": r[9],
                 "exit_reason": r[10],
-                "hold_time": f"{r[9] // 60}min" if r[9] else "?",
             }
             for r in rows
         ]
@@ -232,10 +231,12 @@ class DecisionDB:
 
     def get_daily_pnl(self) -> float:
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        start_of_day = f"{today}T00:00:00+00:00"
+        end_of_day = f"{today}T23:59:59.999999+00:00"
         with self._lock:
             row = self._conn.execute(
-                "SELECT COALESCE(SUM(pnl_usd), 0) FROM outcomes WHERE timestamp LIKE ?",
-                (f"{today}%",),
+                "SELECT COALESCE(SUM(pnl_usd), 0) FROM outcomes WHERE timestamp >= ? AND timestamp <= ?",
+                (start_of_day, end_of_day),
             ).fetchone()
         return row[0] if row else 0.0
 

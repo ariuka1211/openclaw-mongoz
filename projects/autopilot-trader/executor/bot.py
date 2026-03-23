@@ -1318,9 +1318,9 @@ class LighterCopilot:
                 logging.debug(f"⏳ {symbol}: pacing orders (low quota), skipping open")
                 continue
 
-            # Quota prioritization: skip new opens when quota < 15 to preserve for SL orders
+            # Quota prioritization: skip new opens when quota < 35 to preserve for SL orders
             if self._should_skip_open_for_quota():
-                logging.warning(f"🚫 {symbol}: new opens paused (quota={self.api.volume_quota_remaining} < 15, SL protection prioritized)")
+                logging.warning(f"🚫 {symbol}: new opens paused (quota={self.api.volume_quota_remaining} < 35, SL protection prioritized)")
                 continue
 
             # Always fetch live price — signal data can be stale (up to 5 min old)
@@ -1498,10 +1498,10 @@ class LighterCopilot:
             logging.info(f"⏱️ AI open: {symbol} pacing orders (low quota) — skipping")
             return False
 
-        # Quota prioritization: skip new opens when quota < 15 to preserve for SL orders
+        # Quota prioritization: skip new opens when quota < 35 to preserve for SL orders
         if self._should_skip_open_for_quota():
             quota = self.api.volume_quota_remaining if self.api else None
-            logging.warning(f"🚫 {symbol}: new opens paused (quota={quota} < 15, SL protection prioritized)")
+            logging.warning(f"🚫 {symbol}: new opens paused (quota={quota} < 35, SL protection prioritized)")
             return False
 
         is_long = direction == "long"
@@ -1937,7 +1937,7 @@ class LighterCopilot:
 
     def _should_pace_orders(self) -> bool:
         """Pace orders to leverage 15-second free tx window when quota is low."""
-        if self.api and self.api.volume_quota_remaining is not None and self.api.volume_quota_remaining < 15:
+        if self.api and self.api.volume_quota_remaining is not None and self.api.volume_quota_remaining < 35:
             time_since_last = time.time() - self._last_order_time
             if time_since_last < 16:  # 16s to be safe
                 logging.debug(f"⏱️ Pacing orders (quota={self.api.volume_quota_remaining}, last_order={time_since_last:.1f}s ago)")
@@ -1947,8 +1947,8 @@ class LighterCopilot:
     def _should_skip_open_for_quota(self) -> bool:
         """Skip new opens when quota is low to preserve it for SL orders."""
         quota = self.api.volume_quota_remaining if self.api else None
-        if quota is not None and quota < 15:
-            logging.debug(f"🚫 Skipping new opens (quota={quota} < 15, preserving for SL)")
+        if quota is not None and quota < 35:
+            logging.debug(f"🚫 Skipping new opens (quota={quota} < 35, preserving for SL)")
             return True
         return False
 
@@ -2065,7 +2065,7 @@ class LighterCopilot:
             else:
                 status = "unknown"
             positions_count = len(self.tracker.positions)
-            emoji = "🔴" if (api_quota is not None and api_quota < 15) or (api_quota is None and in_cooldown) else "🟡" if (api_quota is not None and api_quota < 200) else "🟢"
+            emoji = "🔴" if (api_quota is not None and api_quota < 35) or (api_quota is None and in_cooldown) else "🟡" if (api_quota is not None and api_quota < 200) else "🟢"
             await self.alerts.send(
                 f"{emoji} *Quota Status*\n"
                 f"Remaining: {status}\n"

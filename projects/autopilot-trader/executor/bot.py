@@ -178,6 +178,9 @@ class BotConfig:
     stagnation_minutes: int = 60
     dsl_tiers: list = field(default_factory=list)
 
+    # Position management scope
+    track_manual_positions: bool = False
+
     def validate(self) -> list[str]:
         """Validate config values. Returns list of error strings (empty = valid)."""
         errors = []
@@ -1129,6 +1132,10 @@ class LighterCopilot:
         # Kill switch — file-based emergency stop
         self._kill_switch_active = False
         self._kill_switch_path = Path(__file__).parent / "state" / "KILL_SWITCH"
+        # Saved positions for DSL state restoration across restarts
+        self._saved_positions: dict | None = None
+        # BUG-07: Track which market_ids were opened by the bot
+        self.bot_managed_market_ids: set[int] = set()
 
 
     async def start(self):
@@ -1356,10 +1363,19 @@ class LighterCopilot:
                 if success:
                     self._mark_order_submitted()
                     self._reset_volume_quota_backoff()
+
+                    # Verify position exists on exchange (BUG-03 fix)
+                    expected_size = size_usd / current_price
+                    verified_pos = await self._verify_position_opened(mid, expected_size, symbol)
+                    if verified_pos is None:
+                        logging.error(f"❌ Signal open: {symbol} order rejected by exchange (phantom position prevented)")
+                        continue  # Skip to next signal
+
                     self._opened_signals.add(mid)
                     self._pending_sync.add(mid)
-                    # Track in position tracker — entry at current price
-                    actual_size = size_usd / current_price
+                    self.bot_managed_market_ids.add(mid)
+                    # Use actual filled size from exchange (handles partial fills)
+                    actual_size = verified_pos["size"]
                     self.tracker.add_position(mid, symbol, direction, current_price, actual_size, leverage=self.cfg.default_leverage)
                     logging.info(f"📊 Quota remaining: {self.api.volume_quota_remaining}")
                     await self.alerts.send(
@@ -1383,7 +1399,8 @@ class LighterCopilot:
                 return f"Missing or invalid symbol: {symbol!r}"
 
         if action == "open":
-            size_usd = decision.get("size_usd", 0)
+            # IPC-03: use requested_size_usd (new) with fallback to size_usd (legacy)
+            size_usd = decision.get("requested_size_usd", 0) or decision.get("size_usd", 0)
             if not isinstance(size_usd, (int, float)) or size_usd <= 0:
                 return f"Invalid size_usd: {size_usd!r}"
             direction = decision.get("direction")
@@ -1429,33 +1446,27 @@ class LighterCopilot:
         if action not in ("open", "close", "close_all"):
             return  # hold or unknown — do nothing
 
-        if action == "close_all":
-            success = await self._execute_ai_close_all(decision)
+        # Execute inside try/except — ACK + result are written AFTER execution
+        # completes (success or failure), NOT if an uncaught exception occurs.
+        try:
+            if action == "close_all":
+                success = await self._execute_ai_close_all(decision)
+            elif action == "open":
+                success = await self._execute_ai_open(decision)
+            elif action == "close":
+                success = await self._execute_ai_close(decision)
+            else:
+                success = True
+
+            # Write result back for the AI trader
             self._write_ai_result(decision, success=success)
             # Write ACK so AI trader knows this decision was consumed
             ack_path = str(path) + ".ack"
-            try:
-                with open(ack_path, "w") as f:
-                    f.write(decision.get("decision_id", ""))
-            except Exception:
-                pass
-            return
-        elif action == "open":
-            success = await self._execute_ai_open(decision)
-        elif action == "close":
-            success = await self._execute_ai_close(decision)
-        else:
-            success = True
-
-        # Write result back for the AI trader
-        self._write_ai_result(decision, success=success)
-        # Write ACK so AI trader knows this decision was consumed
-        ack_path = str(path) + ".ack"
-        try:
             with open(ack_path, "w") as f:
                 f.write(decision.get("decision_id", ""))
-        except Exception:
-            pass
+        except Exception as e:
+            logging.error(f"❌ AI decision execution crashed — NOT writing ACK: {e}", exc_info=True)
+            # Do NOT write result or ACK — the AI trader will re-deliver the decision
 
     async def _execute_ai_open(self, decision: dict) -> bool:
         """Execute an AI-recommended open. Returns True on success."""
@@ -1465,7 +1476,8 @@ class LighterCopilot:
 
         symbol = decision.get("symbol")
         direction = decision.get("direction")
-        size_usd = decision.get("size_usd", 0)
+        # IPC-03: use requested_size_usd (new) with fallback to size_usd (legacy)
+        size_usd = decision.get("requested_size_usd", 0) or decision.get("size_usd", 0)
 
         if not symbol or not direction or size_usd <= 0:
             logging.warning(f"AI open: invalid decision fields")
@@ -1529,8 +1541,18 @@ class LighterCopilot:
         if success:
             self._mark_order_submitted()
             self._reset_volume_quota_backoff()
+
+            # Verify position exists on exchange (BUG-03 fix)
+            expected_size = size_usd / current_price
+            verified_pos = await self._verify_position_opened(market_id, expected_size, symbol)
+            if verified_pos is None:
+                logging.error(f"❌ AI open: {symbol} order rejected by exchange (phantom position prevented)")
+                return False
+
             self._pending_sync.add(market_id)
-            actual_size = size_usd / current_price
+            self.bot_managed_market_ids.add(market_id)
+            # Use actual filled size from exchange (handles partial fills)
+            actual_size = verified_pos["size"]
             ai_sl_pct = decision.get("stop_loss_pct")
             self.tracker.add_position(market_id, symbol, direction, current_price, actual_size, leverage=self.cfg.default_leverage, sl_pct=ai_sl_pct)
             logging.info(f"📊 Quota remaining: {self.api.volume_quota_remaining}")
@@ -1608,6 +1630,52 @@ class LighterCopilot:
             except Exception as e:
                 logging.warning(f"⚠️ {symbol}: error verifying closure (attempt {attempt + 1}): {e}")
         return False
+
+    async def _verify_position_opened(self, market_id: int, expected_size: float, symbol: str) -> dict | None:
+        """Verify a position exists on the exchange after open_order returns success.
+
+        Retries up to 3 times with 1-second delays (max ~3s total).
+        Returns position dict with actual filled size on success, None on failure.
+
+        Handles:
+        - Exchange rejecting the order after SDK returned success (phantom positions)
+        - Partial fills (actual size < requested size)
+        - EDGE-03: get_positions() returning None on network failure
+        """
+        for attempt in range(1, 4):
+            await asyncio.sleep(1)
+            try:
+                live_positions = await self.api.get_positions()
+                # Handle EDGE-03: get_positions() returns None on failure
+                if live_positions is None:
+                    logging.warning(f"⚠️ {symbol}: get_positions() returned None during open verification (attempt {attempt}/3)")
+                    continue
+                for p in live_positions:
+                    if p["market_id"] == market_id and abs(p.get("size", 0)) > 0.001:
+                        actual_size = p["size"]
+                        # Check for partial fill (allow 10% tolerance for rounding/slippage)
+                        fill_ratio = actual_size / expected_size if expected_size > 0 else 0
+                        if fill_ratio < 0.1:
+                            logging.warning(
+                                f"⚠️ {symbol}: position exists but severely underfilled "
+                                f"(actual={actual_size:.6f}, expected={expected_size:.6f}, fill={fill_ratio:.1%})"
+                            )
+                        elif fill_ratio < 0.9:
+                            logging.info(
+                                f"📊 {symbol}: partial fill detected "
+                                f"(actual={actual_size:.6f}, expected={expected_size:.6f}, fill={fill_ratio:.1%})"
+                            )
+                        else:
+                            logging.info(
+                                f"✅ {symbol}: position verified on exchange "
+                                f"(size={actual_size:.6f}, attempt {attempt})"
+                            )
+                        return p
+                logging.info(f"⏳ {symbol}: position not yet visible on exchange (attempt {attempt}/3)")
+            except Exception as e:
+                logging.warning(f"⚠️ {symbol}: error during open verification (attempt {attempt}/3): {e}")
+        logging.error(f"❌ {symbol}: position NOT found on exchange after 3 verification attempts — order may have been rejected")
+        return None
 
     async def _get_fill_price(self, market_id: int, client_order_index: str | None) -> float | None:
         """Query Lighter API for actual fill price of a closed order."""
@@ -1726,6 +1794,7 @@ class LighterCopilot:
         exit_price = fill_price if fill_price else current_price
         self._log_outcome(pos, exit_price, "ai_close")
         self._recently_closed[mid_to_close] = time.monotonic() + 300  # 5 min phantom guard
+        self.bot_managed_market_ids.discard(mid_to_close)
         self.tracker.remove_position(mid_to_close)
 
         roe = ((exit_price - pos.entry_price) / pos.entry_price * 100) if is_long \
@@ -1787,6 +1856,7 @@ class LighterCopilot:
                     else ((pos.entry_price - current_price) / pos.entry_price * 100)
                 logging.info(f"Emergency closed: {pos.side} {pos.symbol} ROE={roe:+.1f}%")
                 self._recently_closed[mid] = time.monotonic() + 300
+                self.bot_managed_market_ids.discard(mid)
                 self.tracker.remove_position(mid)
                 await self.alerts.send(
                     f"✅ *CLOSE ALL → {pos.side.upper()} {pos.symbol}* closed"
@@ -1880,7 +1950,7 @@ class LighterCopilot:
                     "entry_price": pos.entry_price,
                     "current_price": current_price if current_price and current_price > 0 else pos.entry_price,
                     "size": pos.size,
-                    "size_usd": pos.size * pos.entry_price,
+                    "position_size_usd": pos.size * pos.entry_price,
                 })
             result = {
                 "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -2015,8 +2085,7 @@ class LighterCopilot:
         # Cache mark prices from unrealized_pnl (authoritative exchange price for PnL)
         self.api.update_mark_prices_from_positions(live_positions)
 
-        # Detect new positions (skip markets opened this tick to avoid race)
-        # Two-cycle confirmation: position must appear in 2 consecutive syncs before tracking
+        # Detect new positions (confirmed on first detection)
         for pos in live_positions:
             mid = pos["market_id"]
             if mid in self._pending_sync:
@@ -2031,6 +2100,11 @@ class LighterCopilot:
             # Skip if bot recently closed this position (stale API data)
             if mid in self._recently_closed:
                 logging.debug(f"⏭️ {symbol}: recently closed by bot, ignoring stale API data")
+                continue
+
+            # BUG-07: Skip positions the bot didn't open
+            if not self.cfg.track_manual_positions and mid not in self.bot_managed_market_ids:
+                logging.info(f"↩️ Unmanaged position detected, skipping: {pos['side'].upper()} {symbol} (market_id={mid})")
                 continue
 
             # Check AI close cooldown before re-tracking
@@ -2069,6 +2143,7 @@ class LighterCopilot:
                 self._log_outcome(pos, exit_price, "exchange_close")
                 logging.info(f"Position closed by exchange: {pos.symbol}")
                 self._recently_closed[mid] = time.monotonic() + 300
+                self.bot_managed_market_ids.discard(mid)
                 self.tracker.remove_position(mid)
 
         # Periodic quota status alert (every 20 minutes) — after position sync for accurate counts
@@ -2094,6 +2169,9 @@ class LighterCopilot:
                 f"Positions: {positions_count}\n"
                 f"Cooldown: {'active' if in_cooldown else 'none'}"
             )
+
+        # 1.4. Reconcile saved DSL state with detected positions (first tick after restart)
+        self._reconcile_positions(live_positions)
 
         # 1.5. Process signals — AI mode or rule-based
         # NOTE: Moved AFTER position sync/confirmation so tracker is populated
@@ -2269,6 +2347,7 @@ class LighterCopilot:
             exit_price = fill_price if fill_price else price
             self._log_outcome(pos, exit_price, f"dsl_{action}")
             self._recently_closed[mid] = time.monotonic() + 300  # 5 min phantom guard
+            self.bot_managed_market_ids.discard(mid)
             self.tracker.remove_position(mid)
             # Post-close completion alert
             roe_pct = ((exit_price - pos.entry_price) / pos.entry_price * 100) if is_long else ((pos.entry_price - exit_price) / pos.entry_price * 100)
@@ -2354,7 +2433,24 @@ class LighterCopilot:
 
         self._log_outcome(pos, price, action)
         self._recently_closed[mid] = time.monotonic() + 300  # 5 min phantom guard
+        self.bot_managed_market_ids.discard(mid)
         self.tracker.remove_position(mid)
+
+    def _serialize_dsl_state(self, dsl: DSLState) -> dict:
+        """Serialize DSLState to a JSON-compatible dict."""
+        return {
+            "side": dsl.side,
+            "entry_price": dsl.entry_price,
+            "leverage": dsl.leverage,
+            "high_water_roe": dsl.high_water_roe,
+            "high_water_price": dsl.high_water_price,
+            "high_water_time": dsl.high_water_time.isoformat() if dsl.high_water_time else None,
+            "current_tier_trigger": dsl.current_tier.trigger_pct if dsl.current_tier else None,
+            "breach_count": dsl.breach_count,
+            "locked_floor_roe": dsl.locked_floor_roe,
+            "stagnation_active": dsl.stagnation_active,
+            "stagnation_started": dsl.stagnation_started.isoformat() if dsl.stagnation_started else None,
+        }
 
     def _save_state(self):
         """Persist critical ephemeral state to disk for crash/restart recovery."""
@@ -2369,6 +2465,25 @@ class LighterCopilot:
             "close_attempt_cooldown": {s: max(0, t - now) for s, t in self._close_attempt_cooldown.items()},
             "dsl_close_attempts": self._dsl_close_attempts,
             "dsl_close_attempt_cooldown": {s: max(0, t - now) for s, t in self._dsl_close_attempt_cooldown.items()},
+            # BUG-07: Which market_ids were opened by the bot
+            "bot_managed_market_ids": sorted(self.bot_managed_market_ids),
+            # Persist position state + DSL state for restart recovery
+            "positions": {
+                str(mid): {
+                    "market_id": mid,
+                    "symbol": pos.symbol,
+                    "side": pos.side,
+                    "entry_price": pos.entry_price,
+                    "size": pos.size,
+                    "leverage": pos.dsl_state.leverage if pos.dsl_state else self.cfg.default_leverage,
+                    "sl_pct": pos.sl_pct,
+                    "high_water_mark": pos.high_water_mark,
+                    "trailing_active": pos.trailing_active,
+                    "trailing_sl_level": pos.trailing_sl_level,
+                    "dsl": self._serialize_dsl_state(pos.dsl_state) if pos.dsl_state else None,
+                }
+                for mid, pos in self.tracker.positions.items()
+            },
         }
         try:
             state_path = Path("state/bot_state.json")
@@ -2414,6 +2529,13 @@ class LighterCopilot:
                 if remaining > 0:
                     self._dsl_close_attempt_cooldown[symbol] = now + remaining
 
+            # BUG-07: Load bot-managed market IDs
+            managed_ids = state.get("bot_managed_market_ids", [])
+            self.bot_managed_market_ids = set(managed_ids)
+
+            # Load saved positions for DSL state restoration (applied after exchange detection)
+            self._saved_positions = state.get("positions") or None
+
             restored = []
             if self._last_ai_decision_ts:
                 restored.append(f"ai_decision_ts={self._last_ai_decision_ts}")
@@ -2423,6 +2545,8 @@ class LighterCopilot:
                 restored.append(f"ai_close_cooldown={len(self._ai_close_cooldown)}")
             if self._close_attempts:
                 restored.append(f"close_attempts={len(self._close_attempts)}")
+            if self._saved_positions:
+                restored.append(f"saved_positions={len(self._saved_positions)}")
             if restored:
                 logging.info(f"🔄 Bot state restored: {', '.join(restored)}")
 
@@ -2442,6 +2566,88 @@ class LighterCopilot:
                     pass
         except Exception as e:
             logging.warning(f"Failed to load bot state: {e}")
+
+    def _restore_dsl_state(self, dsl_data: dict, pos: TrackedPosition):
+        """Restore saved DSL state onto a live TrackedPosition.
+
+        Overwrites all tracked fields on the existing DSLState from saved data.
+        The DSLState object is already constructed by tracker.add_position() with
+        correct entry_price/side/leverage — we just restore the progress fields.
+        """
+        if not dsl_data or not pos.dsl_state:
+            return
+        try:
+            saved_tier_trigger = dsl_data.get("current_tier_trigger")
+            tier = None
+            if saved_tier_trigger is not None:
+                for t in self.tracker.dsl_cfg.tiers:
+                    if t.trigger_pct == saved_tier_trigger:
+                        tier = t
+                        break
+
+            saved_hw_time = dsl_data.get("high_water_time")
+            hw_time = datetime.fromisoformat(saved_hw_time) if saved_hw_time else None
+            saved_stag_time = dsl_data.get("stagnation_started")
+            stag_time = datetime.fromisoformat(saved_stag_time) if saved_stag_time else None
+
+            pos.dsl_state.high_water_roe = dsl_data.get("high_water_roe", 0.0)
+            pos.dsl_state.high_water_price = dsl_data.get("high_water_price", 0.0)
+            pos.dsl_state.high_water_time = hw_time
+            pos.dsl_state.current_tier = tier
+            pos.dsl_state.breach_count = dsl_data.get("breach_count", 0)
+            pos.dsl_state.locked_floor_roe = dsl_data.get("locked_floor_roe")
+            pos.dsl_state.stagnation_active = dsl_data.get("stagnation_active", False)
+            pos.dsl_state.stagnation_started = stag_time
+
+            logging.info(
+                f"🔄 Restored DSL state for {pos.symbol}: "
+                f"HW_ROE={pos.dsl_state.high_water_roe:+.1f}%, "
+                f"Tier={tier.trigger_pct if tier else 'none'}, "
+                f"Floor={pos.dsl_state.locked_floor_roe}, "
+                f"Breaches={pos.dsl_state.breach_count}"
+            )
+        except Exception as e:
+            logging.warning(f"Failed to restore DSL state for {pos.symbol}: {e}")
+
+    def _reconcile_positions(self, live_positions: list[dict] | None):
+        """Reconcile saved positions with live exchange positions.
+
+        Called once per tick (no-op after first successful reconciliation).
+        Restores saved DSLState for positions that match the exchange.
+
+        Saved but not on exchange → dropped (position was closed).
+        On exchange but not saved → stays with fresh DSLState (new position).
+        Both → DSLState restored from saved data.
+        """
+        if not self._saved_positions or live_positions is None:
+            return
+
+        live_mids = {p["market_id"] for p in live_positions}
+
+        for mid_str, saved_pos in self._saved_positions.items():
+            try:
+                mid = int(mid_str)
+            except (ValueError, TypeError):
+                continue
+
+            if mid in live_mids and mid in self.tracker.positions:
+                # Position exists on both exchange and tracker — restore DSL state
+                pos = self.tracker.positions[mid]
+                dsl_data = saved_pos.get("dsl")
+                if dsl_data:
+                    self._restore_dsl_state(dsl_data, pos)
+                # Also restore legacy trailing state
+                if saved_pos.get("trailing_sl_level") is not None:
+                    pos.trailing_sl_level = saved_pos["trailing_sl_level"]
+                if saved_pos.get("trailing_active"):
+                    pos.trailing_active = True
+                if saved_pos.get("high_water_mark"):
+                    pos.high_water_mark = max(pos.high_water_mark, saved_pos["high_water_mark"])
+            elif mid not in live_mids:
+                logging.info(f"🗑️ Saved position {saved_pos.get('symbol', mid)} no longer on exchange — dropped")
+
+        # Clear after reconciliation (one-time operation per restart)
+        self._saved_positions = None
 
     def _shutdown(self):
         logging.info("Shutdown requested...")

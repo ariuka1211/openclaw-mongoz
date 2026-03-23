@@ -350,13 +350,13 @@ class AITrader:
                 "reasoning": decision.get("reasoning", ""),
                 "confidence": decision.get("confidence", 0),
             }
-            # Convert size_pct_equity to size_usd for the bot (only for open actions)
+            # Convert size_pct_equity to requested_size_usd for the bot (only for open actions)
             if decision.get("action") == "open" and decision.get("size_pct_equity") is not None:
                 signals, signals_config = self.context_builder.read_signals()
                 equity = signals_config.get("accountEquity", 1000)
-                output["size_usd"] = equity * decision["size_pct_equity"] / 100
+                output["requested_size_usd"] = equity * decision["size_pct_equity"] / 100
             else:
-                output["size_usd"] = None
+                output["requested_size_usd"] = None
 
             self.decision_file.parent.mkdir(parents=True, exist_ok=True)
             atomic_write(self.decision_file, output)

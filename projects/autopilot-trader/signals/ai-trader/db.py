@@ -151,7 +151,11 @@ class DecisionDB:
                     json.dumps(outcome.get("decision_snapshot", {})),
                 ),
             )
-            self._conn.commit()
+            try:
+                self._conn.commit()
+            except sqlite3.Error as e:
+                log.error(f"Failed to commit outcome for {outcome.get('symbol')}: {e}")
+                raise
 
     def log_alert(self, level: str, message: str):
         now = datetime.now(timezone.utc).isoformat()

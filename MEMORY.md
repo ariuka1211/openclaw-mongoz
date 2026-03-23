@@ -73,3 +73,10 @@
 - [fact] (trading) Lighter REST API auth helper implemented: `LighterAuthManager` class in `auth_helper.py` with in-memory + disk caching, auto-refreshes 7 days before 30-day token expiry, tokens stored with 600 permissions. Ready for integration into `bot.py` pending John's approval. — trading bot development
 - [open] (trading) Critical bug: bot flips position direction after restart — positions correctly detected as LONG before restart, re-detected as SHORT after restart (e.g. RESOLV/MORPHO/ROBO at 17:38). Root cause in position sync logic around bot.py lines 611-612 where `sign` field extraction fails during post-restart re-sync. This is distinct from the earlier `pos.position` vs `pos.sign` bug. — trading bot debug
 
+
+## Session Extract — 2026-03-22 [auto]
+
+- [decision] (trading) Implemented quota-aware exponential backoff for trading bot: 60s → 120s → 300s (capped) when volume quota exhausted. VolumeQuotaError exception raised by API methods and caught at all order callers. — trading bot development, branch feature/quota-cooldown
+- [decision] (trading) Added quota prioritization: when quota < 50 remaining, new opens are blocked to preserve quota for critical SL orders. TP execution also restricted in emergency mode. — trading bot development, branch feature/quota-prioritization
+- [fact] (trading) Prediction market contrarian signal explored: Minara Polymarket workflow that fades 85%+ odds skews is theoretically sound per prediction market literature, but current implementation is vibes-based LLM reasoning not quantitative. Needs backtesting of skew thresholds and liquidity factors. — from John
+

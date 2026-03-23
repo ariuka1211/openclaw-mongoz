@@ -7,7 +7,7 @@
   "max_signals": 15,
   "cycle_interval_seconds": 120,
   "max_consecutive_failures": 5,
-  "max_rejection_halt_count": 5,
+  "max_rejection_halt_count": 15,
   "rejection_halt_window_minutes": 30,
 
   "llm": {
@@ -29,7 +29,7 @@
     "min_scanner_score": 60,
     "required_stop_loss": true,
     "min_stop_loss_pct": 0.5,
-    "max_orders_per_hour": 12,
+    "max_orders_per_hour": 50,
     "cooldown_after_loss_seconds": 300
   },
 

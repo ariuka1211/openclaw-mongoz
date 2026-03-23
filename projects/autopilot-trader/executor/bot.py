@@ -707,12 +707,12 @@ class LighterAPI:
                 continue
             # Reverse-engineer mark price from unrealized PnL
             # For longs: pnl = size * (mark - entry) → mark = entry + pnl/size
-            # For shorts: pnl = size * (entry - mark) → mark = entry - pnl/size
-            # But pnl sign already encodes direction (positive = profit),
-            # and size is signed (positive = long, negative = short).
-            # Unified formula: mark = entry + pnl / abs(size)
+            # For shorts: pnl = abs(size) * (entry - mark) → mark = entry - pnl/abs(size)
             abs_size = abs(size)
-            mark_price = entry + (pnl / abs_size)
+            if pos.get("side") == "short":
+                mark_price = entry - (pnl / abs_size)
+            else:
+                mark_price = entry + (pnl / abs_size)
             if mark_price > 0:
                 self._mark_prices[mid] = mark_price
 
@@ -1353,6 +1353,36 @@ class LighterCopilot:
                 logging.warning(f"⚠️ {symbol}: error verifying closure (attempt {attempt + 1}): {e}")
         return False
 
+    async def _get_fill_price(self, market_id: int, client_order_index: str | None) -> float | None:
+        """Query Lighter API for actual fill price of a closed order."""
+        if not client_order_index:
+            return None
+        try:
+            from auth_helper import LighterAuthManager
+            if not hasattr(self, '_auth_manager'):
+                self._auth_manager = LighterAuthManager(
+                    signer=self.api._signer,
+                    account_index=self.cfg.account_index
+                )
+            auth = self._auth_manager.get_auth_token()
+            import aiohttp
+            url = f'https://mainnet.zklighter.elliot.ai/api/v1/accountInactiveOrders?account_index={self.cfg.account_index}&limit=20&auth={auth}'
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as resp:
+                    data = await resp.json()
+                    if data.get("code") == 200 and "orders" in data:
+                        for o in data["orders"]:
+                            coi = str(o.get("client_order_index", ""))
+                            if coi == str(client_order_index):
+                                filled_base = float(o.get("filled_base_amount", 0))
+                                filled_quote = float(o.get("filled_quote_amount", 0))
+                                if filled_base > 0:
+                                    return filled_quote / filled_base
+            return None
+        except Exception as e:
+            logging.debug(f"Could not fetch fill price: {e}")
+            return None
+
     async def _execute_ai_close(self, decision: dict) -> bool:
         """Execute an AI-recommended close. Returns True on success (position actually closed)."""
         symbol = decision.get("symbol")
@@ -1418,12 +1448,14 @@ class LighterCopilot:
         self._close_attempts.pop(symbol, None)
         self._close_attempt_cooldown.pop(symbol, None)
 
-        self._log_outcome(pos, current_price, "ai_close")
+        fill_price = await self._get_fill_price(mid_to_close, sl_coi)
+        exit_price = fill_price if fill_price else current_price
+        self._log_outcome(pos, exit_price, "ai_close")
         self._recently_closed[mid_to_close] = time.monotonic() + 300  # 5 min phantom guard
         self.tracker.remove_position(mid_to_close)
 
-        roe = ((current_price - pos.entry_price) / pos.entry_price * 100) if is_long \
-            else ((pos.entry_price - current_price) / pos.entry_price * 100)
+        roe = ((exit_price - pos.entry_price) / pos.entry_price * 100) if is_long \
+            else ((pos.entry_price - exit_price) / pos.entry_price * 100)
 
         await self.alerts.send(
             f"🤖 *AI → CLOSED*\n"
@@ -1798,7 +1830,9 @@ class LighterCopilot:
             else:
                 logging.warning(f"⚠️ {pos.symbol}: DSL SL order rejected — keeping in tracker")
                 return  # Don't remove from tracker, will retry next tick
-            self._log_outcome(pos, price, f"dsl_{action}")
+            fill_price = await self._get_fill_price(mid, sl_coi)
+            exit_price = fill_price if fill_price else price
+            self._log_outcome(pos, exit_price, f"dsl_{action}")
             self._recently_closed[mid] = time.monotonic() + 300  # 5 min phantom guard
             self.tracker.remove_position(mid)
             return
@@ -1830,6 +1864,8 @@ class LighterCopilot:
                 if not position_closed:
                     logging.warning(f"⚠️ {pos.symbol}: SL submitted but position still open — keeping in tracker")
                     return  # Don't remove from tracker, will retry next tick
+                fill_price = await self._get_fill_price(mid, sl_coi)
+                price = fill_price if fill_price else price
             else:
                 logging.warning(f"⚠️ {pos.symbol}: SL order rejected — keeping in tracker")
                 return  # Don't remove from tracker, will retry next tick

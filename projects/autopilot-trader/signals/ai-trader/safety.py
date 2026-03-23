@@ -113,12 +113,16 @@ class SafetyLayer:
         if any(p.get("symbol") == symbol for p in positions):
             reasons.append(f"already have position in {symbol} (different direction)")
 
-        # Rule 2: Max 20x leverage
-        if leverage > self.max_leverage:
+        # Rule 2: Max 20x leverage (must be positive)
+        if leverage <= 0:
+            reasons.append(f"leverage {leverage}x must be positive")
+        elif leverage > self.max_leverage:
             reasons.append(f"leverage {leverage}x > max {self.max_leverage}x")
 
-        # Rule 3: Max 5% equity per position
-        if size_pct > self.max_size_pct_equity:
+        # Rule 3: Max 5% equity per position (must be positive)
+        if size_pct <= 0:
+            reasons.append(f"size {size_pct}% must be positive")
+        elif size_pct > self.max_size_pct_equity:
             reasons.append(f"size {size_pct}% > max {self.max_size_pct_equity}%")
 
         # Rule 12: All positions need stop losses

@@ -179,6 +179,10 @@ class AITrader:
                     log.critical(f"🚨 Emergency halt — {self.MAX_CONSECUTIVE_FAILURES}+ consecutive failures")
                     self.db.log_alert("critical", f"Emergency halt — {self.MAX_CONSECUTIVE_FAILURES}+ consecutive failures")
 
+            # If already halted, skip kill switch check and break out
+            if self.emergency_halt:
+                break
+
             # Check kill switches
             signals, signals_config = self.context_builder.read_signals()
             equity = signals_config.get("accountEquity", 0)
@@ -376,6 +380,9 @@ class AITrader:
 
     def _emergency_halt(self, reason: str):
         """Write close_all decision, then set emergency_halt flag."""
+        if self.emergency_halt:
+            log.debug(f"Emergency halt already triggered, ignoring: {reason}")
+            return
         log.critical(f"🚨 Emergency halt: {reason}")
         try:
             close_all = {

@@ -302,7 +302,7 @@ class DecisionDB:
         ]
 
     def purge_old_data(self, keep_days: int = 7):
-        """Remove decisions and alerts older than keep_days. Outcomes are kept (they're small and useful)."""
+        """Remove decisions, alerts, and outcomes older than keep_days."""
         cutoff = datetime.now(timezone.utc).isoformat()[:10]  # today
         with self._lock:
             # Delete old decisions
@@ -322,12 +322,17 @@ class DecisionDB:
                 "DELETE FROM alerts WHERE timestamp < datetime('now', '-30 days')",
             )
             stale_alerts = cur.rowcount
+            # Delete outcomes older than 30 days
+            cur = self._conn.execute(
+                "DELETE FROM outcomes WHERE timestamp < datetime('now', '-30 days')",
+            )
+            outcomes_deleted = cur.rowcount
             self._conn.commit()
             # Vacuum to reclaim space
             self._conn.execute("VACUUM")
-            total = decisions_deleted + alerts_deleted + stale_alerts
+            total = decisions_deleted + alerts_deleted + stale_alerts + outcomes_deleted
             if total > 0:
-                log.info(f"Purged: {decisions_deleted} decisions, {alerts_deleted + stale_alerts} alerts")
+                log.info(f"Purged: {decisions_deleted} decisions, {alerts_deleted + stale_alerts} alerts, {outcomes_deleted} outcomes")
 
     def close(self):
         with self._lock:

@@ -121,6 +121,8 @@ class AITrader:
         self._cycles_skipped: int = 0
         # IPC-02: Track last sent decision_id for result correlation
         self._last_sent_decision_id = None
+        # ACK timeout — if decision not ACKed after this many seconds, treat as stale
+        self._ack_timeout_seconds = config.get("ack_timeout_seconds", 300)
 
         # Paths
         self.decision_file = Path(_config_dir) / config["decision_file"]
@@ -282,7 +284,7 @@ class AITrader:
         # 6. Execute (if approved and not hold)
         executed = False
         if safe and decision.get("action") != "hold":
-            executed = await self._send_to_bot(decision)
+            executed = await self._send_to_bot(decision, equity)
             if executed:
                 # IPC-02: Wait briefly for bot result, then correlate
                 await asyncio.sleep(3)
@@ -322,7 +324,7 @@ class AITrader:
             return None
         return result
 
-    async def _send_to_bot(self, decision: dict) -> bool:
+    async def _send_to_bot(self, decision: dict, equity: float = 1000) -> bool:
         """Write decision to shared JSON file for bot to consume.
 
         IPC protocol (atomic, race-safe):
@@ -348,8 +350,28 @@ class AITrader:
                         acked_id = ""
 
                     if current_id and acked_id != current_id:
-                        log.info(f"⏳ Bot hasn't processed decision {current_id} yet (acked={acked_id}), skipping write")
-                        return False
+                        # Check if decision is stale (ACK timeout)
+                        try:
+                            current_ts = current.get("timestamp", "")
+                            if current_ts:
+                                decision_dt = datetime.fromisoformat(current_ts.replace("Z", "+00:00"))
+                                age_seconds = (datetime.now(timezone.utc) - decision_dt).total_seconds()
+                                if age_seconds > self._ack_timeout_seconds:
+                                    log.warning(
+                                        f"⚠️ Decision {current_id} is stale (age={age_seconds:.0f}s > "
+                                        f"timeout={self._ack_timeout_seconds}s), forcing overwrite"
+                                    )
+                                    prev_decision_id = None  # Skip prev tracking for stale override
+                                    # Don't return False — allow write to proceed
+                                else:
+                                    log.info(f"⏳ Bot hasn't processed decision {current_id} yet (acked={acked_id}), skipping write")
+                                    return False
+                            else:
+                                log.info(f"⏳ Bot hasn't processed decision {current_id} yet (acked={acked_id}), skipping write")
+                                return False
+                        except (ValueError, TypeError):
+                            log.info(f"⏳ Bot hasn't processed decision {current_id} yet (acked={acked_id}), skipping write")
+                            return False
 
                     # Capture ACKed ID for inclusion in new decision (bot-side verification)
                     if current_id and acked_id == current_id:
@@ -372,8 +394,6 @@ class AITrader:
             }
             # Convert size_pct_equity to requested_size_usd for the bot (only for open actions)
             if decision.get("action") == "open" and decision.get("size_pct_equity") is not None:
-                signals, signals_config = self.context_builder.read_signals()
-                equity = signals_config.get("accountEquity", 1000)
                 output["requested_size_usd"] = equity * decision["size_pct_equity"] / 100
             else:
                 output["requested_size_usd"] = None
@@ -433,7 +453,14 @@ class AITrader:
                 "prev_decision_id": None,  # Emergency halt bypasses normal IPC flow
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "action": "close_all",
+                "symbol": None,
+                "direction": "long",
+                "size_pct_equity": None,
+                "leverage": 1,
+                "stop_loss_pct": None,
                 "reasoning": f"Emergency halt triggered: {reason}",
+                "confidence": 1.0,
+                "requested_size_usd": None,
                 "positions": [],
             }
             # Clean up ACK file so bot can process emergency halt immediately

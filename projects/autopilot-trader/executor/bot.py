@@ -1099,6 +1099,7 @@ class LighterCopilot:
         # DSL close circuit breaker — mirror of AI close tracking
         self._dsl_close_attempts: dict[str, int] = {}  # symbol → consecutive DSL close attempts
         self._dsl_close_attempt_cooldown: dict[str, float] = {}  # symbol → monotonic() deadline
+        self._sl_retry_delays: list[int] = [15, 60, 300, 900]  # 15s, 1min, 5min, 15min
         # Volume quota cooldown
         self._volume_quota_cooldown_until: float = 0  # timestamp when cooldown expires
         self._volume_quota_backoff_seconds: int = 60  # current backoff duration
@@ -1618,10 +1619,22 @@ class LighterCopilot:
             sl_success, sl_coi = await self.api.execute_sl(mid_to_close, pos.size, current_price, is_long)
         except VolumeQuotaError:
             self._start_volume_quota_cooldown()
-            logging.warning(f"⚠️ AI close: {symbol} volume quota exhausted — cooldown started, keeping in tracker")
+            # Track attempts with graduated delay
+            attempts = self._close_attempts.get(symbol, 0) + 1
+            self._close_attempts[symbol] = attempts
+            delay_idx = min(attempts - 1, len(self._sl_retry_delays) - 1)
+            retry_delay = self._sl_retry_delays[delay_idx]
+            self._close_attempt_cooldown[symbol] = time.monotonic() + retry_delay
+            logging.warning(f"⚠️ AI close: {symbol} volume quota exhausted (attempt {attempts}, retry in {retry_delay}s)")
             return False
         if not sl_success:
-            logging.warning(f"⚠️ Failed to submit close order for {pos.side} {symbol} — keeping in tracker")
+            # Track attempts with graduated delay
+            attempts = self._close_attempts.get(symbol, 0) + 1
+            self._close_attempts[symbol] = attempts
+            delay_idx = min(attempts - 1, len(self._sl_retry_delays) - 1)
+            retry_delay = self._sl_retry_delays[delay_idx]
+            self._close_attempt_cooldown[symbol] = time.monotonic() + retry_delay
+            logging.warning(f"⚠️ Failed to submit close order for {pos.side} {symbol} (attempt {attempts}, retry in {retry_delay}s)")
             return False
 
         # Order submitted — now verify it actually filled by polling the API
@@ -2073,7 +2086,13 @@ class LighterCopilot:
                 sl_success, sl_coi = await self.api.execute_sl(mid, pos.size, price, is_long)
             except VolumeQuotaError:
                 self._start_volume_quota_cooldown()
-                logging.warning(f"⚠️ DSL close: {pos.symbol} volume quota exhausted — cooldown started")
+                # Track attempts with graduated delay (same as failed SL)
+                attempts = self._dsl_close_attempts.get(pos.symbol, 0) + 1
+                self._dsl_close_attempts[pos.symbol] = attempts
+                delay_idx = min(attempts - 1, len(self._sl_retry_delays) - 1)
+                retry_delay = self._sl_retry_delays[delay_idx]
+                self._dsl_close_attempt_cooldown[pos.symbol] = time.monotonic() + retry_delay
+                logging.warning(f"⚠️ DSL close: {pos.symbol} volume quota exhausted (attempt {attempts}, retry in {retry_delay}s)")
                 return  # Don't remove from tracker, will retry after cooldown
             if sl_success:
                 position_closed = await self._verify_position_closed(mid, pos.symbol)
@@ -2100,8 +2119,26 @@ class LighterCopilot:
                 self._dsl_close_attempts.pop(pos.symbol, None)
                 self._dsl_close_attempt_cooldown.pop(pos.symbol, None)
             else:
-                logging.warning(f"⚠️ {pos.symbol}: DSL SL order rejected — keeping in tracker")
-                return  # Don't remove from tracker, will retry next tick
+                # SL order failed (rate-limited or rejected) — track attempts with graduated delay
+                attempts = self._dsl_close_attempts.get(pos.symbol, 0) + 1
+                self._dsl_close_attempts[pos.symbol] = attempts
+                delay_idx = min(attempts - 1, len(self._sl_retry_delays) - 1)
+                retry_delay = self._sl_retry_delays[delay_idx]
+                self._dsl_close_attempt_cooldown[pos.symbol] = time.monotonic() + retry_delay
+
+                logging.warning(f"⚠️ {pos.symbol}: DSL SL order rejected (attempt {attempts}, retry in {retry_delay}s)")
+
+                if attempts >= 4:
+                    # After 3 graduated retries, alert for manual intervention
+                    await self.alerts.send(
+                        f"🚨 *DSL SL FAILED ×{attempts}*\n"
+                        f"{pos.side.upper()} {pos.symbol}\n"
+                        f"ROE: {roe:+.1f}%\n"
+                        f"Action: {labels.get(action, action)}\n"
+                        f"Retry delays exhausted. Next retry in 15min.\n"
+                        f"MANUAL INTERVENTION may be needed."
+                    )
+                return  # Don't remove from tracker, will retry after cooldown
             fill_price = await self._get_fill_price(mid, sl_coi)
             exit_price = fill_price if fill_price else price
             self._log_outcome(pos, exit_price, f"dsl_{action}")
@@ -2153,7 +2190,13 @@ class LighterCopilot:
                 sl_success, sl_coi = await self.api.execute_sl(mid, pos.size, price, is_long)
             except VolumeQuotaError:
                 self._start_volume_quota_cooldown()
-                logging.warning(f"⚠️ SL: {pos.symbol} volume quota exhausted — cooldown started")
+                # Track attempts with graduated delay (same as DSL path)
+                attempts = self._dsl_close_attempts.get(pos.symbol, 0) + 1
+                self._dsl_close_attempts[pos.symbol] = attempts
+                delay_idx = min(attempts - 1, len(self._sl_retry_delays) - 1)
+                retry_delay = self._sl_retry_delays[delay_idx]
+                self._dsl_close_attempt_cooldown[pos.symbol] = time.monotonic() + retry_delay
+                logging.warning(f"⚠️ SL: {pos.symbol} volume quota exhausted (attempt {attempts}, retry in {retry_delay}s)")
                 return  # Don't remove from tracker, will retry after cooldown
             if sl_success:
                 position_closed = await self._verify_position_closed(mid, pos.symbol)
@@ -2163,8 +2206,25 @@ class LighterCopilot:
                 fill_price = await self._get_fill_price(mid, sl_coi)
                 price = fill_price if fill_price else price
             else:
-                logging.warning(f"⚠️ {pos.symbol}: SL order rejected — keeping in tracker")
-                return  # Don't remove from tracker, will retry next tick
+                # SL order failed (rate-limited or rejected) — track attempts with graduated delay
+                attempts = self._dsl_close_attempts.get(pos.symbol, 0) + 1
+                self._dsl_close_attempts[pos.symbol] = attempts
+                delay_idx = min(attempts - 1, len(self._sl_retry_delays) - 1)
+                retry_delay = self._sl_retry_delays[delay_idx]
+                self._dsl_close_attempt_cooldown[pos.symbol] = time.monotonic() + retry_delay
+                logging.warning(f"⚠️ {pos.symbol}: SL order rejected (attempt {attempts}, retry in {retry_delay}s)")
+
+                if attempts >= 4:
+                    roe_pct = ((price - pos.entry_price) / pos.entry_price * 100) if is_long else ((pos.entry_price - price) / pos.entry_price * 100)
+                    await self.alerts.send(
+                        f"🚨 *SL FAILED ×{attempts}*\n"
+                        f"{pos.side.upper()} {pos.symbol}\n"
+                        f"ROE: {roe_pct:+.1f}%\n"
+                        f"Action: {labels.get(action, action)}\n"
+                        f"Retry delays exhausted. Next retry in 15min.\n"
+                        f"MANUAL INTERVENTION may be needed."
+                    )
+                return  # Don't remove from tracker, will retry after cooldown
 
         self._log_outcome(pos, price, action)
         self._recently_closed[mid] = time.monotonic() + 300  # 5 min phantom guard

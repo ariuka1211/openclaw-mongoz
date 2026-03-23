@@ -1196,6 +1196,9 @@ class LighterCopilot:
             f"SL: trailing {self.cfg.sl_pct}%"
         )
 
+        # Restore ephemeral state from disk
+        self._load_state()
+
         loop = asyncio.get_event_loop()
         for sig in (signal.SIGINT, signal.SIGTERM):
             loop.add_signal_handler(sig, self._shutdown)
@@ -2014,31 +2017,18 @@ class LighterCopilot:
                     logging.warning(f"🧊 DETECTED {symbol} from Lighter API but AI close cooldown active ({remaining}s) - API lag? IGNORING")
                 continue
 
-            # Two-cycle confirmation: first appearance → pending, second → track
-            if mid not in self._pending_positions:
-                self._pending_positions[mid] = pos
-                logging.info(f"⏳ {symbol}: new position detected (pending confirmation, will track after 2nd sync)")
-                continue
-
-            # Second consecutive sync — confirm and track
-            logging.info(f"📌 API POSITION CONFIRMED: {pos['side'].upper()} {symbol}")
+            # Confirm on first detection — phantom guard via _recently_closed + _ai_close_cooldown already handles false positives
+            logging.info(f"📌 API POSITION DETECTED: {pos['side'].upper()} {symbol}")
             self.tracker.add_position(
                 mid, pos["symbol"], pos["side"], pos["entry_price"], pos["size"],
                 leverage=pos.get("leverage")
             )
             logging.info(f"📊 Quota remaining: {self.api.volume_quota_remaining}")
-            self._pending_positions.pop(mid, None)
             await self.alerts.send(
-                f"📌 *New position confirmed*\n"
+                f"📌 *New position detected*\n"
                 f"{pos['side'].upper()} {pos['symbol']} @ ${pos['entry_price']:,.2f}\n"
                 f"Size: {pos['size']}"
             )
-
-        # Clean up pending positions that disappeared (were phantom)
-        disappeared = set(self._pending_positions.keys()) - live_mids
-        for mid in disappeared:
-            phantom = self._pending_positions.pop(mid)
-            logging.debug(f"👻 Phantom position gone: {phantom.get('symbol', f'MKT{mid}')}")
 
         # Detect closed positions
         for mid in list(self.tracker.positions.keys()):
@@ -2096,6 +2086,9 @@ class LighterCopilot:
 
         # Clear pending sync — must be outside position loop so it runs even on exceptions
         self._pending_sync.clear()
+
+        # Persist state for crash/restart recovery
+        self._save_state()
 
     async def _process_position_tick(self, mid: int, pos: TrackedPosition):
         """Process a single position's tick — fetch price, evaluate triggers, execute if needed."""
@@ -2329,9 +2322,82 @@ class LighterCopilot:
         self._recently_closed[mid] = time.monotonic() + 300  # 5 min phantom guard
         self.tracker.remove_position(mid)
 
+    def _save_state(self):
+        """Persist critical ephemeral state to disk for crash/restart recovery."""
+        now = time.monotonic()
+        state = {
+            "last_ai_decision_ts": self._last_ai_decision_ts,
+            "last_signal_timestamp": self._last_signal_timestamp,
+            # Convert monotonic deadlines to remaining seconds for portability
+            "recently_closed": {str(mid): max(0, t - now) for mid, t in self._recently_closed.items()},
+            "ai_close_cooldown": {s: max(0, t - now) for s, t in self._ai_close_cooldown.items()},
+            "close_attempts": self._close_attempts,
+            "close_attempt_cooldown": {s: max(0, t - now) for s, t in self._close_attempt_cooldown.items()},
+            "dsl_close_attempts": self._dsl_close_attempts,
+            "dsl_close_attempt_cooldown": {s: max(0, t - now) for s, t in self._dsl_close_attempt_cooldown.items()},
+        }
+        try:
+            state_path = Path("state/bot_state.json")
+            state_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = str(state_path) + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump(state, f, indent=2)
+            os.replace(tmp, str(state_path))
+        except Exception as e:
+            logging.debug(f"Failed to save bot state: {e}")
+
+    def _load_state(self):
+        """Restore critical ephemeral state from disk after restart."""
+        state_path = Path("state/bot_state.json")
+        if not state_path.exists():
+            return
+        try:
+            with open(state_path) as f:
+                state = json.load(f)
+            now = time.monotonic()
+
+            self._last_ai_decision_ts = state.get("last_ai_decision_ts")
+            self._last_signal_timestamp = state.get("last_signal_timestamp")
+
+            # Convert remaining seconds back to monotonic deadlines
+            for mid_str, remaining in state.get("recently_closed", {}).items():
+                if remaining > 0:
+                    self._recently_closed[int(mid_str)] = now + remaining
+
+            for symbol, remaining in state.get("ai_close_cooldown", {}).items():
+                if remaining > 0:
+                    self._ai_close_cooldown[symbol] = now + remaining
+
+            self._close_attempts = state.get("close_attempts", {})
+
+            for symbol, remaining in state.get("close_attempt_cooldown", {}).items():
+                if remaining > 0:
+                    self._close_attempt_cooldown[symbol] = now + remaining
+
+            self._dsl_close_attempts = state.get("dsl_close_attempts", {})
+
+            for symbol, remaining in state.get("dsl_close_attempt_cooldown", {}).items():
+                if remaining > 0:
+                    self._dsl_close_attempt_cooldown[symbol] = now + remaining
+
+            restored = []
+            if self._last_ai_decision_ts:
+                restored.append(f"ai_decision_ts={self._last_ai_decision_ts}")
+            if self._recently_closed:
+                restored.append(f"recently_closed={len(self._recently_closed)}")
+            if self._ai_close_cooldown:
+                restored.append(f"ai_close_cooldown={len(self._ai_close_cooldown)}")
+            if self._close_attempts:
+                restored.append(f"close_attempts={len(self._close_attempts)}")
+            if restored:
+                logging.info(f"🔄 Bot state restored: {', '.join(restored)}")
+        except Exception as e:
+            logging.warning(f"Failed to load bot state: {e}")
+
     def _shutdown(self):
         logging.info("Shutdown requested...")
         self.running = False
+        self._save_state()
 
 
 # ── Entry Point ──────────────────────────────────────────────────────

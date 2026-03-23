@@ -57,11 +57,18 @@ def sanitize_reasoning(text: str | None) -> str:
 
 
 class ContextBuilder:
-    def __init__(self, config: dict, db: DecisionDB):
+    def __init__(self, config: dict, db: DecisionDB, config_dir: str | None = None):
         self.config = config
         self.db = db
-        self.signals_file = Path(config["signals_file"])
-        self.memory_file = Path(config.get("strategy_memory_file", "state/strategy_memory.md"))
+        # Resolve relative paths relative to config file directory
+        if config_dir:
+            self.signals_file = Path(config_dir) / config["signals_file"]
+            self.memory_file = Path(config_dir) / config.get("strategy_memory_file", "state/strategy_memory.md")
+            self.result_file = Path(config_dir) / config.get("result_file", "../ai-result.json")
+        else:
+            self.signals_file = Path(config["signals_file"])
+            self.memory_file = Path(config.get("strategy_memory_file", "state/strategy_memory.md"))
+            self.result_file = Path(config.get("result_file", "../ai-result.json"))
 
     def read_signals(self) -> tuple[list[dict], dict]:
         """Read signals.json. Returns (top_opportunities_list, config_dict).
@@ -130,10 +137,8 @@ class ContextBuilder:
 
     def read_positions(self) -> list[dict]:
         """Read current positions from the shared decision result file."""
-        result_file = self.config.get("result_file", "../ai-result.json")
-        path = Path(result_file)
-        if path.exists():
-            data = safe_read_json(path)
+        if self.result_file.exists():
+            data = safe_read_json(self.result_file)
             if data:
                 return data.get("positions", [])
         return []

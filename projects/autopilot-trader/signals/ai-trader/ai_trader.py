@@ -99,7 +99,10 @@ class AITrader:
     def __init__(self, config: dict):
         self.config = config
         self.db = DecisionDB(config["db_path"])
-        self.context_builder = ContextBuilder(config, self.db)
+        # Resolve relative paths relative to config file directory
+        _config_dir = os.path.dirname(os.path.abspath(config["_config_path"]))
+
+        self.context_builder = ContextBuilder(config, self.db, config_dir=_config_dir)
         self.safety = SafetyLayer(config, self.db)
         self.llm = LLMClient(config["llm"])
         self.system_prompt, self.decision_template = load_prompts()
@@ -120,8 +123,8 @@ class AITrader:
         self._last_sent_decision_id = None
 
         # Paths
-        self.decision_file = Path(config["decision_file"])
-        self.result_file = Path(config.get("result_file", "../ai-result.json"))
+        self.decision_file = Path(_config_dir) / config["decision_file"]
+        self.result_file = Path(_config_dir) / config.get("result_file", "../ai-result.json")
 
         log.info(f"AI Trader initialized")
         log.info(f"  Models: {config['llm']['primary_model']} / {config['llm']['fallback_model']}")
@@ -454,6 +457,7 @@ def main():
     with open(config_path) as f:
         config = json.load(f)
 
+    config["_config_path"] = config_path
     trader = AITrader(config)
     asyncio.run(trader.run_forever())
 

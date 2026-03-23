@@ -1387,7 +1387,7 @@ class LighterCopilot:
                     self.bot_managed_market_ids.add(mid)
                     # Use actual filled size from exchange (handles partial fills)
                     actual_size = verified_pos["size"]
-                    self.tracker.add_position(mid, symbol, direction, current_price, actual_size, leverage=self.cfg.default_leverage)
+                    self.tracker.add_position(mid, symbol, direction, current_price, actual_size, leverage=min(self.cfg.default_leverage, 10))
 
                     # BUG-06: Verify we can actually fetch price for this position after open
                     price_ok = False
@@ -1589,7 +1589,8 @@ class LighterCopilot:
             # Use actual filled size from exchange (handles partial fills)
             actual_size = verified_pos["size"]
             ai_sl_pct = decision.get("stop_loss_pct")
-            self.tracker.add_position(market_id, symbol, direction, current_price, actual_size, leverage=self.cfg.default_leverage, sl_pct=ai_sl_pct)
+            ai_leverage = min(float(decision.get("leverage", self.cfg.default_leverage)), 10)
+            self.tracker.add_position(market_id, symbol, direction, current_price, actual_size, leverage=ai_leverage, sl_pct=ai_sl_pct)
 
             # BUG-06: Verify we can actually fetch price for this position after open
             # If price is unavailable, the position becomes "orphaned" — DSL can't compute ROE

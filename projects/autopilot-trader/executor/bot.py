@@ -1091,6 +1091,7 @@ class LighterCopilot:
         self._last_signal_timestamp: str | None = None
         self._opened_signals: set[int] = set()
         self._min_score = 60  # Only open positions for signals >= this score
+        self._signal_processed_this_tick: bool = False
         # AI Autopilot
         self._ai_mode = cfg.ai_mode
         self._ai_decision_file = cfg.ai_decision_file
@@ -1134,6 +1135,11 @@ class LighterCopilot:
         # Position sync failure tracking (EDGE-03)
         self._position_sync_failures: int = 0  # consecutive failures
         self._position_sync_failure_threshold: int = 3  # alert after this many consecutive failures
+        # Idle polling — reduce API calls when flat with no signals
+        self._idle_tick_count: int = 0
+        self._idle_threshold: int = 2   # consecutive ticks before extending interval
+        self._idle_sleep_interval: int = 60  # seconds between polls when idle (vs normal)
+>>>>>>> fix/edge-01-idle-polling
 
 
     async def start(self):
@@ -1218,7 +1224,14 @@ class LighterCopilot:
         try:
             while self.running:
                 await self._tick()
-                await asyncio.sleep(self.cfg.price_poll_interval)
+                # Dynamic sleep: fast when active, slow when idle with no positions
+                num_positions = len(self.tracker.positions)
+                if num_positions == 0 and self._idle_tick_count >= self._idle_threshold:
+                    sleep_interval = self._idle_sleep_interval
+                else:
+                    sleep_interval = self.cfg.price_poll_interval
+                logging.debug(f"⏱️ Sleep {sleep_interval}s (positions={num_positions}, idle_ticks={self._idle_tick_count})")
+                await asyncio.sleep(sleep_interval)
         except asyncio.CancelledError:
             pass
         except Exception as e:
@@ -1272,6 +1285,7 @@ class LighterCopilot:
         if data.get("timestamp") == self._last_signal_timestamp:
             return
         self._last_signal_timestamp = data.get("timestamp")
+        self._signal_processed_this_tick = True
 
         # Auto-detect balance and scale positions proportionally
         balance = await self._get_balance()
@@ -1455,6 +1469,7 @@ class LighterCopilot:
         if ts == self._last_ai_decision_ts:
             return
         self._last_ai_decision_ts = ts
+        self._signal_processed_this_tick = True
 
         # Validate decision
         validation_error = self._validate_ai_decision(decision)
@@ -2319,6 +2334,14 @@ class LighterCopilot:
 
         # Persist state for crash/restart recovery
         self._save_state()
+
+        # ── Idle tick tracking — extend sleep when flat with no activity ──
+        if len(self.tracker.positions) == 0 and not self._signal_processed_this_tick and not quota_cooldown:
+            self._idle_tick_count += 1
+        else:
+            # Reset on any activity (positions, signals, or quota cooldown)
+            self._idle_tick_count = 0
+        self._signal_processed_this_tick = False  # reset per-tick flag
 
     async def _process_position_tick(self, mid: int, pos: TrackedPosition):
         """Process a single position's tick — fetch price, evaluate triggers, execute if needed."""

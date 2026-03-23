@@ -835,8 +835,9 @@ class LighterAPI:
                 if resp is not None:
                     resp_code = getattr(resp, 'code', None)
                     resp_msg = getattr(resp, 'msg', None) or getattr(resp, 'message', None)
+                    resp_quota = getattr(resp, 'volume_quota_remaining', None)
                     if resp_msg and "didn't use volume quota" in str(resp_msg):
-                        logging.warning(f"⚠️ Open order rate-limited (volume quota): {resp_msg}")
+                        logging.warning(f"⚠️ Open order rate-limited (volume quota): {resp_msg}, vol_quota_remaining={resp_quota}")
                         return False  # Opening should fail explicitly if rate-limited
                     logging.info(f"✅ Position opened: {'LONG' if is_long else 'SHORT'} {size_usd:.2f} USD -> tx={tx}, resp_code={resp_code}, resp_msg={resp_msg}")
                 else:
@@ -900,8 +901,8 @@ class LighterAPI:
                     resp_pred_ms = getattr(resp, 'predicted_execution_time_ms', None)
                     resp_quota = getattr(resp, 'volume_quota_remaining', None)
                     if resp_msg and "didn't use volume quota" in str(resp_msg):
-                        logging.warning(f"⚠️ SL order rate-limited (volume quota): {resp_msg}")
-                        # Still return True — the order MIGHT execute later, but warn clearly
+                        logging.warning(f"⚠️ SL order rate-limited (volume quota): {resp_msg}, vol_quota_remaining={resp_quota}")
+                        return False, None  # Don't pretend SL succeeded — position is unprotected
                     else:
                         logging.info(
                             f"✅ SL order submitted: code={resp_code}, msg={resp_msg}, "

@@ -29,19 +29,23 @@ def atomic_write(path: Path, data: dict) -> None:
 def safe_read_json(path: Path, retries: int = 2, delay: float = 0.1) -> dict | None:
     """Read JSON with retry — handles race conditions from concurrent atomic_write.
 
-    If we catch a file mid-write (partial JSON), retry after a short delay.
-    os.replace is atomic, so 1 retry is almost always enough.
+    Reads to buffer first (avoids partial reads from concurrent writes), then parses.
+    Warns specifically on corrupt JSON to distinguish from benign file-not-found.
     """
     for attempt in range(retries + 1):
         try:
             with open(path) as f:
-                return json.load(f)
+                raw = f.read()
+            if not raw.strip():
+                return None  # Empty file
+            return json.loads(raw)
         except (json.JSONDecodeError, OSError) as e:
             if attempt < retries:
                 time.sleep(delay)
             else:
-                # Log non-"file not found" errors (permission, disk full, etc.)
-                if not isinstance(e, FileNotFoundError):
+                if isinstance(e, json.JSONDecodeError):
+                    log.warning(f"Corrupt JSON in {path}: {e}")
+                elif not isinstance(e, FileNotFoundError):
                     log.warning(f"Failed to read {path}: {e}")
                 return None
     return None

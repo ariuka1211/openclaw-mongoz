@@ -159,10 +159,11 @@ class ContextBuilder:
             return opportunities
 
     def read_positions(self) -> list[dict]:
-        """Read current positions from the shared decision result file."""
+        """Read current positions from bot's result file. Only trusts data after bot ACK."""
         if self.result_file.exists():
             data = safe_read_json(self.result_file)
-            if data:
+            if data and data.get("processed_decision_id"):
+                # Bot has processed a decision — positions are fresh
                 return data.get("positions", [])
         return []
 

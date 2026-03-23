@@ -218,6 +218,15 @@ class SafetyLayer:
         """Check all kill switch conditions. Returns list of triggered reasons."""
         triggers = []
 
+        # Time-based decay: reset consecutive failures if last failure was > N minutes ago
+        if self._last_failure_time > 0:
+            minutes_since = (time.time() - self._last_failure_time) / 60
+            if minutes_since > self.failure_decay_minutes:
+                if consecutive_failures > 0:
+                    log.info(f"Kill switch: resetting consecutive_failures from {consecutive_failures} to 0 "
+                             f"(no failures for {minutes_since:.1f} min)")
+                consecutive_failures = 0
+
         # Daily drawdown
         dd = self.get_daily_drawdown(equity)
         if dd > self.max_daily_drawdown_pct:

@@ -155,6 +155,7 @@ class AITrader:
                 log.info(f"Cycle {cycle_id} complete ({cycle_count} total)")
             except Exception as e:
                 self.consecutive_failures += 1
+                self.safety._last_failure_time = time.time()
                 log.error(
                     f"Cycle {cycle_id} failed ({self.consecutive_failures}/{self.MAX_CONSECUTIVE_FAILURES}): {e}",
                     exc_info=True,
@@ -286,9 +287,13 @@ class AITrader:
         if safe and decision.get("action") != "hold":
             executed = await self._send_to_bot(decision, equity)
             if executed:
-                # IPC-02: Wait briefly for bot result, then correlate
-                await asyncio.sleep(3)
-                result = await self._check_bot_result(self._last_sent_decision_id)
+                # Poll for bot result with timeout (limit orders may take 10-30s to fill)
+                result = None
+                for _ in range(15):  # 15 * 2s = 30s max
+                    await asyncio.sleep(2)
+                    result = await self._check_bot_result(self._last_sent_decision_id)
+                    if result is not None:
+                        break
                 if result and result.get("success") is False:
                     log.warning(f"Bot reported validation failure: {result.get('decision_action')} {result.get('decision_symbol')} -- not retrying")
                     executed = False
@@ -448,6 +453,13 @@ class AITrader:
             return
         log.critical(f"🚨 Emergency halt: {reason}")
         try:
+            # Read current positions from result file for the close_all
+            current_positions = []
+            if self.result_file.exists():
+                result_data = safe_read_json(self.result_file)
+                if result_data:
+                    current_positions = result_data.get("positions", [])
+
             close_all = {
                 "decision_id": str(uuid.uuid4())[:8],
                 "prev_decision_id": None,  # Emergency halt bypasses normal IPC flow
@@ -461,7 +473,7 @@ class AITrader:
                 "reasoning": f"Emergency halt triggered: {reason}",
                 "confidence": 1.0,
                 "requested_size_usd": None,
-                "positions": [],
+                "positions": current_positions,
             }
             # Clean up ACK file so bot can process emergency halt immediately
             ack_path = str(self.decision_file) + ".ack"

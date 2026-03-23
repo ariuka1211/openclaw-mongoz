@@ -250,11 +250,20 @@ class TelegramAlerter:
         try:
             timeout = aiohttp.ClientTimeout(total=10)
             async with aiohttp.ClientSession(timeout=timeout) as session:
-                await session.post(url, json={
+                payload = {
                     "chat_id": self.chat_id,
                     "text": text,
                     "parse_mode": "Markdown",
-                })
+                }
+                async with session.post(url, json=payload, timeout=timeout) as resp:
+                    if resp.status == 429:
+                        retry_after = resp.headers.get('Retry-After', 'unknown')
+                        logging.warning(f"Telegram rate limited (429), retry after {retry_after}s — alert dropped")
+                    elif resp.status != 200:
+                        body = await resp.text()
+                        logging.warning(f"Telegram API error {resp.status}: {body}")
+                    else:
+                        logging.debug(f"Alert sent to Telegram ({len(text)} chars)")
         except Exception as e:
             logging.warning(f"Telegram send failed: {e}")
 
@@ -1690,6 +1699,9 @@ class LighterCopilot:
                     logging.info(f"Emergency closed: {pos.side} {pos.symbol} ROE={roe:+.1f}%")
                     self._recently_closed[mid] = time.monotonic() + 300  # 5 min phantom guard
                     self.tracker.remove_position(mid)
+                    await self.alerts.send(
+                        f"✅ *CLOSE ALL → {pos.side.upper()} {pos.symbol}* closed"
+                    )
                 else:
                     logging.warning(f"⚠️ Failed to close {pos.side} {pos.symbol} — keeping in tracker")
             else:
@@ -2094,6 +2106,16 @@ class LighterCopilot:
             self._log_outcome(pos, exit_price, f"dsl_{action}")
             self._recently_closed[mid] = time.monotonic() + 300  # 5 min phantom guard
             self.tracker.remove_position(mid)
+            # Post-close completion alert
+            roe_pct = ((exit_price - pos.entry_price) / pos.entry_price * 100) if is_long else ((pos.entry_price - exit_price) / pos.entry_price * 100)
+            await self.alerts.send(
+                f"✅ *DSL → CLOSED*\n"
+                f"{pos.side.upper()} {pos.symbol}\n"
+                f"Entry: ${pos.entry_price:,.2f}\n"
+                f"Exit: ${exit_price:,.2f}\n"
+                f"ROE: {roe_pct:+.1f}%\n"
+                f"Reason: {labels.get(action, action)}"
+            )
             return
 
         # Legacy actions

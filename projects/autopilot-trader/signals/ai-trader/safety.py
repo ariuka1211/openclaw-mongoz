@@ -61,6 +61,9 @@ class SafetyLayer:
             return self._validate_open(decision, positions, signals, equity, reasons)
         elif action == "close":
             return self._validate_close(decision, positions, reasons)
+        elif action == "close_all":
+            # close_all is always approved — emergency action, no additional checks
+            return len(reasons) == 0, reasons
         elif action == "adjust":
             return self._validate_adjust(decision, positions, reasons)
         else:
@@ -77,7 +80,7 @@ class SafetyLayer:
                 errors.append(f"missing required field: {key}")
 
         action = decision.get("action", "")
-        if action not in ("open", "close", "hold", "adjust"):
+        if action not in ("open", "close", "close_all", "hold", "adjust"):
             errors.append(f"invalid action: {action}")
 
         if action == "open":

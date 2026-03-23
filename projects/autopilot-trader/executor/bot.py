@@ -1309,6 +1309,19 @@ class LighterCopilot:
 
             is_long = direction == "long"
 
+            # Check quota cooldown and pacing BEFORE fetching price (saves API calls)
+            if self._is_volume_quota_cooldown():
+                logging.debug(f"⏳ {symbol}: volume quota cooldown active, skipping open")
+                continue
+            if self._should_pace_orders():
+                logging.debug(f"⏳ {symbol}: pacing orders (low quota), skipping open")
+                continue
+
+            # Quota prioritization: skip new opens when quota < 50 to preserve for SL orders
+            if self._should_skip_open_for_quota():
+                logging.warning(f"🚫 {symbol}: new opens paused (quota={self.api.volume_quota_remaining} < 50, SL protection prioritized)")
+                continue
+
             # Always fetch live price — signal data can be stale (up to 5 min old)
             current_price = None
             if self.api:
@@ -1322,19 +1335,6 @@ class LighterCopilot:
             size_usd = opp.get("positionSizeUsd", 0) * scale
             if size_usd <= 0:
                 logging.warning(f"⚠️ {symbol}: invalid position size, skipping")
-                continue
-
-            # Check quota cooldown and pacing before opening
-            if self._is_volume_quota_cooldown():
-                logging.debug(f"⏳ {symbol}: volume quota cooldown active, skipping open")
-                continue
-            if self._should_pace_orders():
-                logging.debug(f"⏳ {symbol}: pacing orders (low quota), skipping open")
-                continue
-
-            # Quota prioritization: skip new opens when quota < 50 to preserve for SL orders
-            if self._should_skip_open_for_quota():
-                logging.warning(f"🚫 {symbol}: new opens paused (quota={self.api.volume_quota_remaining} < 50, SL protection prioritized)")
                 continue
 
             # Open the position
@@ -2282,12 +2282,12 @@ class LighterCopilot:
                 sl_success, sl_coi = await self.api.execute_sl(mid, pos.size, price, is_long)
             except VolumeQuotaError:
                 self._start_volume_quota_cooldown()
-                # Track attempts with graduated delay (same as DSL path)
-                attempts = self._dsl_close_attempts.get(pos.symbol, 0) + 1
-                self._dsl_close_attempts[pos.symbol] = attempts
+                # Track attempts with graduated delay
+                attempts = self._close_attempts.get(pos.symbol, 0) + 1
+                self._close_attempts[pos.symbol] = attempts
                 delay_idx = min(attempts - 1, len(self._sl_retry_delays) - 1)
                 retry_delay = self._sl_retry_delays[delay_idx]
-                self._dsl_close_attempt_cooldown[pos.symbol] = time.monotonic() + retry_delay
+                self._close_attempt_cooldown[pos.symbol] = time.monotonic() + retry_delay
                 logging.warning(f"⚠️ SL: {pos.symbol} volume quota exhausted (attempt {attempts}, retry in {retry_delay}s)")
                 return  # Don't remove from tracker, will retry after cooldown
             if sl_success:
@@ -2299,11 +2299,11 @@ class LighterCopilot:
                 price = fill_price if fill_price else price
             else:
                 # SL order failed (rate-limited or rejected) — track attempts with graduated delay
-                attempts = self._dsl_close_attempts.get(pos.symbol, 0) + 1
-                self._dsl_close_attempts[pos.symbol] = attempts
+                attempts = self._close_attempts.get(pos.symbol, 0) + 1
+                self._close_attempts[pos.symbol] = attempts
                 delay_idx = min(attempts - 1, len(self._sl_retry_delays) - 1)
                 retry_delay = self._sl_retry_delays[delay_idx]
-                self._dsl_close_attempt_cooldown[pos.symbol] = time.monotonic() + retry_delay
+                self._close_attempt_cooldown[pos.symbol] = time.monotonic() + retry_delay
                 logging.warning(f"⚠️ {pos.symbol}: SL order rejected (attempt {attempts}, retry in {retry_delay}s)")
 
                 if attempts >= 4:

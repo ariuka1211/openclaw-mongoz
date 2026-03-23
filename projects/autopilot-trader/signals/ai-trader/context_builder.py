@@ -4,12 +4,28 @@ Context builder — assembles compressed prompt from signals, positions, history
 
 import json
 import logging
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
 from db import DecisionDB
 
 log = logging.getLogger("ai-trader.context")
+
+# ── Safe JSON reader ────────────────────────────────────────────────
+
+def safe_read_json(path: Path, retries: int = 2, delay: float = 0.1) -> dict | None:
+    """Read JSON with retry — handles race conditions from concurrent atomic_write."""
+    for attempt in range(retries + 1):
+        try:
+            with open(path) as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError) as e:
+            if attempt < retries:
+                time.sleep(delay)
+            else:
+                return None
+    return None
 
 # ── Prompt injection sanitizer ──────────────────────────────────────
 
@@ -65,8 +81,10 @@ class ContextBuilder:
             return [], {}
 
         try:
-            with open(self.signals_file) as f:
-                data = json.load(f)
+            data = safe_read_json(self.signals_file)
+            if data is None:
+                log.error(f"Failed to read signals: {self.signals_file}")
+                return [], {}
 
             opportunities = data.get("opportunities", [])
             if not opportunities:
@@ -123,12 +141,9 @@ class ContextBuilder:
         result_file = self.config.get("result_file", "../ai-result.json")
         path = Path(result_file)
         if path.exists():
-            try:
-                with open(path) as f:
-                    data = json.load(f)
+            data = safe_read_json(path)
+            if data:
                 return data.get("positions", [])
-            except (json.JSONDecodeError, OSError):
-                pass
         return []
 
     def read_strategy_memory(self) -> str:
@@ -205,9 +220,10 @@ class ContextBuilder:
             out_lines = []
             for o in outcomes[:5]:
                 emoji = "🟢" if o.get("pnl_usd", 0) > 0 else "🔴"
+                roe = o.get("roe_pct", o.get("pnl_pct", 0))
                 out_lines.append(
                     f"{emoji} {o['symbol']} {o.get('direction', '?')} → "
-                    f"${o.get('pnl_usd', 0):+.2f} ({o.get('pnl_pct', 0):+.1f}%) "
+                    f"${o.get('pnl_usd', 0):+.2f} (ROE {roe:+.1f}%) "
                     f"held {o.get('hold_time', '?')}"
                 )
             sections.append("## Recent Trade Outcomes\n" + "\n".join(out_lines))

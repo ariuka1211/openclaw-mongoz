@@ -115,6 +115,25 @@ except Exception as _e:
     logging.warning(f"⚠️ Could not init DecisionDB: {_e} — outcomes will not be logged")
     _db = None
 
+# ── Safe JSON reader ────────────────────────────────────────────────
+
+def safe_read_json(path: Path, retries: int = 2, delay: float = 0.1) -> dict | None:
+    """Read JSON with retry — handles race conditions from concurrent writes.
+
+    os.replace (used in atomic_write) is atomic, but we can still catch a file
+    mid-flush. 1 retry with a tiny delay is almost always enough.
+    """
+    for attempt in range(retries + 1):
+        try:
+            with open(path) as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError) as e:
+            if attempt < retries:
+                time.sleep(delay)
+            else:
+                return None
+    return None
+
 # ── Config ───────────────────────────────────────────────────────────
 
 @dataclass
@@ -281,6 +300,7 @@ class TrackedPosition:
     trailing_active: bool = False
     trailing_sl_level: float | None = None  # legacy: flat trailing stop loss level
     dsl_state: DSLState | None = None       # DSL state (when dsl_enabled)
+    sl_pct: float | None = None             # per-position stop loss % (from AI), None = use config default
     opened_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -320,7 +340,12 @@ class PositionTracker:
 
     def compute_sl_price(self, pos: TrackedPosition) -> float:
         """Return trailing stop loss level. Trails upward on longs, downward on shorts."""
-        return pos.trailing_sl_level or pos.entry_price * (1 - self.cfg.sl_pct / 100 if pos.side == "long" else 1 + self.cfg.sl_pct / 100)
+        sl_pct = self._get_sl_pct(pos)
+        return pos.trailing_sl_level or pos.entry_price * (1 - sl_pct / 100 if pos.side == "long" else 1 + sl_pct / 100)
+
+    def _get_sl_pct(self, pos: TrackedPosition) -> float:
+        """Get effective stop loss % — per-position (AI) or config default."""
+        return pos.sl_pct if pos.sl_pct is not None else self.cfg.sl_pct
 
     def update_price(self, market_id: int, price: float) -> str | None:
         pos = self.positions.get(market_id)
@@ -393,15 +418,16 @@ class PositionTracker:
                     logging.info(f"🎯 {pos.symbol} trailing TP ACTIVE at ${price:,.2f}")
 
         # Update trailing stop loss (ratchets up on longs, down on shorts — never reverses)
+        sl_pct = self._get_sl_pct(pos)
         if pos.side == "long":
-            candidate = price * (1 - self.cfg.sl_pct / 100)
+            candidate = price * (1 - sl_pct / 100)
             if pos.trailing_sl_level is None or candidate > pos.trailing_sl_level:
                 old = pos.trailing_sl_level
                 pos.trailing_sl_level = candidate
                 if old is not None:
                     logging.info(f"🛡️ {pos.symbol} trailing SL advanced: ${old:,.2f} → ${candidate:,.2f}")
         else:
-            candidate = price * (1 + self.cfg.sl_pct / 100)
+            candidate = price * (1 + sl_pct / 100)
             if pos.trailing_sl_level is None or candidate < pos.trailing_sl_level:
                 old = pos.trailing_sl_level
                 pos.trailing_sl_level = candidate
@@ -437,7 +463,7 @@ class PositionTracker:
 
         return None
 
-    def add_position(self, market_id: int, symbol: str, side: str, entry: float, size: float, leverage: float = None):
+    def add_position(self, market_id: int, symbol: str, side: str, entry: float, size: float, leverage: float = None, sl_pct: float = None):
         lev = leverage or self.cfg.default_leverage
         dsl_state = None
         if self.cfg.dsl_enabled:
@@ -456,10 +482,12 @@ class PositionTracker:
             size=size,
             high_water_mark=entry,
             dsl_state=dsl_state,
+            sl_pct=sl_pct,
         )
         self.positions[market_id] = pos
+        sl_source = f"AI={sl_pct}%" if sl_pct is not None else f"config={self.cfg.sl_pct}%"
         mode = f"DSL (lev={lev}x)" if self.cfg.dsl_enabled else "legacy trailing"
-        logging.info(f"📌 Tracking: {side.upper()} {symbol} @ ${entry:,.2f}, size={size}, mode={mode}")
+        logging.info(f"📌 Tracking: {side.upper()} {symbol} @ ${entry:,.2f}, size={size}, mode={mode}, SL={sl_source}")
 
     def remove_position(self, market_id: int):
         self.positions.pop(market_id, None)
@@ -608,23 +636,6 @@ class LighterAPI:
 
         # Volume quota tracking
         self._volume_quota_remaining: int | None = None
-
-    def _analyze_quota_response(self, resp) -> dict:
-        """Analyze response object for quota field debugging."""
-        analysis = {
-            'type': type(resp).__name__,
-            'has_volume_quota_remaining': hasattr(resp, 'volume_quota_remaining'),
-            'volume_quota_value': getattr(resp, 'volume_quota_remaining', 'NOT_FOUND'),
-            'all_attributes': [attr for attr in dir(resp) if not attr.startswith('_')],
-            'quota_related_attrs': [attr for attr in dir(resp) if 'quota' in attr.lower() or 'volume' in attr.lower()],
-        }
-        
-        # Try different field name variations
-        for field in ['volume_quota_remaining', 'volumeQuotaRemaining', 'quota_remaining', 'quota', 'volume_quota']:
-            if hasattr(resp, field):
-                analysis[f'found_{field}'] = getattr(resp, field)
-        
-        return analysis
 
     def _extract_quota_from_response(self, resp) -> tuple[int | None, str]:
         """Extract quota with detailed field analysis."""
@@ -901,9 +912,6 @@ class LighterAPI:
                     # 🔍 DEBUG: Raw response structure analysis
                     quota_val, quota_detail = self._extract_quota_from_response(resp)
                     logging.debug(f"🔍 TP response quota extraction: {quota_detail}")
-                    if quota_val is None:
-                        quota_analysis = self._analyze_quota_response(resp)
-                        logging.debug(f"🔍 TP response full analysis: {json.dumps(quota_analysis, indent=2)}")
                     
                     resp_code = getattr(resp, 'code', None)
                     resp_msg = getattr(resp, 'msg', None) or getattr(resp, 'message', None)
@@ -958,9 +966,6 @@ class LighterAPI:
                     # 🔍 DEBUG: Raw response structure analysis
                     quota_val, quota_detail = self._extract_quota_from_response(resp)
                     logging.debug(f"🔍 Open response quota extraction: {quota_detail}")
-                    if quota_val is None:
-                        quota_analysis = self._analyze_quota_response(resp)
-                        logging.debug(f"🔍 Open response full analysis: {json.dumps(quota_analysis, indent=2)}")
                     
                     resp_code = getattr(resp, 'code', None)
                     resp_msg = getattr(resp, 'msg', None) or getattr(resp, 'message', None)
@@ -1027,9 +1032,6 @@ class LighterAPI:
                     # 🔍 DEBUG: Raw response structure analysis
                     quota_val, quota_detail = self._extract_quota_from_response(resp)
                     logging.debug(f"🔍 SL response quota extraction: {quota_detail}")
-                    if quota_val is None:
-                        quota_analysis = self._analyze_quota_response(resp)
-                        logging.debug(f"🔍 SL response full analysis: {json.dumps(quota_analysis, indent=2)}")
                     
                     resp_code = getattr(resp, 'code', None)
                     resp_msg = getattr(resp, 'msg', None) or getattr(resp, 'message', None)
@@ -1057,34 +1059,6 @@ class LighterAPI:
         except Exception as e:
             logging.error(f"Failed to execute SL: {e}")
             return False, None
-
-    async def _test_quota_response(self):
-        """Test method to capture quota response structure. Does NOT submit real orders."""
-        try:
-            await self._ensure_signer()
-            
-            # Try to get current account info first
-            result = await self._account_api.account(
-                by="index", value=str(self.cfg.account_index)
-            )
-            
-            logging.info("🧪 Testing quota response structure...")
-            
-            # Analyze account API response for quota fields
-            if hasattr(result, 'accounts') and result.accounts:
-                for acc in result.accounts:
-                    acc_analysis = self._analyze_quota_response(acc)
-                    logging.info(f"🧪 Account response analysis: type={acc_analysis['type']}, quota_attrs={acc_analysis['quota_related_attrs']}")
-                    # Check all attributes for quota-related fields
-                    for attr in dir(acc):
-                        if 'quota' in attr.lower() or 'volume' in attr.lower():
-                            val = getattr(acc, attr, None)
-                            logging.info(f"🧪   Account.{attr} = {val}")
-            
-            logging.info("🧪 Quota response structure test complete (no orders submitted)")
-                
-        except Exception as e:
-            logging.info(f"🧪 Quota test encountered error: {e}")
 
     async def close(self):
         """Close all aiohttp sessions."""
@@ -1124,7 +1098,7 @@ class LighterCopilot:
         self._last_ai_decision_ts: str | None = None
         # AI close cooldown — prevent re-opening same symbol after AI closes it
         self._ai_close_cooldown: dict[str, float] = {}  # symbol → monotonic() deadline
-        self._ai_cooldown_seconds = 1800  # 30 minutes
+        self._ai_cooldown_seconds = 300  # 5 minutes
         self._api_lag_warnings: dict[str, float] = {}  # symbol → last warning timestamp
         self._pending_sync: set[int] = set()  # market_ids opened this tick — skip in sync
         # Phantom position prevention: require 2 consecutive sync cycles to confirm new positions
@@ -1201,10 +1175,6 @@ class LighterCopilot:
         except Exception as e:
             logging.warning(f"⚠️ Account tier check failed: {e}")
 
-        # Test quota response structure (debugging)
-        if logging.getLogger().getEffectiveLevel() <= logging.DEBUG:
-            await self._test_quota_response()
-
         # Check balance
         logging.info("💰 Checking balance...")
         # TODO: Re-enable once API rate limits are resolved
@@ -1244,6 +1214,11 @@ class LighterCopilot:
                     await self.api.close()
                 except Exception as e:
                     logging.error(f"API cleanup error: {e}")
+            if hasattr(self, '_http_session') and not self._http_session.closed:
+                try:
+                    await self._http_session.close()
+                except Exception:
+                    pass
             try:
                 await self.alerts.send("🔴 *Lighter Copilot* stopped")
             except Exception:
@@ -1269,11 +1244,9 @@ class LighterCopilot:
         if not signals_path.exists():
             return
 
-        try:
-            with open(signals_path) as f:
-                data = json.load(f)
-        except (json.JSONDecodeError, OSError) as e:
-            logging.warning(f"Failed to read signals file: {e}")
+        data = safe_read_json(signals_path)
+        if data is None:
+            logging.warning(f"Failed to read signals file: {signals_path}")
             return
 
         # Only process new signal files
@@ -1407,14 +1380,14 @@ class LighterCopilot:
                 return f"Invalid direction: {direction!r}"
             confidence = decision.get("confidence")
             if confidence is not None:
-                if not isinstance(confidence, (int, float)) or not (0 <= confidence <= 100):
-                    return f"Invalid confidence: {confidence!r}"
+                if not isinstance(confidence, (int, float)) or not (0 <= confidence <= 1):
+                    return f"Invalid confidence: {confidence!r} (expected 0.0-1.0)"
 
         if action == "close":
             confidence = decision.get("confidence")
             if confidence is not None:
-                if not isinstance(confidence, (int, float)) or not (0 <= confidence <= 100):
-                    return f"Invalid confidence: {confidence!r}"
+                if not isinstance(confidence, (int, float)) or not (0 <= confidence <= 1):
+                    return f"Invalid confidence: {confidence!r} (expected 0.0-1.0)"
 
         return None
 
@@ -1424,10 +1397,8 @@ class LighterCopilot:
         if not path.exists():
             return
 
-        try:
-            with open(path) as f:
-                decision = json.load(f)
-        except (json.JSONDecodeError, OSError):
+        decision = safe_read_json(path)
+        if decision is None:
             return
 
         # Only process new decisions
@@ -1531,7 +1502,8 @@ class LighterCopilot:
             self._reset_volume_quota_backoff()
             self._pending_sync.add(market_id)
             actual_size = size_usd / current_price
-            self.tracker.add_position(market_id, symbol, direction, current_price, actual_size, leverage=self.cfg.default_leverage)
+            ai_sl_pct = decision.get("stop_loss_pct")
+            self.tracker.add_position(market_id, symbol, direction, current_price, actual_size, leverage=self.cfg.default_leverage, sl_pct=ai_sl_pct)
             logging.info(f"📊 Quota remaining: {self.api.volume_quota_remaining}")
             # Reset close attempt tracking for this symbol
             self._close_attempts.pop(symbol, None)
@@ -1619,19 +1591,20 @@ class LighterCopilot:
                     account_index=self.cfg.account_index
                 )
             auth = self._auth_manager.get_auth_token()
-            import aiohttp
             url = f'https://mainnet.zklighter.elliot.ai/api/v1/accountInactiveOrders?account_index={self.cfg.account_index}&limit=20&auth={auth}'
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url) as resp:
-                    data = await resp.json()
-                    if data.get("code") == 200 and "orders" in data:
-                        for o in data["orders"]:
-                            coi = str(o.get("client_order_index", ""))
-                            if coi == str(client_order_index):
-                                filled_base = float(o.get("filled_base_amount", 0))
-                                filled_quote = float(o.get("filled_quote_amount", 0))
-                                if filled_base > 0:
-                                    return filled_quote / filled_base
+            # Reuse or create a session for fill price queries
+            if not hasattr(self, '_http_session') or self._http_session.closed:
+                self._http_session = aiohttp.ClientSession()
+            async with self._http_session.get(url) as resp:
+                data = await resp.json()
+                if data.get("code") == 200 and "orders" in data:
+                    for o in data["orders"]:
+                        coi = str(o.get("client_order_index", ""))
+                        if coi == str(client_order_index):
+                            filled_base = float(o.get("filled_base_amount", 0))
+                            filled_quote = float(o.get("filled_quote_amount", 0))
+                            if filled_base > 0:
+                                return filled_quote / filled_base
             return None
         except Exception as e:
             logging.debug(f"Could not fetch fill price: {e}")
@@ -1778,16 +1751,13 @@ class LighterCopilot:
     def _resolve_market_id(self, symbol: str) -> int | None:
         """Resolve symbol to market_id. Tries scanner signals first, then cached positions."""
         # Try from signals file
-        try:
-            signals_path = Path(self._signals_file)
-            if signals_path.exists():
-                with open(signals_path) as f:
-                    data = json.load(f)
+        signals_path = Path(self._signals_file)
+        if signals_path.exists():
+            data = safe_read_json(signals_path)
+            if data:
                 for opp in data.get("opportunities", []):
                     if opp.get("symbol") == symbol:
                         return opp.get("marketId")
-        except Exception:
-            pass
 
         # Try from position tracker (already-open positions)
         for mid, pos in self.tracker.positions.items():
@@ -1830,7 +1800,8 @@ class LighterCopilot:
                 "exit_price": exit_price,
                 "size_usd": size_usd,
                 "pnl_usd": pnl_usd,
-                "pnl_pct": roe_pct,
+                "pnl_pct": pnl_pct,
+                "roe_pct": roe_pct,
                 "hold_time_seconds": hold_seconds,
                 "max_drawdown_pct": 0,  # not tracked yet
                 "exit_reason": exit_reason,
@@ -1859,13 +1830,18 @@ class LighterCopilot:
                 })
             result = {
                 "timestamp": datetime.now(timezone.utc).isoformat(),
+                "processed_decision_id": decision.get("decision_id"),
+                "processed_timestamp": datetime.now(timezone.utc).isoformat(),
                 "decision_action": decision.get("action"),
                 "decision_symbol": decision.get("symbol"),
                 "success": success,
                 "positions": positions,
             }
-            with open(self._ai_result_file, "w") as f:
+            # Atomic write (same pattern as ai-trader)
+            tmp = str(self._ai_result_file) + ".tmp"
+            with open(tmp, "w") as f:
                 json.dump(result, f, indent=2)
+            os.replace(tmp, str(self._ai_result_file))
         except Exception as e:
             logging.warning(f"Failed to write AI result: {e}")
 
@@ -2076,6 +2052,9 @@ class LighterCopilot:
             except Exception as e:
                 logging.error(f"Error processing {pos.symbol} (market {mid}): {e}", exc_info=True)
                 continue  # one bad position doesn't kill the rest
+
+        # Clear pending sync — must be outside position loop so it runs even on exceptions
+        self._pending_sync.clear()
 
     async def _process_position_tick(self, mid: int, pos: TrackedPosition):
         """Process a single position's tick — fetch price, evaluate triggers, execute if needed."""
@@ -2308,9 +2287,6 @@ class LighterCopilot:
         self._log_outcome(pos, price, action)
         self._recently_closed[mid] = time.monotonic() + 300  # 5 min phantom guard
         self.tracker.remove_position(mid)
-
-        # Clear pending sync set at end of tick
-        self._pending_sync.clear()
 
     def _shutdown(self):
         logging.info("Shutdown requested...")

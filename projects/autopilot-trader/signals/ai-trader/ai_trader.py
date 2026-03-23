@@ -29,6 +29,23 @@ def atomic_write(path: Path, data: dict):
         json.dump(data, f, indent=2)
     os.replace(tmp, str(path))
 
+def safe_read_json(path: Path, retries: int = 2, delay: float = 0.1) -> dict | None:
+    """Read JSON with retry — handles race conditions from concurrent atomic_write.
+
+    If we catch a file mid-write (partial JSON), retry after a short delay.
+    os.replace is atomic, so 1 retry is almost always enough.
+    """
+    for attempt in range(retries + 1):
+        try:
+            with open(path) as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError) as e:
+            if attempt < retries:
+                time.sleep(delay)
+            else:
+                return None
+    return None
+
 # ── Logging setup ────────────────────────────────────────────────────
 
 LOG_DIR = Path("logs")
@@ -55,31 +72,41 @@ def load_prompts() -> tuple[str, str]:
 
 
 def parse_decision_json(raw: str) -> dict:
-    """Parse LLM response into a decision dict. Handles markdown code blocks."""
+    """Parse LLM response into a decision dict. Handles markdown code blocks and extra text."""
     text = raw.strip()
 
     # Strip markdown code fences if present
     if text.startswith("```"):
         lines = text.split("\n")
-        # Find first { and last }
-        start = None
-        end = None
-        for i, line in enumerate(lines):
-            if line.strip().startswith("{") and start is None:
-                start = i
-            if line.strip().endswith("}"):
+        # Remove fence lines
+        lines = [l for l in lines if not l.strip().startswith("```")]
+        text = "\n".join(lines)
+
+    # Find the JSON object using brace-depth tracking
+    start = text.find("{")
+    if start == -1:
+        log.error(f"No JSON object found in LLM response: {raw[:300]}")
+        return {"action": "hold", "reasoning": "No JSON found in response", "confidence": 0}
+
+    depth = 0
+    end = None
+    for i in range(start, len(text)):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
                 end = i + 1
-        if start is not None and end is not None:
-            text = "\n".join(lines[start:end])
-    elif not text.startswith("{"):
-        # Try to find JSON in the text
-        brace_start = text.find("{")
-        brace_end = text.rfind("}")
-        if brace_start != -1 and brace_end != -1:
-            text = text[brace_start : brace_end + 1]
+                break
+
+    if end is None:
+        log.error(f"Unmatched braces in LLM response: {raw[:300]}")
+        return {"action": "hold", "reasoning": "Unmatched JSON braces", "confidence": 0}
+
+    json_text = text[start:end]
 
     try:
-        decision = json.loads(text)
+        decision = json.loads(json_text)
         return decision
     except json.JSONDecodeError as e:
         log.error(f"Failed to parse LLM JSON: {e}\nRaw: {raw[:500]}")
@@ -100,6 +127,8 @@ class AITrader:
         self.MAX_CONSECUTIVE_FAILURES = config.get("max_consecutive_failures", 5)
         self.max_rejection_halt_count = config.get("max_rejection_halt_count", 15)
         self.rejection_halt_window_minutes = config.get("rejection_halt_window_minutes", 30)
+        self._purge_interval_cycles = 720  # ~24 hours at 2-min cycles
+        self._cycles_since_purge = 0
         self.running = True
         self.emergency_halt = False
         self.consecutive_failures = 0
@@ -163,6 +192,15 @@ class AITrader:
                 log.critical(f"🚨 Kill switch triggered: {kill_triggers}")
                 self.db.log_alert("critical", f"Kill switch: {'; '.join(kill_triggers)}")
 
+            # Periodic DB purge (~daily)
+            self._cycles_since_purge += 1
+            if self._cycles_since_purge >= self._purge_interval_cycles:
+                self._cycles_since_purge = 0
+                try:
+                    self.db.purge_old_data(keep_days=7)
+                except Exception as e:
+                    log.warning(f"DB purge failed: {e}")
+
             self.last_cycle_time = time.time()
 
             # Sleep until next cycle
@@ -171,6 +209,14 @@ class AITrader:
             if self.running and not self.emergency_halt:
                 log.info(f"Next cycle in {sleep_time:.0f}s")
                 await asyncio.sleep(sleep_time)
+
+        # Cleanup
+        if self.emergency_halt:
+            # Give bot time to process the close_all decision before we exit
+            log.info("Waiting 10s for bot to process close_all...")
+            await asyncio.sleep(10)
+        await self.llm.close()
+        self.db.close()
 
         if self.emergency_halt:
             log.critical("🛑 AI Trader halted (emergency). Manual restart required.")
@@ -267,7 +313,9 @@ class AITrader:
     async def _send_to_bot(self, decision: dict) -> bool:
         """Write decision to shared JSON file for bot to consume."""
         try:
+            decision_id = str(uuid.uuid4())[:8]
             output = {
+                "decision_id": decision_id,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "action": decision.get("action"),
                 "symbol": decision.get("symbol"),
@@ -289,7 +337,7 @@ class AITrader:
             self.decision_file.parent.mkdir(parents=True, exist_ok=True)
             atomic_write(self.decision_file, output)
 
-            log.info(f"📤 Decision written: {decision.get('action')} {decision.get('symbol', '')}")
+            log.info(f"📤 Decision written [{decision_id}]: {decision.get('action')} {decision.get('symbol', '')}")
             self.safety.record_order()
             return True
         except Exception as e:

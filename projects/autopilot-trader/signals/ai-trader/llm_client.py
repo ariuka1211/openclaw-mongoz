@@ -58,7 +58,7 @@ class LLMClient:
         self._session: aiohttp.ClientSession | None = None
 
         if not self.api_key:
-            raise SystemExit("OPENROUTER_API_KEY is not set — cannot start AI trader")
+            raise SystemExit("KILOCODE_API_KEY is not set — cannot start AI trader")
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """Return a reusable aiohttp session, creating it on first use."""

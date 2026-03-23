@@ -61,6 +61,7 @@ class DecisionDB:
                 size_usd REAL,
                 pnl_usd REAL,
                 pnl_pct REAL,
+                roe_pct REAL,
                 hold_time_seconds INTEGER,
                 max_drawdown_pct REAL,
                 exit_reason TEXT,
@@ -81,6 +82,10 @@ class DecisionDB:
             CREATE INDEX IF NOT EXISTS idx_outcomes_symbol ON outcomes(symbol);
             CREATE INDEX IF NOT EXISTS idx_alerts_ts ON alerts(timestamp);
         """)
+            # Migration: add roe_pct column if missing
+            columns = {row[1] for row in self._conn.execute("PRAGMA table_info(outcomes)").fetchall()}
+            if "roe_pct" not in columns:
+                self._conn.execute("ALTER TABLE outcomes ADD COLUMN roe_pct REAL")
             self._conn.commit()
 
     def log_decision(
@@ -126,9 +131,9 @@ class DecisionDB:
             self._conn.execute(
                 """INSERT INTO outcomes
                    (timestamp, cycle_id, symbol, direction, entry_price, exit_price,
-                    size_usd, pnl_usd, pnl_pct, hold_time_seconds, max_drawdown_pct,
+                    size_usd, pnl_usd, pnl_pct, roe_pct, hold_time_seconds, max_drawdown_pct,
                     exit_reason, decision_snapshot)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     now,
                     outcome.get("cycle_id"),
@@ -139,6 +144,7 @@ class DecisionDB:
                     outcome.get("size_usd"),
                     outcome.get("pnl_usd"),
                     outcome.get("pnl_pct"),
+                    outcome.get("roe_pct"),
                     outcome.get("hold_time_seconds", 0),
                     outcome.get("max_drawdown_pct", 0),
                     outcome.get("exit_reason", "unknown"),
@@ -185,7 +191,7 @@ class DecisionDB:
         with self._lock:
             rows = self._conn.execute(
                 """SELECT timestamp, symbol, direction, entry_price, exit_price,
-                          size_usd, pnl_usd, pnl_pct, hold_time_seconds, exit_reason
+                          size_usd, pnl_usd, pnl_pct, roe_pct, hold_time_seconds, exit_reason
                    FROM outcomes ORDER BY id DESC LIMIT ?""",
                 (limit,),
             ).fetchall()
@@ -199,9 +205,10 @@ class DecisionDB:
                 "size_usd": r[5],
                 "pnl_usd": r[6],
                 "pnl_pct": r[7],
-                "hold_time_seconds": r[8],
-                "exit_reason": r[9],
-                "hold_time": f"{r[8] // 60}min" if r[8] else "?",
+                "roe_pct": r[8],
+                "hold_time_seconds": r[9],
+                "exit_reason": r[10],
+                "hold_time": f"{r[9] // 60}min" if r[9] else "?",
             }
             for r in rows
         ]
@@ -290,6 +297,34 @@ class DecisionDB:
             {"id": r[0], "timestamp": r[1], "level": r[2], "message": r[3], "acknowledged": bool(r[4])}
             for r in rows
         ]
+
+    def purge_old_data(self, keep_days: int = 7):
+        """Remove decisions and alerts older than keep_days. Outcomes are kept (they're small and useful)."""
+        cutoff = datetime.now(timezone.utc).isoformat()[:10]  # today
+        with self._lock:
+            # Delete old decisions
+            cur = self._conn.execute(
+                "DELETE FROM decisions WHERE timestamp < datetime('now', ?)",
+                (f"-{keep_days} days",),
+            )
+            decisions_deleted = cur.rowcount
+            # Delete acknowledged alerts older than keep_days
+            cur = self._conn.execute(
+                "DELETE FROM alerts WHERE acknowledged = 1 AND timestamp < datetime('now', ?)",
+                (f"-{keep_days} days",),
+            )
+            alerts_deleted = cur.rowcount
+            # Delete unacknowledged alerts older than 30 days (stale)
+            cur = self._conn.execute(
+                "DELETE FROM alerts WHERE timestamp < datetime('now', '-30 days')",
+            )
+            stale_alerts = cur.rowcount
+            self._conn.commit()
+            # Vacuum to reclaim space
+            self._conn.execute("VACUUM")
+            total = decisions_deleted + alerts_deleted + stale_alerts
+            if total > 0:
+                log.info(f"Purged: {decisions_deleted} decisions, {alerts_deleted + stale_alerts} alerts")
 
     def close(self):
         with self._lock:

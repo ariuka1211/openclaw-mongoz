@@ -87,8 +87,8 @@ def _gather_quantitative_stats(db) -> str:
             wr = (wins / total * 100) if total > 0 else 0
             lines.append(f"- {bracket}: {wr:.0f}% ({wins}/{total}), avg=${avg_pnl:+.2f}")
 
-    # 3. Win rate by entry confidence (from decision_snapshot)
-    # confidence is stored in the decisions table, join on symbol+timestamp proximity
+    # 3. Win rate by entry confidence
+    # Join: pick the CLOSEST decision before each outcome (not just any within 5 min)
     rows = db._conn.execute("""
         SELECT
             CASE
@@ -100,8 +100,15 @@ def _gather_quantitative_stats(db) -> str:
             SUM(CASE WHEN o.pnl_usd > 0 THEN 1 ELSE 0 END) as wins,
             COALESCE(AVG(o.pnl_usd), 0) as avg_pnl
         FROM outcomes o
-        LEFT JOIN decisions d ON d.symbol = o.symbol
-            AND ABS(strftime('%s', d.timestamp) - strftime('%s', o.timestamp)) < 300
+        LEFT JOIN decisions d ON d.id = (
+            SELECT d2.id FROM decisions d2
+            WHERE d2.symbol = o.symbol
+              AND d2.timestamp <= o.timestamp
+              AND d2.action = 'open'
+              AND d2.executed = 1
+            ORDER BY d2.timestamp DESC
+            LIMIT 1
+        )
         WHERE d.confidence IS NOT NULL
         GROUP BY conf_bracket
     """).fetchall()
@@ -150,7 +157,7 @@ class ReflectionAgent:
 
         self.api_base = self.config["llm"]["api_base"]
         self.model = self.config["llm"]["reflection_model"]
-        self.api_key = os.environ.get("OPENROUTER_API_KEY", "")
+        self.api_key = os.environ.get("KILOCODE_API_KEY", "")
         self.db_path = self.config["db_path"]
         self.memory_path = Path(self.config.get("strategy_memory_file", "state/strategy_memory.md"))
 
@@ -174,9 +181,10 @@ class ReflectionAgent:
         outcome_lines = []
         for o in outcomes:
             emoji = "🟢" if o.get("pnl_usd", 0) > 0 else "🔴"
+            roe = o.get("roe_pct", o.get("pnl_pct", 0))
             outcome_lines.append(
                 f"{emoji} {o['symbol']} {o.get('direction', '?')} → "
-                f"${o.get('pnl_usd', 0):+.2f} ({o.get('pnl_pct', 0):+.1f}%) "
+                f"${o.get('pnl_usd', 0):+.2f} (ROE {roe:+.1f}%) "
                 f"held {o.get('hold_time', '?')} "
                 f"exit: {o.get('exit_reason', '?')}"
             )

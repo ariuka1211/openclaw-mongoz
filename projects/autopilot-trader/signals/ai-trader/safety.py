@@ -128,7 +128,7 @@ class SafetyLayer:
         # Rule 8: Liquidation distance ≥ 2x stop-loss distance
         # For safety: max_leverage * sl_pct must leave margin
         # Simple check: at given leverage, sl_pct must be <= 100/max_leverage/2
-        if leverage > 0 and sl_pct:
+        if leverage > 0 and sl_pct is not None:
             max_safe_sl = 100.0 / leverage / 2.0
             if sl_pct > max_safe_sl:
                 reasons.append(
@@ -232,6 +232,6 @@ class SafetyLayer:
 
         # Too many rejections (within the configured time window)
         if rejection_window_count >= self.max_rejection_halt_count:
-            triggers.append(f"{rejection_window_count} safety rejections in {self.config.get('rejection_halt_window_minutes', 30)} min (limit: {self.max_rejection_halt_count})")
+            triggers.append(f"{rejection_window_count} safety rejections in {self.rejection_halt_window_minutes} min (limit: {self.max_rejection_halt_count})")
 
         return triggers

@@ -404,11 +404,13 @@ class AITrader:
 
             log.info(f"📤 Decision written [{decision_id}]: {decision.get('action')} {decision.get('symbol', '')}"
                      + (f" (prev={prev_decision_id})" if prev_decision_id else ""))
-            self.safety.record_order()
 
-            # Record for cooldown-after-loss protection
-            if decision.get("action") in ("close", "close_all"):
-                self.safety.record_loss()
+            # Only count opens toward the hourly rate limit — closes are the relief valve
+            if decision.get("action") == "open":
+                self.safety.record_order()
+
+            # Losses tracked retroactively via DB outcomes (reflection system),
+            # not at decision time — we don't know PnL until the trade closes
 
             return True
         except Exception as e:

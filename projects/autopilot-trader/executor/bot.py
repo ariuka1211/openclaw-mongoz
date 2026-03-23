@@ -574,7 +574,7 @@ class LighterAPI:
 
         # Mark price cache — derived from unrealized_pnl during position sync
         # More accurate than recent_trades for ROE/stop-loss calculations
-        self._mark_prices: dict[int, float] = {}  # market_id → mark_price
+        self._mark_prices: dict[int, dict] = {}  # market_id → {"price": float, "time": float}
 
         # Volume quota tracking — must exist before any async calls
         self._volume_quota_remaining: int | None = None
@@ -814,15 +814,19 @@ class LighterAPI:
             else:
                 mark_price = entry + (pnl / abs_size)
             if mark_price > 0:
-                self._mark_prices[mid] = mark_price
+                self._mark_prices[mid] = {"price": mark_price, "time": time.time()}
 
     def get_mark_price(self, market_id: int) -> float | None:
         """Get mark price for a position. Uses cached mark price from account API
-        (derived from unrealized_pnl), falls back to recent_trades."""
+        (derived from unrealized_pnl), falls back to recent_trades.
+        Returns None if mark price is stale (>30s old)."""
         cached = self._mark_prices.get(market_id)
-        if cached and cached > 0:
-            return cached
-        # Fallback to recent trades (may be stale, but better than nothing)
+        if cached and cached["price"] > 0:
+            age = time.time() - cached["time"]
+            if age > 30:
+                logging.debug(f"Mark price for market {market_id} is stale ({age:.1f}s), skipping")
+                return None
+            return cached["price"]
         return None
 
     async def get_price_with_mark_fallback(self, market_id: int) -> float | None:

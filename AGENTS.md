@@ -102,6 +102,12 @@ Before touching ANYTHING outside workspace reading: **stop, show what you're abo
 
 No exceptions. Not "he seemed to want it." Not "he said clean up." Show first.
 
+### ⚠️ NEVER GUESS FINANCIAL DATA
+
+On 2026-03-23, gave a wrong Lighter account address. John sent $100 (his last money) to the wrong address. It's gone. 
+
+**Rule: Never provide account numbers, addresses, wallet addresses, or any financial data without reading it directly from the verified source file.** If the .env says account index 719758, use 719758. If you're not 100% certain, say "let me check" and verify. Making up or guessing financial data costs real money.
+
 ## External vs Internal
 
 **Safe:** read files, explore, search the web, work within workspace.

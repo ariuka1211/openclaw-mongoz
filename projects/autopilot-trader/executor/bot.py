@@ -2005,7 +2005,9 @@ class LighterCopilot:
             pnl_usd = size_usd * pnl_pct / 100
             hold_seconds = int((datetime.now(timezone.utc) - pos.opened_at).total_seconds())
             # ROE = return relative to margin (not notional) = pnl_pct × leverage
-            roe_pct = pnl_pct * self.cfg.default_leverage
+            # Use actual position leverage, not config default
+            actual_leverage = pos.dsl_state.leverage if pos.dsl_state else self.cfg.default_leverage
+            roe_pct = pnl_pct * actual_leverage
 
             # Mark as estimated if we haven't verified the fill yet
             reason_tag = f"{exit_reason} (estimated)" if estimated else exit_reason
@@ -2026,7 +2028,7 @@ class LighterCopilot:
             tag = " (est)" if estimated else ""
             logging.info(
                 f"📝 Outcome logged{tag}: {pos.side} {pos.symbol} "
-                f"PnL=${pnl_usd:+.2f} ({roe_pct:+.1f}% ROE) "
+                f"PnL=${pnl_usd:+.2f} ({roe_pct:+.1f}% ROE @ {actual_leverage:.1f}x) "
                 f"held={hold_seconds}s reason={exit_reason}"
             )
         except Exception as e:
@@ -2046,7 +2048,9 @@ class LighterCopilot:
                 else ((pos.entry_price - exit_price) / pos.entry_price * 100)
             size_usd = pos.size * pos.entry_price
             pnl_usd = size_usd * pnl_pct / 100
-            roe_pct = pnl_pct * self.cfg.default_leverage
+            # Use actual position leverage, not config default
+            actual_leverage = pos.dsl_state.leverage if pos.dsl_state else self.cfg.default_leverage
+            roe_pct = pnl_pct * actual_leverage
 
             updated = _db.update_latest_outcome(
                 pos.symbol, exit_price, pnl_usd, pnl_pct, roe_pct, exit_reason
@@ -2054,7 +2058,7 @@ class LighterCopilot:
             if updated:
                 logging.info(
                     f"📝 Outcome updated: {pos.side} {pos.symbol} "
-                    f"PnL=${pnl_usd:+.2f} ({roe_pct:+.1f}% ROE) reason={exit_reason}"
+                    f"PnL=${pnl_usd:+.2f} ({roe_pct:+.1f}% ROE @ {actual_leverage:.1f}x) reason={exit_reason}"
                 )
             else:
                 logging.warning(f"Outcome update: no matching record for {pos.symbol}")

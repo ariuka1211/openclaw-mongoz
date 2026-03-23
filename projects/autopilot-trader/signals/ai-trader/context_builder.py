@@ -228,7 +228,7 @@ class ContextBuilder:
                 out_lines.append(
                     f"{emoji} {o['symbol']} {o.get('direction', '?')} → "
                     f"${o.get('pnl_usd', 0):+.2f} (ROE {roe:+.1f}%) "
-                    f"held {o.get('hold_time', '?')}"
+                    f"held {o.get('hold_time_seconds', 0) // 60}min"
                 )
             sections.append("## Recent Trade Outcomes\n" + "\n".join(out_lines))
 

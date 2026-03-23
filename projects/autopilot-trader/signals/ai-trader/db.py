@@ -208,7 +208,6 @@ class DecisionDB:
                 "roe_pct": r[8],
                 "hold_time_seconds": r[9],
                 "exit_reason": r[10],
-                "hold_time": f"{r[9] // 60}min" if r[9] else "?",
             }
             for r in rows
         ]

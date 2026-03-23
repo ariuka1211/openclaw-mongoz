@@ -681,8 +681,13 @@ class LighterAPI:
         else:
             self._volume_quota_remaining = None
 
-    async def get_positions(self) -> list[dict]:
-        """Fetch open positions from Lighter."""
+    async def get_positions(self) -> list[dict] | None:
+        """Fetch open positions from Lighter.
+
+        Returns list of positions on success, None on API/network failure.
+        This distinction is critical: [] means "no positions" (API worked),
+        None means "can't reach the API" (don't change anything).
+        """
         try:
             await self._ensure_client()
             result = await self._account_api.account(
@@ -721,8 +726,8 @@ class LighterAPI:
                         })
             return positions
         except Exception as e:
-            logging.error(f"Failed to fetch positions: {e}")
-            return []
+            logging.error(f"Failed to fetch positions (API/network error): {e}")
+            return None
 
     async def _get_symbol(self, market_id: int) -> str:
         """Get symbol for a market ID with 5-second TTL cache."""
@@ -1126,6 +1131,9 @@ class LighterCopilot:
         self._last_quota_alert_time: float = 0  # periodic quota status alert (20min)
         self._quota_alert_interval: float = 1200  # 20 minutes in seconds
         self._last_quota_emergency_warn: float = 0  # rate-limit for quota emergency warnings
+        # Position sync failure tracking (EDGE-03)
+        self._position_sync_failures: int = 0  # consecutive failures
+        self._position_sync_failure_threshold: int = 3  # alert after this many consecutive failures
 
 
     async def start(self):
@@ -1988,66 +1996,91 @@ class LighterCopilot:
 
         # 1. Sync positions from Lighter
         live_positions = await self.api.get_positions()
-        live_mids = {p["market_id"] for p in live_positions}
 
-        # Cache mark prices from unrealized_pnl (authoritative exchange price for PnL)
-        self.api.update_mark_prices_from_positions(live_positions)
+        # EDGE-03: Handle API/network failure — don't clear positions on error
+        if live_positions is None:
+            self._position_sync_failures += 1
+            if self._position_sync_failures == 1:
+                logging.warning(f"⚠️ Position sync failed (attempt {self._position_sync_failures}) — keeping existing tracker state")
+            else:
+                logging.error(f"❌ Position sync failed ({self._position_sync_failures} consecutive) — keeping existing tracker state")
+            if self._position_sync_failures >= self._position_sync_failure_threshold:
+                await self.alerts.send(
+                    f"🔴 *Position Sync Failed ×{self._position_sync_failures}*\n"
+                    f"Cannot reach Lighter API for position sync.\n"
+                    f"Tracker state preserved (positions may be stale).\n"
+                    f"Check network/proxy status."
+                )
+            # Skip position sync entirely — DSL evaluation still runs on existing positions
+            live_mids = set()
+        else:
+            # Reset failure counter on successful sync
+            if self._position_sync_failures > 0:
+                logging.info(f"✅ Position sync recovered after {self._position_sync_failures} failure(s)")
+                self._position_sync_failures = 0
 
-        # Detect new positions (skip markets opened this tick to avoid race)
-        # Two-cycle confirmation: position must appear in 2 consecutive syncs before tracking
-        for pos in live_positions:
-            mid = pos["market_id"]
-            if mid in self._pending_sync:
-                continue
-            if mid in self.tracker.positions:
-                continue  # already tracked
-            if pos["entry_price"] <= 0:
-                continue
+            live_mids = {p["market_id"] for p in live_positions}
 
-            symbol = pos["symbol"]
+            # Cache mark prices from unrealized_pnl (authoritative exchange price for PnL)
+            self.api.update_mark_prices_from_positions(live_positions)
 
-            # Skip if bot recently closed this position (stale API data)
-            if mid in self._recently_closed:
-                logging.debug(f"⏭️ {symbol}: recently closed by bot, ignoring stale API data")
-                continue
+        # Detect new positions & closed positions — only when API succeeded
+        # When live_positions is None, skip entirely to preserve tracker state (EDGE-03)
+        if live_positions is not None:
+            # Detect new positions (skip markets opened this tick to avoid race)
+            for pos in live_positions:
+                mid = pos["market_id"]
+                if mid in self._pending_sync:
+                    continue
+                if mid in self.tracker.positions:
+                    continue  # already tracked
+                if pos["entry_price"] <= 0:
+                    continue
 
-            # Check AI close cooldown before re-tracking
-            cooldown_until = self._ai_close_cooldown.get(symbol)
-            if cooldown_until and time.monotonic() < cooldown_until:
-                remaining = int(cooldown_until - time.monotonic())
-                # Rate limit API lag warnings (once per minute per symbol)
-                now = time.monotonic()
-                last_warned = self._api_lag_warnings.get(symbol, 0)
-                if now - last_warned > 60:
-                    self._api_lag_warnings[symbol] = now
-                    logging.warning(f"🧊 DETECTED {symbol} from Lighter API but AI close cooldown active ({remaining}s) - API lag? IGNORING")
-                continue
+                symbol = pos["symbol"]
 
-            # Confirm on first detection — phantom guard via _recently_closed + _ai_close_cooldown already handles false positives
-            logging.info(f"📌 API POSITION DETECTED: {pos['side'].upper()} {symbol}")
-            self.tracker.add_position(
-                mid, pos["symbol"], pos["side"], pos["entry_price"], pos["size"],
-                leverage=pos.get("leverage")
-            )
-            logging.info(f"📊 Quota remaining: {self.api.volume_quota_remaining}")
-            await self.alerts.send(
-                f"📌 *New position detected*\n"
-                f"{pos['side'].upper()} {pos['symbol']} @ ${pos['entry_price']:,.2f}\n"
-                f"Size: {pos['size']}"
-            )
+                # Skip if bot recently closed this position (stale API data)
+                if mid in self._recently_closed:
+                    logging.debug(f"⏭️ {symbol}: recently closed by bot, ignoring stale API data")
+                    continue
 
-        # Detect closed positions
-        for mid in list(self.tracker.positions.keys()):
-            if mid not in live_mids:
-                pos = self.tracker.positions[mid]
-                # Try to get fill price for accurate outcome logging
-                exit_price = self.api.get_mark_price(mid) if self.api else pos.entry_price
-                if not exit_price or exit_price <= 0:
-                    exit_price = pos.entry_price
-                self._log_outcome(pos, exit_price, "exchange_close")
-                logging.info(f"Position closed by exchange: {pos.symbol}")
-                self._recently_closed[mid] = time.monotonic() + 300
-                self.tracker.remove_position(mid)
+                # Check AI close cooldown before re-tracking
+                cooldown_until = self._ai_close_cooldown.get(symbol)
+                if cooldown_until and time.monotonic() < cooldown_until:
+                    remaining = int(cooldown_until - time.monotonic())
+                    # Rate limit API lag warnings (once per minute per symbol)
+                    now = time.monotonic()
+                    last_warned = self._api_lag_warnings.get(symbol, 0)
+                    if now - last_warned > 60:
+                        self._api_lag_warnings[symbol] = now
+                        logging.warning(f"🧊 DETECTED {symbol} from Lighter API but AI close cooldown active ({remaining}s) - API lag? IGNORING")
+                    continue
+
+                # Confirm on first detection — phantom guard via _recently_closed + _ai_close_cooldown already handles false positives
+                logging.info(f"📌 API POSITION DETECTED: {pos['side'].upper()} {symbol}")
+                self.tracker.add_position(
+                    mid, pos["symbol"], pos["side"], pos["entry_price"], pos["size"],
+                    leverage=pos.get("leverage")
+                )
+                logging.info(f"📊 Quota remaining: {self.api.volume_quota_remaining}")
+                await self.alerts.send(
+                    f"📌 *New position detected*\n"
+                    f"{pos['side'].upper()} {pos['symbol']} @ ${pos['entry_price']:,.2f}\n"
+                    f"Size: {pos['size']}"
+                )
+
+            # Detect closed positions
+            for mid in list(self.tracker.positions.keys()):
+                if mid not in live_mids:
+                    pos = self.tracker.positions[mid]
+                    # Try to get fill price for accurate outcome logging
+                    exit_price = self.api.get_mark_price(mid) if self.api else pos.entry_price
+                    if not exit_price or exit_price <= 0:
+                        exit_price = pos.entry_price
+                    self._log_outcome(pos, exit_price, "exchange_close")
+                    logging.info(f"Position closed by exchange: {pos.symbol}")
+                    self._recently_closed[mid] = time.monotonic() + 300
+                    self.tracker.remove_position(mid)
 
         # Periodic quota status alert (every 20 minutes) — after position sync for accurate counts
         now = time.time()
@@ -2334,6 +2367,22 @@ class LighterCopilot:
         self._recently_closed[mid] = time.monotonic() + 300  # 5 min phantom guard
         self.tracker.remove_position(mid)
 
+    def _serialize_dsl_state(self, dsl: DSLState) -> dict:
+        """Serialize DSLState to a JSON-compatible dict."""
+        return {
+            "side": dsl.side,
+            "entry_price": dsl.entry_price,
+            "leverage": dsl.leverage,
+            "high_water_roe": dsl.high_water_roe,
+            "high_water_price": dsl.high_water_price,
+            "high_water_time": dsl.high_water_time.isoformat() if dsl.high_water_time else None,
+            "current_tier_trigger": dsl.current_tier.trigger_pct if dsl.current_tier else None,
+            "breach_count": dsl.breach_count,
+            "locked_floor_roe": dsl.locked_floor_roe,
+            "stagnation_active": dsl.stagnation_active,
+            "stagnation_started": dsl.stagnation_started.isoformat() if dsl.stagnation_started else None,
+        }
+
     def _save_state(self):
         """Persist critical ephemeral state to disk for crash/restart recovery."""
         now = time.monotonic()
@@ -2347,6 +2396,23 @@ class LighterCopilot:
             "close_attempt_cooldown": {s: max(0, t - now) for s, t in self._close_attempt_cooldown.items()},
             "dsl_close_attempts": self._dsl_close_attempts,
             "dsl_close_attempt_cooldown": {s: max(0, t - now) for s, t in self._dsl_close_attempt_cooldown.items()},
+            # Persist position state + DSL state for restart recovery
+            "positions": {
+                str(mid): {
+                    "market_id": mid,
+                    "symbol": pos.symbol,
+                    "side": pos.side,
+                    "entry_price": pos.entry_price,
+                    "size": pos.size,
+                    "leverage": pos.dsl_state.leverage if pos.dsl_state else self.cfg.default_leverage,
+                    "sl_pct": pos.sl_pct,
+                    "high_water_mark": pos.high_water_mark,
+                    "trailing_active": pos.trailing_active,
+                    "trailing_sl_level": pos.trailing_sl_level,
+                    "dsl": self._serialize_dsl_state(pos.dsl_state) if pos.dsl_state else None,
+                }
+                for mid, pos in self.tracker.positions.items()
+            },
         }
         try:
             state_path = Path("state/bot_state.json")
@@ -2392,6 +2458,9 @@ class LighterCopilot:
                 if remaining > 0:
                     self._dsl_close_attempt_cooldown[symbol] = now + remaining
 
+            # Load saved positions for DSL state restoration (applied after exchange detection)
+            self._saved_positions = state.get("positions") or None
+
             restored = []
             if self._last_ai_decision_ts:
                 restored.append(f"ai_decision_ts={self._last_ai_decision_ts}")
@@ -2401,6 +2470,8 @@ class LighterCopilot:
                 restored.append(f"ai_close_cooldown={len(self._ai_close_cooldown)}")
             if self._close_attempts:
                 restored.append(f"close_attempts={len(self._close_attempts)}")
+            if self._saved_positions:
+                restored.append(f"saved_positions={len(self._saved_positions)}")
             if restored:
                 logging.info(f"🔄 Bot state restored: {', '.join(restored)}")
 

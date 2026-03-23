@@ -1105,6 +1105,8 @@ class LighterCopilot:
         self._volume_quota_backoff_seconds: int = 60  # current backoff duration
         self._volume_quota_max_backoff: int = 300  # 5 minutes max
         self._last_order_time: float = 0  # for pacing orders in 15s free tx window
+        self._last_quota_alert_time: float = 0  # periodic quota status alert (20min)
+        self._quota_alert_interval: float = 1200  # 20 minutes in seconds
 
 
     async def start(self):
@@ -1901,6 +1903,22 @@ class LighterCopilot:
         # Skip tick if in volume quota cooldown
         if self._is_volume_quota_cooldown():
             return
+        
+        # Periodic quota status alert (every 20 minutes)
+        now = time.time()
+        if now - self._last_quota_alert_time > self._quota_alert_interval:
+            self._last_quota_alert_time = now
+            quota = self._volume_quota_remaining
+            status = "unknown" if quota is None else f"{quota} TX"
+            positions_count = len(self.tracker.positions)
+            emoji = "🔴" if (quota is not None and quota < 50) else "🟡" if (quota is not None and quota < 200) else "🟢"
+            await self.alerts.send(
+                f"{emoji} *Quota Status*\n"
+                f"Remaining: {status}\n"
+                f"Positions: {positions_count}\n"
+                f"Cooldown: {'active' if self._is_volume_quota_cooldown() else 'none'}"
+            )
+
         self._prune_caches()
         if not self.api:
             return

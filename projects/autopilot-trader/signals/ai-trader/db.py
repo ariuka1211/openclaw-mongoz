@@ -153,6 +153,31 @@ class DecisionDB:
             )
             self._conn.commit()
 
+    def update_latest_outcome(self, symbol: str, exit_price: float, pnl_usd: float,
+                              pnl_pct: float, roe_pct: float, exit_reason: str) -> bool:
+        """Update the most recent outcome for a symbol with actual fill price.
+
+        Called after verification confirms the fill price. If the bot crashes
+        before this, the estimated outcome still exists with the best available price.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            cur = self._conn.execute(
+                """UPDATE outcomes SET
+                    exit_price = ?,
+                    pnl_usd = ?,
+                    pnl_pct = ?,
+                    roe_pct = ?,
+                    exit_reason = ?,
+                    timestamp = ?
+                WHERE id = (
+                    SELECT id FROM outcomes WHERE symbol = ? ORDER BY id DESC LIMIT 1
+                )""",
+                (exit_price, pnl_usd, pnl_pct, roe_pct, exit_reason, now, symbol),
+            )
+            self._conn.commit()
+            return cur.rowcount > 0
+
     def log_alert(self, level: str, message: str):
         now = datetime.now(timezone.utc).isoformat()
         with self._lock:

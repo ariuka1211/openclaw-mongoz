@@ -1877,8 +1877,14 @@ class LighterCopilot:
 
         return None
 
-    def _log_outcome(self, pos: TrackedPosition, exit_price: float, exit_reason: str):
+    def _log_outcome(self, pos: TrackedPosition, exit_price: float, exit_reason: str,
+                     estimated: bool = False):
         """Log a closed trade outcome to the AI trader journal DB.
+
+        When estimated=True, marks the outcome as provisional (best available price
+        at close submission time). After verification, call _update_outcome() to
+        correct with actual fill price. This ensures we never lose outcome data if
+        the bot crashes during verification.
 
         PnL math (no double-counting of leverage):
           pnl_pct  = raw price movement % (not leveraged)
@@ -1904,6 +1910,8 @@ class LighterCopilot:
             # ROE = return relative to margin (not notional) = pnl_pct × leverage
             roe_pct = pnl_pct * self.cfg.default_leverage
 
+            # Mark as estimated if we haven't verified the fill yet
+            reason_tag = f"{exit_reason} (estimated)" if estimated else exit_reason
             _db.log_outcome({
                 "symbol": pos.symbol,
                 "direction": pos.side,
@@ -1915,16 +1923,46 @@ class LighterCopilot:
                 "roe_pct": roe_pct,
                 "hold_time_seconds": hold_seconds,
                 "max_drawdown_pct": 0,  # not tracked yet
-                "exit_reason": exit_reason,
+                "exit_reason": reason_tag,
                 "decision_snapshot": {},
             })
+            tag = " (est)" if estimated else ""
             logging.info(
-                f"📝 Outcome logged: {pos.side} {pos.symbol} "
+                f"📝 Outcome logged{tag}: {pos.side} {pos.symbol} "
                 f"PnL=${pnl_usd:+.2f} ({roe_pct:+.1f}% ROE) "
                 f"held={hold_seconds}s reason={exit_reason}"
             )
         except Exception as e:
             logging.warning(f"Failed to log outcome: {e}")
+
+    def _update_outcome(self, pos: TrackedPosition, exit_price: float, exit_reason: str):
+        """Update the most recent outcome for this symbol with actual fill price.
+
+        Called after verification confirms the actual fill. If this fails or the
+        bot crashes, the estimated outcome already exists in the DB.
+        """
+        if _db is None:
+            return
+        try:
+            is_long = pos.side == "long"
+            pnl_pct = ((exit_price - pos.entry_price) / pos.entry_price * 100) if is_long \
+                else ((pos.entry_price - exit_price) / pos.entry_price * 100)
+            size_usd = pos.size * pos.entry_price
+            pnl_usd = size_usd * pnl_pct / 100
+            roe_pct = pnl_pct * self.cfg.default_leverage
+
+            updated = _db.update_latest_outcome(
+                pos.symbol, exit_price, pnl_usd, pnl_pct, roe_pct, exit_reason
+            )
+            if updated:
+                logging.info(
+                    f"📝 Outcome updated: {pos.side} {pos.symbol} "
+                    f"PnL=${pnl_usd:+.2f} ({roe_pct:+.1f}% ROE) reason={exit_reason}"
+                )
+            else:
+                logging.warning(f"Outcome update: no matching record for {pos.symbol}")
+        except Exception as e:
+            logging.warning(f"Failed to update outcome: {e}")
 
     def _write_ai_result(self, decision: dict, success: bool):
         """Write execution result for the AI trader to read."""

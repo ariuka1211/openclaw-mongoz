@@ -184,7 +184,7 @@ class ContextBuilder:
                 roe = self._calc_roe(p)
                 pos_summary.append(
                     f"- {p.get('symbol', '?')} {p.get('side', '?').upper()} "
-                    f"${p.get('size_usd', 0):.0f} "
+                    f"${p.get('position_size_usd', p.get('size_usd', 0)):.0f} "
                     f"@ {p.get('entry_price', 0):.4f} "
                     f"(ROE: {roe:+.1f}%)"
                 )

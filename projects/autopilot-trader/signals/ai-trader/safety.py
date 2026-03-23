@@ -145,7 +145,7 @@ class SafetyLayer:
 
         # Rule 4: Max 15% total exposure
         current_exposure = sum(
-            abs(p.get("size_usd", 0)) for p in positions
+            abs(p.get("position_size_usd", p.get("size_usd", 0))) for p in positions
         )
         new_exposure = equity * size_pct / 100
         total_exposure_pct = (current_exposure + new_exposure) / equity * 100

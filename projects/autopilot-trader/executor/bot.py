@@ -1392,7 +1392,8 @@ class LighterCopilot:
                 return f"Missing or invalid symbol: {symbol!r}"
 
         if action == "open":
-            size_usd = decision.get("size_usd", 0)
+            # IPC-03: use requested_size_usd (new) with fallback to size_usd (legacy)
+            size_usd = decision.get("requested_size_usd", 0) or decision.get("size_usd", 0)
             if not isinstance(size_usd, (int, float)) or size_usd <= 0:
                 return f"Invalid size_usd: {size_usd!r}"
             direction = decision.get("direction")
@@ -1464,7 +1465,8 @@ class LighterCopilot:
         """Execute an AI-recommended open. Returns True on success."""
         symbol = decision.get("symbol")
         direction = decision.get("direction")
-        size_usd = decision.get("size_usd", 0)
+        # IPC-03: use requested_size_usd (new) with fallback to size_usd (legacy)
+        size_usd = decision.get("requested_size_usd", 0) or decision.get("size_usd", 0)
 
         if not symbol or not direction or size_usd <= 0:
             logging.warning(f"AI open: invalid decision fields")
@@ -1937,7 +1939,7 @@ class LighterCopilot:
                     "entry_price": pos.entry_price,
                     "current_price": current_price if current_price and current_price > 0 else pos.entry_price,
                     "size": pos.size,
-                    "size_usd": pos.size * pos.entry_price,
+                    "position_size_usd": pos.size * pos.entry_price,
                 })
             result = {
                 "timestamp": datetime.now(timezone.utc).isoformat(),

@@ -550,6 +550,10 @@ class LighterAPI:
         self._last_known_quota: int | None = None  # last non-None quota value
         self._last_quota_time: float = 0  # when _last_known_quota was last updated
 
+        # Load persisted quota cache from state file (survives restarts)
+        self._quota_state_file = self._state_dir / "quota_state.json"
+        self._load_quota_cache()
+
     async def _ensure_client(self):
         """Lazy initialization of API clients in async context."""
         if self._client is not None:
@@ -657,6 +661,7 @@ class LighterAPI:
             self._volume_quota_remaining = quota
             self._last_known_quota = quota
             self._last_quota_time = time.time()
+            self._save_quota_cache()
             if quota == 0:
                 logging.warning("⚠️ Volume quota depleted — next orders need free window")
         else:
@@ -838,6 +843,32 @@ class LighterAPI:
                 json.dump(self.tracked_market_ids, f)
         except OSError as e:
             logging.warning(f"Failed to save tracked markets: {e}")
+
+    def _load_quota_cache(self):
+        """Load persisted quota from state file."""
+        try:
+            if self._quota_state_file.exists():
+                with open(self._quota_state_file) as f:
+                    data = json.load(f)
+                quota = data.get("quota")
+                ts = data.get("timestamp", 0)
+                if isinstance(quota, int) and quota >= 0:
+                    self._last_known_quota = quota
+                    self._last_quota_time = float(ts)
+                    logging.info(f"📂 Loaded quota cache: {quota} TX (from {time.strftime('%H:%M:%S', time.localtime(ts))})")
+        except (json.JSONDecodeError, OSError) as e:
+            logging.warning(f"Failed to load quota cache: {e}")
+
+    def _save_quota_cache(self):
+        """Persist quota to state file."""
+        if self._last_known_quota is None:
+            return
+        try:
+            self._state_dir.mkdir(parents=True, exist_ok=True)
+            with open(self._quota_state_file, "w") as f:
+                json.dump({"quota": self._last_known_quota, "timestamp": self._last_quota_time}, f)
+        except OSError as e:
+            logging.warning(f"Failed to save quota cache: {e}")
 
     async def execute_tp(self, market_id: int, size: float, trigger_price: float, is_long: bool) -> bool:
         """Execute a take profit order (reduce-only, IOC)."""

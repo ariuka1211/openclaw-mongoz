@@ -2203,6 +2203,9 @@ class LighterCopilot:
                 logging.warning(f"⚠️ DSL close: {pos.symbol} volume quota exhausted (attempt {attempts}, retry in {retry_delay}s)")
                 return  # Don't remove from tracker, will retry after cooldown
             if sl_success:
+                # Log outcome NOW with estimated price to prevent data loss on crash
+                self._log_outcome(pos, price, f"dsl_{action}", estimated=True)
+
                 position_closed = await self._verify_position_closed(mid, pos.symbol)
                 if not position_closed:
                     # Increment DSL close attempt counter
@@ -2249,7 +2252,8 @@ class LighterCopilot:
                 return  # Don't remove from tracker, will retry after cooldown
             fill_price = await self._get_fill_price(mid, sl_coi)
             exit_price = fill_price if fill_price else price
-            self._log_outcome(pos, exit_price, f"dsl_{action}")
+            # Update the outcome with actual fill price (was logged as estimated before verification)
+            self._update_outcome(pos, exit_price, f"dsl_{action}")
             self._recently_closed[mid] = time.monotonic() + 300  # 5 min phantom guard
             self.tracker.remove_position(mid)
             # Post-close completion alert
@@ -2293,6 +2297,8 @@ class LighterCopilot:
                 self._start_volume_quota_cooldown()
                 logging.warning(f"⚠️ TP: {pos.symbol} volume quota exhausted — cooldown started")
                 return  # Keep position, will retry after cooldown
+            # TP submitted — log outcome immediately (no verification loop for TP)
+            self._log_outcome(pos, price, action)
         else:
             try:
                 sl_success, sl_coi = await self.api.execute_sl(mid, pos.size, price, is_long)
@@ -2307,12 +2313,17 @@ class LighterCopilot:
                 logging.warning(f"⚠️ SL: {pos.symbol} volume quota exhausted (attempt {attempts}, retry in {retry_delay}s)")
                 return  # Don't remove from tracker, will retry after cooldown
             if sl_success:
+                # Log outcome NOW with estimated price to prevent data loss on crash
+                self._log_outcome(pos, price, action, estimated=True)
+
                 position_closed = await self._verify_position_closed(mid, pos.symbol)
                 if not position_closed:
                     logging.warning(f"⚠️ {pos.symbol}: SL submitted but position still open — keeping in tracker")
                     return  # Don't remove from tracker, will retry next tick
                 fill_price = await self._get_fill_price(mid, sl_coi)
                 price = fill_price if fill_price else price
+                # Update the outcome with actual fill price (was logged as estimated before verification)
+                self._update_outcome(pos, price, action)
             else:
                 # SL order failed (rate-limited or rejected) — track attempts with graduated delay
                 attempts = self._close_attempts.get(pos.symbol, 0) + 1
@@ -2333,8 +2344,6 @@ class LighterCopilot:
                         f"MANUAL INTERVENTION may be needed."
                     )
                 return  # Don't remove from tracker, will retry after cooldown
-
-        self._log_outcome(pos, price, action)
         self._recently_closed[mid] = time.monotonic() + 300  # 5 min phantom guard
         self.tracker.remove_position(mid)
 

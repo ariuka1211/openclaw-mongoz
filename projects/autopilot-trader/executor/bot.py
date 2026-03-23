@@ -1102,7 +1102,7 @@ class LighterCopilot:
         self._api_lag_warnings: dict[str, float] = {}  # symbol → last warning timestamp
         self._pending_sync: set[int] = set()  # market_ids opened this tick — skip in sync
         # Phantom position prevention: require 2 consecutive sync cycles to confirm new positions
-        self._pending_positions: dict[int, dict] = {}  # market_id → pos_data (awaiting confirmation)
+
         self._recently_closed: dict[int, float] = {}  # market_id → monotonic() expire time (bot-closed positions)
         # Close attempt tracking — prevent infinite close loops
         self._close_attempts: dict[str, int] = {}  # symbol → consecutive close attempts

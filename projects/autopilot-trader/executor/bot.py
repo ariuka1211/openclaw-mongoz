@@ -1126,6 +1126,8 @@ class LighterCopilot:
         self._last_quota_alert_time: float = 0  # periodic quota status alert (20min)
         self._quota_alert_interval: float = 1200  # 20 minutes in seconds
         self._last_quota_emergency_warn: float = 0  # rate-limit for quota emergency warnings
+        # Saved positions for DSL state restoration across restarts
+        self._saved_positions: dict | None = None
 
 
     async def start(self):
@@ -2073,6 +2075,9 @@ class LighterCopilot:
                 f"Cooldown: {'active' if in_cooldown else 'none'}"
             )
 
+        # 1.4. Reconcile saved DSL state with detected positions (first tick after restart)
+        self._reconcile_positions(live_positions)
+
         # 1.5. Process signals — AI mode or rule-based
         # NOTE: Moved AFTER position sync/confirmation so tracker is populated
         # before close_all or other AI decisions execute.
@@ -2334,6 +2339,22 @@ class LighterCopilot:
         self._recently_closed[mid] = time.monotonic() + 300  # 5 min phantom guard
         self.tracker.remove_position(mid)
 
+    def _serialize_dsl_state(self, dsl: DSLState) -> dict:
+        """Serialize DSLState to a JSON-compatible dict."""
+        return {
+            "side": dsl.side,
+            "entry_price": dsl.entry_price,
+            "leverage": dsl.leverage,
+            "high_water_roe": dsl.high_water_roe,
+            "high_water_price": dsl.high_water_price,
+            "high_water_time": dsl.high_water_time.isoformat() if dsl.high_water_time else None,
+            "current_tier_trigger": dsl.current_tier.trigger_pct if dsl.current_tier else None,
+            "breach_count": dsl.breach_count,
+            "locked_floor_roe": dsl.locked_floor_roe,
+            "stagnation_active": dsl.stagnation_active,
+            "stagnation_started": dsl.stagnation_started.isoformat() if dsl.stagnation_started else None,
+        }
+
     def _save_state(self):
         """Persist critical ephemeral state to disk for crash/restart recovery."""
         now = time.monotonic()
@@ -2347,6 +2368,23 @@ class LighterCopilot:
             "close_attempt_cooldown": {s: max(0, t - now) for s, t in self._close_attempt_cooldown.items()},
             "dsl_close_attempts": self._dsl_close_attempts,
             "dsl_close_attempt_cooldown": {s: max(0, t - now) for s, t in self._dsl_close_attempt_cooldown.items()},
+            # Persist position state + DSL state for restart recovery
+            "positions": {
+                str(mid): {
+                    "market_id": mid,
+                    "symbol": pos.symbol,
+                    "side": pos.side,
+                    "entry_price": pos.entry_price,
+                    "size": pos.size,
+                    "leverage": pos.dsl_state.leverage if pos.dsl_state else self.cfg.default_leverage,
+                    "sl_pct": pos.sl_pct,
+                    "high_water_mark": pos.high_water_mark,
+                    "trailing_active": pos.trailing_active,
+                    "trailing_sl_level": pos.trailing_sl_level,
+                    "dsl": self._serialize_dsl_state(pos.dsl_state) if pos.dsl_state else None,
+                }
+                for mid, pos in self.tracker.positions.items()
+            },
         }
         try:
             state_path = Path("state/bot_state.json")
@@ -2392,6 +2430,9 @@ class LighterCopilot:
                 if remaining > 0:
                     self._dsl_close_attempt_cooldown[symbol] = now + remaining
 
+            # Load saved positions for DSL state restoration (applied after exchange detection)
+            self._saved_positions = state.get("positions") or None
+
             restored = []
             if self._last_ai_decision_ts:
                 restored.append(f"ai_decision_ts={self._last_ai_decision_ts}")
@@ -2401,6 +2442,8 @@ class LighterCopilot:
                 restored.append(f"ai_close_cooldown={len(self._ai_close_cooldown)}")
             if self._close_attempts:
                 restored.append(f"close_attempts={len(self._close_attempts)}")
+            if self._saved_positions:
+                restored.append(f"saved_positions={len(self._saved_positions)}")
             if restored:
                 logging.info(f"🔄 Bot state restored: {', '.join(restored)}")
 
@@ -2420,6 +2463,88 @@ class LighterCopilot:
                     pass
         except Exception as e:
             logging.warning(f"Failed to load bot state: {e}")
+
+    def _restore_dsl_state(self, dsl_data: dict, pos: TrackedPosition):
+        """Restore saved DSL state onto a live TrackedPosition.
+
+        Overwrites all tracked fields on the existing DSLState from saved data.
+        The DSLState object is already constructed by tracker.add_position() with
+        correct entry_price/side/leverage — we just restore the progress fields.
+        """
+        if not dsl_data or not pos.dsl_state:
+            return
+        try:
+            saved_tier_trigger = dsl_data.get("current_tier_trigger")
+            tier = None
+            if saved_tier_trigger is not None:
+                for t in self.tracker.dsl_cfg.tiers:
+                    if t.trigger_pct == saved_tier_trigger:
+                        tier = t
+                        break
+
+            saved_hw_time = dsl_data.get("high_water_time")
+            hw_time = datetime.fromisoformat(saved_hw_time) if saved_hw_time else None
+            saved_stag_time = dsl_data.get("stagnation_started")
+            stag_time = datetime.fromisoformat(saved_stag_time) if saved_stag_time else None
+
+            pos.dsl_state.high_water_roe = dsl_data.get("high_water_roe", 0.0)
+            pos.dsl_state.high_water_price = dsl_data.get("high_water_price", 0.0)
+            pos.dsl_state.high_water_time = hw_time
+            pos.dsl_state.current_tier = tier
+            pos.dsl_state.breach_count = dsl_data.get("breach_count", 0)
+            pos.dsl_state.locked_floor_roe = dsl_data.get("locked_floor_roe")
+            pos.dsl_state.stagnation_active = dsl_data.get("stagnation_active", False)
+            pos.dsl_state.stagnation_started = stag_time
+
+            logging.info(
+                f"🔄 Restored DSL state for {pos.symbol}: "
+                f"HW_ROE={pos.dsl_state.high_water_roe:+.1f}%, "
+                f"Tier={tier.trigger_pct if tier else 'none'}, "
+                f"Floor={pos.dsl_state.locked_floor_roe}, "
+                f"Breaches={pos.dsl_state.breach_count}"
+            )
+        except Exception as e:
+            logging.warning(f"Failed to restore DSL state for {pos.symbol}: {e}")
+
+    def _reconcile_positions(self, live_positions: list[dict] | None):
+        """Reconcile saved positions with live exchange positions.
+
+        Called once per tick (no-op after first successful reconciliation).
+        Restores saved DSLState for positions that match the exchange.
+
+        Saved but not on exchange → dropped (position was closed).
+        On exchange but not saved → stays with fresh DSLState (new position).
+        Both → DSLState restored from saved data.
+        """
+        if not self._saved_positions or live_positions is None:
+            return
+
+        live_mids = {p["market_id"] for p in live_positions}
+
+        for mid_str, saved_pos in self._saved_positions.items():
+            try:
+                mid = int(mid_str)
+            except (ValueError, TypeError):
+                continue
+
+            if mid in live_mids and mid in self.tracker.positions:
+                # Position exists on both exchange and tracker — restore DSL state
+                pos = self.tracker.positions[mid]
+                dsl_data = saved_pos.get("dsl")
+                if dsl_data:
+                    self._restore_dsl_state(dsl_data, pos)
+                # Also restore legacy trailing state
+                if saved_pos.get("trailing_sl_level") is not None:
+                    pos.trailing_sl_level = saved_pos["trailing_sl_level"]
+                if saved_pos.get("trailing_active"):
+                    pos.trailing_active = True
+                if saved_pos.get("high_water_mark"):
+                    pos.high_water_mark = max(pos.high_water_mark, saved_pos["high_water_mark"])
+            elif mid not in live_mids:
+                logging.info(f"🗑️ Saved position {saved_pos.get('symbol', mid)} no longer on exchange — dropped")
+
+        # Clear after reconciliation (one-time operation per restart)
+        self._saved_positions = None
 
     def _shutdown(self):
         logging.info("Shutdown requested...")

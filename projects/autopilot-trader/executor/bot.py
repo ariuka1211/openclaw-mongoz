@@ -1923,7 +1923,7 @@ class LighterCopilot:
             # When quota is None but we're in cooldown, it means quota is exhausted (0)
             if quota is None and in_cooldown:
                 quota = 0
-            status = "unknown" if quota is None else f"{quota} TX"
+            status = "0 TX" if quota is None else f"{quota} TX"
             positions_count = len(self.tracker.positions)
             emoji = "🔴" if (quota is not None and quota < 50) else "🟡" if (quota is not None and quota < 200) else "🟢"
             await self.alerts.send(

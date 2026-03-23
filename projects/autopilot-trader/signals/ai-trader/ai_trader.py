@@ -138,6 +138,8 @@ class AITrader:
         # Change detection — only call LLM when something actually changed
         self._last_state_hash: str | None = None
         self._cycles_skipped: int = 0
+        # IPC-02: Track last sent decision_id for result correlation
+        self._last_sent_decision_id = None
 
         # Paths
         self.decision_file = Path(config["decision_file"])
@@ -300,6 +302,13 @@ class AITrader:
         executed = False
         if safe and decision.get("action") != "hold":
             executed = await self._send_to_bot(decision)
+            if executed:
+                # IPC-02: Wait briefly for bot result, then correlate
+                await asyncio.sleep(3)
+                result = await self._check_bot_result(self._last_sent_decision_id)
+                if result and result.get("success") is False:
+                    log.warning(f"Bot reported validation failure: {result.get('decision_action')} {result.get('decision_symbol')} -- not retrying")
+                    executed = False
 
         # 7. Log to SQLite
         self.db.log_decision(
@@ -315,21 +324,54 @@ class AITrader:
 
         log.info(f"--- Cycle {cycle_id} done (latency={latency_ms}ms, executed={executed}) ---")
 
+    async def _check_bot_result(self, decision_id):
+        """Check bot result file for correlation with sent decision."""
+        if not self.result_file.exists():
+            return None
+        result = safe_read_json(self.result_file)
+        if not result:
+            return None
+        # IPC-02: Correlate via processed_decision_id
+        if result.get("processed_decision_id") != decision_id:
+            log.debug(f"Result file exists but processed_decision_id does not match sent {decision_id}")
+            return None
+        return result
+
+    async def _check_bot_result(self, decision_id):
+        """Check bot result file for correlation with sent decision."""
+        if not self.result_file.exists():
+            return None
+        result = safe_read_json(self.result_file)
+        if not result:
+            return None
+        # IPC-02: Correlate via processed_decision_id
+        if result.get("processed_decision_id") != decision_id:
+            log.debug(f"Result file exists but processed_decision_id does not match sent {decision_id}")
+            return None
+        return result
+
     async def _send_to_bot(self, decision: dict) -> bool:
-        """Write decision to shared JSON file for bot to consume."""
+        """Write decision to shared JSON file for bot to consume.
+
+        IPC protocol (atomic, race-safe):
+        1. Read current decision + ACK status
+        2. If current decision not ACKed -> skip (bot still processing)
+        3. Build new decision, include prev_decision_id for bot-side verification
+        4. Re-verify ACK still matches (guards against bot ACKing between steps 1 and 4)
+        5. Atomic write via os.replace (temp file -> decision file)
+        6. Delete ACK file (bot already consumed it)
+        """
         try:
-            # ACK check — don't overwrite unprocessed decisions
             ack_path = str(self.decision_file) + ".ack"
+            prev_decision_id: str | None = None
+
+            # Step 1-2: Check if current decision is still being processed
             if self.decision_file.exists():
                 current = safe_read_json(self.decision_file)
                 if current:
                     current_id = current.get("decision_id", "")
-                    # Check if bot acked this decision
                     try:
-                        if Path(ack_path).exists():
-                            acked_id = Path(ack_path).read_text().strip()
-                        else:
-                            acked_id = ""
+                        acked_id = Path(ack_path).read_text().strip() if Path(ack_path).exists() else ""
                     except Exception:
                         acked_id = ""
 
@@ -337,9 +379,15 @@ class AITrader:
                         log.info(f"⏳ Bot hasn't processed decision {current_id} yet (acked={acked_id}), skipping write")
                         return False
 
+                    # Capture ACKed ID for inclusion in new decision (bot-side verification)
+                    if current_id and acked_id == current_id:
+                        prev_decision_id = current_id
+
+            # Step 3: Build new decision
             decision_id = str(uuid.uuid4())[:8]
             output = {
                 "decision_id": decision_id,
+                "prev_decision_id": prev_decision_id,  # IPC: lets bot verify it ACKed the right one
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "action": decision.get("action"),
                 "symbol": decision.get("symbol"),
@@ -358,17 +406,32 @@ class AITrader:
             else:
                 output["requested_size_usd"] = None
 
+            # Step 4: Re-verify ACK before atomic write (guards against TOCTOU race)
+            if prev_decision_id:
+                try:
+                    acked_id_now = Path(ack_path).read_text().strip() if Path(ack_path).exists() else ""
+                except Exception:
+                    acked_id_now = ""
+                if acked_id_now != prev_decision_id:
+                    log.info(f"⏳ ACK changed after check (was={prev_decision_id}, now={acked_id_now}), skipping write")
+                    return False
+
+            # Step 5: Atomic write — temp file then os.replace
             self.decision_file.parent.mkdir(parents=True, exist_ok=True)
             atomic_write(self.decision_file, output)
 
-            # Clean up ACK file after writing new decision
+            # Step 6: Clean up ACK file — safe because bot already consumed it (we verified ACK matches)
             try:
                 if Path(ack_path).exists():
                     Path(ack_path).unlink()
             except Exception:
                 pass
 
-            log.info(f"📤 Decision written [{decision_id}]: {decision.get('action')} {decision.get('symbol', '')}")
+            # IPC-02: Track sent decision_id for result correlation
+            self._last_sent_decision_id = decision_id
+
+            log.info(f"📤 Decision written [{decision_id}]: {decision.get('action')} {decision.get('symbol', '')}"
+                     + (f" (prev={prev_decision_id})" if prev_decision_id else ""))
             self.safety.record_order()
 
             # Record for cooldown-after-loss protection
@@ -392,6 +455,8 @@ class AITrader:
         log.critical(f"🚨 Emergency halt: {reason}")
         try:
             close_all = {
+                "decision_id": str(uuid.uuid4())[:8],
+                "prev_decision_id": None,  # Emergency halt bypasses normal IPC flow
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "action": "close_all",
                 "reasoning": f"Emergency halt triggered: {reason}",

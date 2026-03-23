@@ -147,11 +147,15 @@ class ContextBuilder:
         return []
 
     def read_strategy_memory(self) -> str:
-        """Read learned patterns from strategy memory file."""
+        """Read learned patterns from strategy memory file (truncated to save tokens)."""
         if not self.memory_file.exists():
             return ""
         try:
-            return self.memory_file.read_text().strip()
+            content = self.memory_file.read_text().strip()
+            # Truncate to last 2000 chars to keep prompt size manageable
+            if len(content) > 2000:
+                content = "..." + content[-2000:]
+            return content
         except OSError:
             return ""
 

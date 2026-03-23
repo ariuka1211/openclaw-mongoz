@@ -1125,6 +1125,7 @@ class LighterCopilot:
         self._last_order_time: float = 0  # for pacing orders in 15s free tx window
         self._last_quota_alert_time: float = 0  # periodic quota status alert (20min)
         self._quota_alert_interval: float = 1200  # 20 minutes in seconds
+        self._last_quota_emergency_warn: float = 0  # rate-limit for quota emergency warnings
 
 
     async def start(self):
@@ -1588,7 +1589,7 @@ class LighterCopilot:
                     return True
                 # Also check if there are any active orders (the close order might still be pending)
                 active_orders = await self._check_active_orders(market_id)
-                sl_orders = [o for o in active_orders if o.get('is_ask') == True]  # sell orders for long close
+                sl_orders = [o for o in active_orders]  # all active orders are close-related (both long close and short close)
                 logging.info(
                     f"⏳ {symbol}: position still open (attempt {attempt + 1}/{len(delays)}), "
                     f"active_orders={len(active_orders)}, sl_orders={len(sl_orders)}"
@@ -1959,8 +1960,12 @@ class LighterCopilot:
     def _should_skip_non_critical_orders(self) -> bool:
         """In emergency mode, only allow SL orders."""
         if self._is_quota_emergency():
-            quota = self.api.volume_quota_remaining if self.api else None
-            logging.warning(f"🚨 Quota emergency mode (remaining={quota}), SL only")
+            # Rate-limit warning to once per minute
+            now = time.monotonic()
+            if now - getattr(self, '_last_quota_emergency_warn', 0) > 60:
+                self._last_quota_emergency_warn = now
+                quota = self.api.volume_quota_remaining if self.api else None
+                logging.warning(f"🚨 Quota emergency mode (remaining={quota}), SL only")
             return True
         return False
 

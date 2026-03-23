@@ -138,6 +138,8 @@ class AITrader:
         # Change detection — only call LLM when something actually changed
         self._last_state_hash: str | None = None
         self._cycles_skipped: int = 0
+        # IPC-02: Track last sent decision_id for result correlation
+        self._last_sent_decision_id = None
 
         # Paths
         self.decision_file = Path(config["decision_file"])
@@ -300,6 +302,13 @@ class AITrader:
         executed = False
         if safe and decision.get("action") != "hold":
             executed = await self._send_to_bot(decision)
+            if executed:
+                # IPC-02: Wait briefly for bot result, then correlate
+                await asyncio.sleep(3)
+                result = await self._check_bot_result(self._last_sent_decision_id)
+                if result and result.get("success") is False:
+                    log.warning(f"Bot reported validation failure: {result.get('decision_action')} {result.get('decision_symbol')} -- not retrying")
+                    executed = False
 
         # 7. Log to SQLite
         self.db.log_decision(
@@ -314,6 +323,23 @@ class AITrader:
         )
 
         log.info(f"--- Cycle {cycle_id} done (latency={latency_ms}ms, executed={executed}) ---")
+
+    async def _check_bot_result(self, decision_id: str) -> dict | None:
+        """Check bot result file for correlation with sent decision.
+
+        Returns result dict if found with matching processed_decision_id, else None.
+        """
+        if not self.result_file.exists():
+            return None
+        result = safe_read_json(self.result_file)
+        if not result:
+            return None
+        # IPC-02: Correlate via processed_decision_id
+        if result.get("processed_decision_id") != decision_id:
+            log.debug(f"Result file exists but processed_decision_id={result.get('processed_decision_id')} "
+                       f"doesn't match sent {decision_id}")
+            return None
+        return result
 
     async def _send_to_bot(self, decision: dict) -> bool:
         """Write decision to shared JSON file for bot to consume."""
@@ -367,6 +393,9 @@ class AITrader:
                     Path(ack_path).unlink()
             except Exception:
                 pass
+
+            # IPC-02: Track sent decision_id for result correlation
+            self._last_sent_decision_id = decision_id
 
             log.info(f"📤 Decision written [{decision_id}]: {decision.get('action')} {decision.get('symbol', '')}")
             self.safety.record_order()

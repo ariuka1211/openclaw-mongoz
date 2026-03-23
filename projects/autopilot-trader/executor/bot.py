@@ -1139,7 +1139,6 @@ class LighterCopilot:
         self._idle_tick_count: int = 0
         self._idle_threshold: int = 2   # consecutive ticks before extending interval
         self._idle_sleep_interval: int = 60  # seconds between polls when idle (vs normal)
->>>>>>> fix/edge-01-idle-polling
 
 
     async def start(self):

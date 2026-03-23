@@ -49,6 +49,11 @@ class LighterAuthManager:
         )
         if err:
             raise RuntimeError(f"Failed to create auth token: {err}")
+        if not auth:
+            raise RuntimeError(
+                "create_auth_token_with_expiry returned empty auth token "
+                "(C signer likely failed silently)"
+            )
 
         now = int(time.time())
         expires_at = now + self.token_lifetime

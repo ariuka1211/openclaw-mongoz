@@ -1140,6 +1140,13 @@ class LighterCopilot:
                 account_index=self.cfg.account_index
             )
             auth = self._auth_manager.get_auth_token()
+            logging.debug(
+                f"🔑 Auth token type={type(auth).__name__} "
+                f"len={len(auth) if auth else 0} "
+                f"preview={repr(auth[:20]) if auth else 'None'}"
+            )
+            if not auth:
+                raise RuntimeError("LighterAuthManager.get_auth_token() returned empty/None")
             limits = await self.api._account_api.account_limits(
                 account_index=self.cfg.account_index,
                 auth=auth,

@@ -1561,6 +1561,31 @@ class LighterCopilot:
             actual_size = verified_pos["size"]
             ai_sl_pct = decision.get("stop_loss_pct")
             self.tracker.add_position(market_id, symbol, direction, current_price, actual_size, leverage=self.cfg.default_leverage, sl_pct=ai_sl_pct)
+
+            # BUG-06: Verify we can actually fetch price for this position after open
+            # If price is unavailable, the position becomes "orphaned" — DSL can't compute ROE
+            price_ok = False
+            for attempt in range(1, 4):
+                verify_price = await self.api.get_price_with_mark_fallback(market_id)
+                if verify_price:
+                    price_ok = True
+                    if attempt > 1:
+                        logging.info(f"✅ {symbol}: price verified on retry {attempt}/3 = ${verify_price:,.2f}")
+                    break
+                if attempt < 3:
+                    await asyncio.sleep(1)
+            if not price_ok:
+                logging.error(f"❌ AI open: {symbol} — no price after 3 attempts, removing orphaned position")
+                self.tracker.remove_position(market_id)
+                self._pending_sync.discard(market_id)
+                await self.alerts.send(
+                    f"❌ *AI OPEN FAILED*\n"
+                    f"{direction.upper()} {symbol}\n"
+                    f"Order filled but price unavailable — position removed.\n"
+                    f"Order may need manual cleanup on exchange."
+                )
+                return False
+
             logging.info(f"📊 Quota remaining: {self.api.volume_quota_remaining}")
             # Reset close attempt tracking for this symbol
             self._close_attempts.pop(symbol, None)
@@ -2098,6 +2123,11 @@ class LighterCopilot:
             # Skip if bot recently closed this position (stale API data)
             if mid in self._recently_closed:
                 logging.debug(f"⏭️ {symbol}: recently closed by bot, ignoring stale API data")
+                continue
+
+            # BUG-07: Skip positions the bot didn't open
+            if not self.cfg.track_manual_positions and mid not in self.bot_managed_market_ids:
+                logging.info(f"⏭️ Unmanaged position detected, skipping: {pos['side'].upper()} {symbol} (market_id={mid})")
                 continue
 
             # Check AI close cooldown before re-tracking

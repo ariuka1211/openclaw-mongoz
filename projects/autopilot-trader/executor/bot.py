@@ -545,6 +545,9 @@ class LighterAPI:
         # More accurate than recent_trades for ROE/stop-loss calculations
         self._mark_prices: dict[int, float] = {}  # market_id → mark_price
 
+        # Volume quota tracking — must exist before any async calls
+        self._volume_quota_remaining: int | None = None
+
     async def _ensure_client(self):
         """Lazy initialization of API clients in async context."""
         if self._client is not None:

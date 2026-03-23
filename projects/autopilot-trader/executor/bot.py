@@ -1128,6 +1128,9 @@ class LighterCopilot:
         self._last_quota_emergency_warn: float = 0  # rate-limit for quota emergency warnings
         # Saved positions for DSL state restoration across restarts
         self._saved_positions: dict | None = None
+        # Orphaned position detection — track consecutive no-price ticks per market
+        self._no_price_ticks: dict[int, int] = {}  # market_id → consecutive no-price tick count
+        self._no_price_alert_threshold: int = 3  # alert after N consecutive no-price ticks
 
 
     async def start(self):
@@ -1364,6 +1367,29 @@ class LighterCopilot:
                     # Use actual filled size from exchange (handles partial fills)
                     actual_size = verified_pos["size"]
                     self.tracker.add_position(mid, symbol, direction, current_price, actual_size, leverage=self.cfg.default_leverage)
+
+                    # BUG-06: Verify we can actually fetch price for this position after open
+                    price_ok = False
+                    for attempt in range(1, 4):
+                        verify_price = await self.api.get_price_with_mark_fallback(mid)
+                        if verify_price:
+                            price_ok = True
+                            if attempt > 1:
+                                logging.info(f"✅ {symbol}: price verified on retry {attempt}/3 = ${verify_price:,.2f}")
+                            break
+                        if attempt < 3:
+                            await asyncio.sleep(1)
+                    if not price_ok:
+                        logging.error(f"❌ Signal open: {symbol} — no price after 3 attempts, removing orphaned position")
+                        self.tracker.remove_position(mid)
+                        await self.alerts.send(
+                            f"❌ *SIGNAL OPEN FAILED*\n"
+                            f"{direction.upper()} {symbol}\n"
+                            f"Order filled but price unavailable — position removed.\n"
+                            f"Order may need manual cleanup on exchange."
+                        )
+                        continue
+
                     logging.info(f"📊 Quota remaining: {self.api.volume_quota_remaining}")
                     await self.alerts.send(
                         f"📡 *SIGNAL → OPENED*\n"
@@ -1975,6 +2001,10 @@ class LighterCopilot:
             expired_symbols = [mid for mid, (ts, _) in self.api._symbol_cache.items() if (now - ts) > self.api._symbol_cache_ttl]
             for mid in expired_symbols:
                 del self.api._symbol_cache[mid]
+        # Prune no-price ticks for positions no longer tracked
+        orphaned_mids = [m for m in self._no_price_ticks if m not in self.tracker.positions]
+        for m in orphaned_mids:
+            del self._no_price_ticks[m]
 
     def _is_volume_quota_cooldown(self) -> bool:
         """Check if bot is in volume quota cooldown."""
@@ -2168,7 +2198,27 @@ class LighterCopilot:
         """Process a single position's tick — fetch price, evaluate triggers, execute if needed."""
         price = await self.api.get_price_with_mark_fallback(mid)
         if not price:
+            # BUG-06: Orphaned position detection — don't skip silently
+            consecutive = self._no_price_ticks.get(mid, 0) + 1
+            self._no_price_ticks[mid] = consecutive
+            logging.warning(
+                f"⚠️ {pos.symbol}: no price data (mark + trade both failed) — "
+                f"consecutive no-price ticks: {consecutive}/{self._no_price_alert_threshold}"
+            )
+            if consecutive >= self._no_price_alert_threshold:
+                await self.alerts.send(
+                    f"🚨 *ORPHANED POSITION*\n"
+                    f"{pos.symbol} ({pos.side.upper()})\n"
+                    f"No price data for {consecutive} consecutive ticks.\n"
+                    f"Entry: ${pos.entry_price:,.2f}\n"
+                    f"DSL/SL evaluation suspended — MANUAL CHECK REQUIRED."
+                )
+                # Reset counter to avoid spamming every tick (alert once per threshold)
+                self._no_price_ticks[mid] = 0
             return
+        # Reset no-price counter on successful price fetch
+        if mid in self._no_price_ticks:
+            del self._no_price_ticks[mid]
 
         action = self.tracker.update_price(mid, price)
         is_long = pos.side == "long"

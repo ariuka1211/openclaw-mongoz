@@ -834,6 +834,9 @@ class LighterAPI:
                 if resp is not None:
                     resp_code = getattr(resp, 'code', None)
                     resp_msg = getattr(resp, 'msg', None) or getattr(resp, 'message', None)
+                    if resp_msg and "didn't use volume quota" in str(resp_msg):
+                        logging.warning(f"⚠️ Open order rate-limited (volume quota): {resp_msg}")
+                        return False  # Opening should fail explicitly if rate-limited
                     logging.info(f"✅ Position opened: {'LONG' if is_long else 'SHORT'} {size_usd:.2f} USD -> tx={tx}, resp_code={resp_code}, resp_msg={resp_msg}")
                 else:
                     logging.info(f"✅ Position opened: {'LONG' if is_long else 'SHORT'} {size_usd:.2f} USD -> {tx}")
@@ -859,8 +862,8 @@ class LighterAPI:
             best_price_int = await self._signer.get_best_price(market_id, is_ask=is_long)
             client_order_index = self._next_client_order_index()
 
-            # Use create_market_order_limited_slippage — no pre-check, direct submit with 2% slippage
-            result = await self._signer.create_market_order_limited_slippage(
+            # Use create_market_order_if_slippage — pre-checks order book before submitting
+            result = await self._signer.create_market_order_if_slippage(
                 market_index=market_id,
                 client_order_index=client_order_index,
                 base_amount=base_amount,
@@ -895,11 +898,15 @@ class LighterAPI:
                     resp_tx_hash = getattr(resp, 'tx_hash', None)
                     resp_pred_ms = getattr(resp, 'predicted_execution_time_ms', None)
                     resp_quota = getattr(resp, 'volume_quota_remaining', None)
-                    logging.info(
-                        f"✅ SL order submitted: code={resp_code}, msg={resp_msg}, "
-                        f"tx_hash={resp_tx_hash}, predicted_exec_ms={resp_pred_ms}, "
-                        f"vol_quota={resp_quota}, coi={client_order_index}"
-                    )
+                    if resp_msg and "didn't use volume quota" in str(resp_msg):
+                        logging.warning(f"⚠️ SL order rate-limited (volume quota): {resp_msg}")
+                        # Still return True — the order MIGHT execute later, but warn clearly
+                    else:
+                        logging.info(
+                            f"✅ SL order submitted: code={resp_code}, msg={resp_msg}, "
+                            f"tx_hash={resp_tx_hash}, predicted_exec_ms={resp_pred_ms}, "
+                            f"vol_quota={resp_quota}, coi={client_order_index}"
+                        )
                     # Warn if code is not the expected OK value
                     if resp_code is not None and resp_code != 200:
                         logging.warning(f"⚠️ SL order response code is {resp_code} (expected 200)")

@@ -1132,22 +1132,24 @@ class LighterCopilot:
         try:
             await self.api._ensure_client()
             await self.api._ensure_signer()
-            auth, err = self.api._signer.create_auth_token_with_expiry(deadline=30*24*60*60)
-            if err:
-                logging.warning(f"⚠️ Failed to create auth token for tier check: {err}")
-            else:
-                limits = await self.api._account_api.account_limits(
-                    account_index=self.cfg.account_index,
-                    authorization=auth,
-                )
-                logging.info(
-                    f"📊 Account tier: {limits.user_tier}, "
-                    f"effective_lit_stakes={limits.effective_lit_stakes}, "
-                    f"maker_fee_tick={limits.current_maker_fee_tick}, "
-                    f"taker_fee_tick={limits.current_taker_fee_tick}"
-                )
-                if limits.user_tier != "premium":
-                    logging.warning(f"⚠️ Account tier is '{limits.user_tier}' (not premium) — limits may apply")
+            self._auth_manager = LighterAuthManager(
+                signer=self.api._signer,
+                account_index=self.cfg.account_index
+            )
+            auth = self._auth_manager.get_auth_token()
+            limits = await self.api._account_api.account_limits(
+                account_index=self.cfg.account_index,
+                authorization=auth,
+                _request_timeout=30,
+            )
+            logging.info(
+                f"📊 Account tier: {limits.user_tier}, "
+                f"effective_lit_stakes={limits.effective_lit_stakes}, "
+                f"maker_fee_tick={limits.current_maker_fee_tick}, "
+                f"taker_fee_tick={limits.current_taker_fee_tick}"
+            )
+            if limits.user_tier != "premium":
+                logging.warning(f"⚠️ Account tier is '{limits.user_tier}' (not premium) — limits may apply")
         except Exception as e:
             logging.warning(f"⚠️ Account tier check failed: {e}")
 
@@ -1204,7 +1206,8 @@ class LighterCopilot:
         """Fetch USDC collateral balance from Lighter."""
         try:
             result = await self.api._account_api.account(
-                by="index", value=str(self.cfg.account_index)
+                by="index", value=str(self.cfg.account_index),
+                _request_timeout=30,
             )
             for acc in result.accounts:
                 return float(acc.collateral) if acc.collateral else 0
@@ -1515,6 +1518,7 @@ class LighterCopilot:
                 account_index=self.cfg.account_index,
                 market_id=market_id,
                 auth=auth,
+                _request_timeout=30,
             )
             active = []
             if hasattr(orders, 'orders') and orders.orders:
@@ -1900,15 +1904,15 @@ class LighterCopilot:
 
     async def _tick(self):
         """One cycle: sync positions, update prices, check triggers."""
-        # Skip tick if in volume quota cooldown
-        if self._is_volume_quota_cooldown():
-            return
-        
-        # Periodic quota status alert (every 20 minutes)
+        # Periodic quota status alert (every 20 minutes) — fires even during cooldown
         now = time.time()
         if now - self._last_quota_alert_time > self._quota_alert_interval:
             self._last_quota_alert_time = now
             quota = self.api.volume_quota_remaining if self.api else None
+            in_cooldown = self._is_volume_quota_cooldown()
+            # When quota is None but we're in cooldown, it means quota is exhausted (0)
+            if quota is None and in_cooldown:
+                quota = 0
             status = "unknown" if quota is None else f"{quota} TX"
             positions_count = len(self.tracker.positions)
             emoji = "🔴" if (quota is not None and quota < 50) else "🟡" if (quota is not None and quota < 200) else "🟢"
@@ -1916,8 +1920,12 @@ class LighterCopilot:
                 f"{emoji} *Quota Status*\n"
                 f"Remaining: {status}\n"
                 f"Positions: {positions_count}\n"
-                f"Cooldown: {'active' if self._is_volume_quota_cooldown() else 'none'}"
+                f"Cooldown: {'active' if in_cooldown else 'none'}"
             )
+
+        # Skip tick if in volume quota cooldown
+        if self._is_volume_quota_cooldown():
+            return
 
         self._prune_caches()
         if not self.api:

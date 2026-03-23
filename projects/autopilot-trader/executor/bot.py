@@ -1287,15 +1287,15 @@ class LighterCopilot:
             # Check quota cooldown and pacing before opening
             if self._is_volume_quota_cooldown():
                 logging.debug(f"⏳ {symbol}: volume quota cooldown active, skipping open")
-                return
+                continue
             if self._should_pace_orders():
                 logging.debug(f"⏳ {symbol}: pacing orders (low quota), skipping open")
-                return
+                continue
 
             # Quota prioritization: skip new opens when quota < 50 to preserve for SL orders
             if self._should_skip_open_for_quota():
                 logging.warning(f"🚫 {symbol}: new opens paused (quota={self.api.volume_quota_remaining} < 50, SL protection prioritized)")
-                return
+                continue
 
             # Open the position
             logging.info(f"📡 Signal: {direction.upper()} {symbol} score={opp['compositeScore']} size=${size_usd:.2f}")

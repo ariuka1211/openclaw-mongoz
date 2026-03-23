@@ -64,8 +64,6 @@ class SafetyLayer:
         elif action == "close_all":
             # close_all is always approved — emergency action, no additional checks
             return len(reasons) == 0, reasons
-        elif action == "adjust":
-            return self._validate_adjust(decision, positions, reasons)
         else:
             reasons.append(f"unknown action: {action}")
 
@@ -80,7 +78,7 @@ class SafetyLayer:
                 errors.append(f"missing required field: {key}")
 
         action = decision.get("action", "")
-        if action not in ("open", "close", "close_all", "hold", "adjust"):
+        if action not in ("open", "close", "close_all", "hold"):
             errors.append(f"invalid action: {action}")
 
         if action == "open":
@@ -184,14 +182,6 @@ class SafetyLayer:
         symbol = decision.get("symbol", "")
         if not any(p.get("symbol") == symbol for p in positions):
             reasons.append(f"no position in {symbol} to close")
-        return len(reasons) == 0, reasons
-
-    def _validate_adjust(self, decision: dict, positions: list, reasons: list) -> tuple[bool, list[str]]:
-        """Validate adjust decision (simplified)."""
-        symbol = decision.get("symbol", "")
-        if not any(p.get("symbol") == symbol for p in positions):
-            reasons.append(f"no position in {symbol} to adjust")
-        # Additional adjust-specific checks can go here
         return len(reasons) == 0, reasons
 
     def _check_rate_limit(self) -> bool:

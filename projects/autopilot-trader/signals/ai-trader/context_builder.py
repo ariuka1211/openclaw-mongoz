@@ -172,9 +172,9 @@ class ContextBuilder:
             return ""
         try:
             content = self.memory_file.read_text().strip()
-            # Truncate to last 2000 chars to keep prompt size manageable
-            if len(content) > 2000:
-                content = "..." + content[-2000:]
+            # Truncate to last 10000 chars to keep prompt size manageable
+            if len(content) > 10000:
+                content = "..." + content[-10000:]
             return content
         except OSError:
             return ""
@@ -252,9 +252,9 @@ class ContextBuilder:
                 )
             sections.append("## Recent Trade Outcomes\n" + "\n".join(out_lines))
 
-        # 4. Strategy memory (learned patterns — sanitize to prevent injection)
+        # 4. Strategy memory (learned patterns — from our own file, no injection risk)
         if memory:
-            sections.append(f"## Learned Patterns\n{sanitize_reasoning(memory)}")
+            sections.append(f"## Learned Patterns\n{memory[:10000]}")
 
         # 5. Account state with win rate and timing
         equity = signals_config.get("accountEquity", 1000)

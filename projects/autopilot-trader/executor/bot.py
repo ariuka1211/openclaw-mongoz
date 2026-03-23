@@ -517,49 +517,9 @@ class LighterAPI:
         # Monotonic counter seeded from timestamp — avoids collisions across restarts
         self._client_order_index = int(time.time() * 1000)
 
-        # ── SignerClient with optional proxy (subclass instead of monkey-patch) ──
-        if cfg.proxy_url:
-            signer_config = lighter.Configuration(host=cfg.lighter_url)
-            signer_config.proxy = cfg.proxy_url
-            from lighter.signer_client import get_signer
-
-            class ProxySignerClient(lighter.SignerClient):
-                """SignerClient subclass that uses a proxy-configured ApiClient."""
-                def __init__(self_inner, url, account_index, api_private_keys, nonce_manager_type=lighter.nonce_manager.NonceManagerType.OPTIMISTIC):
-                    # Replicate parent init but use proxy config for ApiClient
-                    self_inner.url = url
-                    self_inner.chain_id = 304 if ("mainnet" in url or "api" in url) else 300
-                    self_inner.validate_api_private_keys(api_private_keys)
-                    self_inner.api_key_dict = api_private_keys
-                    self_inner.account_index = account_index
-                    self_inner.signer = get_signer()
-                    self_inner.api_client = lighter.ApiClient(configuration=signer_config)
-                    self_inner.tx_api = lighter.TransactionApi(self_inner.api_client)
-                    self_inner.order_api = lighter.OrderApi(self_inner.api_client)
-                    self_inner.nonce_manager = lighter.nonce_manager.nonce_manager_factory(
-                        nonce_manager_type=nonce_manager_type,
-                        account_index=account_index,
-                        api_client=self_inner.api_client,
-                        api_keys_list=list(api_private_keys.keys()),
-                    )
-                    for api_key_index in api_private_keys.keys():
-                        self_inner.create_client(api_key_index)
-
-            # self._signer = ProxySignerClient(
-            #     url=cfg.lighter_url,
-            #     account_index=cfg.account_index,
-            #     api_private_keys={cfg.api_key_index: cfg.api_key_private},
-            # )
-            self._signer = None  # Create lazily in async context
-            self._signer_has_own_client = True
-        else:
-            # self._signer = lighter.SignerClient(
-            #     url=cfg.lighter_url,
-            #     account_index=cfg.account_index,
-            #     api_private_keys={cfg.api_key_index: cfg.api_key_private},
-            # )
-            self._signer = None  # Create lazily in async context
-            self._signer_has_own_client = False
+        # ── SignerClient — created lazily in _ensure_signer() ──
+        self._signer = None  # Created lazily in async context (see _ensure_signer)
+        self._signer_has_own_client = bool(cfg.proxy_url)
 
         # Persisted tracked market IDs
         self._state_dir = Path(__file__).parent / "state"
@@ -946,7 +906,7 @@ class LighterAPI:
             # Get best price and add slippage
             await self._ensure_signer()
             best_price_int = await self._signer.get_best_price(market_id, is_ask=not is_long)
-            slippage = int(best_price_int * 0.02)
+            slippage = int(best_price_int * 0.05)
             if is_long:
                 worst_price = best_price_int + slippage  # buy: accept higher price
             else:
@@ -1010,14 +970,14 @@ class LighterAPI:
                 market_index=market_id,
                 client_order_index=client_order_index,
                 base_amount=base_amount,
-                max_slippage=0.02,
+                max_slippage=0.05,
                 is_ask=is_long,      # close long = sell = ask
                 reduce_only=True,
                 ideal_price=best_price_int,
             )
             logging.info(
                 f"🔍 SL order: market={market_id}, size={size}, base_amount={base_amount}, "
-                f"best_price={best_price_int}, max_slippage=0.02, is_ask={is_long}, "
+                f"best_price={best_price_int}, max_slippage=0.05, is_ask={is_long}, "
                 f"reduce_only=True, coi={client_order_index}"
             )
             # SDK returns Union[Tuple[CreateOrder, RespSendTx, None], Tuple[None, None, str]]
@@ -1027,7 +987,7 @@ class LighterAPI:
                     logging.error(f"❌ SL order rejected by exchange: {error_msg}")
                     # Check for specific error types
                     if "slippage" in str(error_msg).lower():
-                        logging.error(f"❌ SL order rejected: excessive slippage — market may have moved beyond 2%")
+                        logging.error(f"❌ SL order rejected: excessive slippage — market may have moved beyond 5%")
                     return False, None
                 if result[0] is None:
                     logging.error("❌ SL order returned None (no order created)")
@@ -2863,6 +2823,9 @@ class LighterCopilot:
                     pos.trailing_active = True
                 if saved_pos.get("high_water_mark"):
                     pos.high_water_mark = max(pos.high_water_mark, saved_pos["high_water_mark"])
+                # Restore AI-specified stop loss % (Fix #10)
+                if saved_pos.get("sl_pct") is not None:
+                    pos.sl_pct = saved_pos["sl_pct"]
             elif mid not in live_mids:
                 logging.info(f"🗑️ Saved position {saved_pos.get('symbol', mid)} no longer on exchange — dropped")
 

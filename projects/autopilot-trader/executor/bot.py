@@ -300,6 +300,7 @@ class PositionTracker:
                 DSLTier(
                     trigger_pct=t.get("trigger_pct", 7),
                     lock_hw_pct=t.get("lock_hw_pct", 40),
+                    trailing_buffer_roe=t.get("trailing_buffer_roe"),
                     consecutive_breaches=t.get("consecutive_breaches", 3),
                 )
                 for t in cfg.dsl_tiers

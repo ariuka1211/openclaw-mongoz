@@ -215,8 +215,24 @@ class ReflectionAgent:
             if self.memory_path.exists():
                 existing_content = self.memory_path.read_text()
 
-            # Append new entry (file grows over time, preserving history)
+            # Append new entry
             combined = existing_content.rstrip() + "\n\n" + new_entry if existing_content.strip() else new_entry
+
+            # Prune to keep file manageable (max ~10000 chars / ~500 lines)
+            MAX_CHARS = 10000
+            if len(combined) > MAX_CHARS:
+                lines = combined.splitlines()
+                # Keep header/metadata, trim from the oldest entries
+                pruned_lines = []
+                char_count = 0
+                for line in reversed(lines):
+                    char_count += len(line) + 1
+                    if char_count > MAX_CHARS:
+                        break
+                    pruned_lines.insert(0, line)
+                combined = "\n".join(pruned_lines)
+                log.info(f"Pruned strategy memory to {len(combined)} chars")
+
             self.memory_path.write_text(combined)
             log.info(f"Strategy memory updated: {self.memory_path}")
 

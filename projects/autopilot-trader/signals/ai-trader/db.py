@@ -242,12 +242,6 @@ class DecisionDB:
         ]
 
     def count_recent_rejections(self, minutes: int = 30) -> int:
-        cutoff = datetime.now(timezone.utc).replace(
-            minute=datetime.now(timezone.utc).minute - minutes
-            if datetime.now(timezone.utc).minute >= minutes
-            else 0
-        ).isoformat()
-        # More reliable: use time comparison
         cutoff_time = time.time() - (minutes * 60)
         cutoff_iso = datetime.fromtimestamp(cutoff_time, tz=timezone.utc).isoformat()
         with self._lock:

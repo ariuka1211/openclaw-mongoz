@@ -147,8 +147,9 @@ def analyze_signals(db_path: str, output_path: str = "state/signal_weights_sugge
         }
 
     # Compute suggested weights based on signal effectiveness
-    # Normalize deltas to positive weights
-    deltas = {k: max(0.01, r["delta"]) for k, r in results.items()}
+    # Apply power curve (1.5) to amplify meaningful deltas over tiny ones
+    # This prevents signals with near-zero delta from getting ~20% weight after normalization
+    deltas = {k: max(0.01, r["delta"] ** 1.5) for k, r in results.items()}
     total_delta = sum(deltas.values())
     suggested_weights = {k: round(deltas[k] / total_delta, 3) for k in SIGNAL_KEYS}
 

@@ -1292,6 +1292,11 @@ class LighterCopilot:
                 logging.debug(f"⏳ {symbol}: pacing orders (low quota), skipping open")
                 return
 
+            # Quota prioritization: skip new opens when quota < 50 to preserve for SL orders
+            if self._should_skip_open_for_quota():
+                logging.warning(f"🚫 {symbol}: new opens paused (quota={self.api.volume_quota_remaining} < 50, SL protection prioritized)")
+                return
+
             # Open the position
             logging.info(f"📡 Signal: {direction.upper()} {symbol} score={opp['compositeScore']} size=${size_usd:.2f}")
             if self.api:
@@ -1438,6 +1443,12 @@ class LighterCopilot:
             return False
         if self._should_pace_orders():
             logging.info(f"⏱️ AI open: {symbol} pacing orders (low quota) — skipping")
+            return False
+
+        # Quota prioritization: skip new opens when quota < 50 to preserve for SL orders
+        if self._should_skip_open_for_quota():
+            quota = self.api.volume_quota_remaining if self.api else None
+            logging.warning(f"🚫 {symbol}: new opens paused (quota={quota} < 50, SL protection prioritized)")
             return False
 
         is_long = direction == "long"
@@ -1834,6 +1845,27 @@ class LighterCopilot:
                 return True
         return False
 
+    def _should_skip_open_for_quota(self) -> bool:
+        """Skip new opens when quota is low to preserve it for SL orders."""
+        quota = self.api.volume_quota_remaining if self.api else None
+        if quota is not None and quota < 50:
+            logging.debug(f"🚫 Skipping new opens (quota={quota} < 50, preserving for SL)")
+            return True
+        return False
+
+    def _is_quota_emergency(self) -> bool:
+        """Emergency mode when quota is critically low."""
+        quota = self.api.volume_quota_remaining if self.api else None
+        return quota is not None and quota < 10
+
+    def _should_skip_non_critical_orders(self) -> bool:
+        """In emergency mode, only allow SL orders."""
+        if self._is_quota_emergency():
+            quota = self.api.volume_quota_remaining if self.api else None
+            logging.warning(f"🚨 Quota emergency mode (remaining={quota}), SL only")
+            return True
+        return False
+
     def _mark_order_submitted(self):
         """Mark timestamp when order was submitted."""
         self._last_order_time = time.time()
@@ -2083,6 +2115,10 @@ class LighterCopilot:
 
         # Execute the order
         if action == "trailing_take_profit":
+            # In quota emergency mode, skip TP orders — only SL proceeds
+            if self._should_skip_non_critical_orders():
+                logging.warning(f"🚫 {pos.symbol}: TP skipped in quota emergency mode, SL only")
+                return  # Keep position, will retry next tick when quota recovers
             try:
                 await self.api.execute_tp(mid, pos.size, price, is_long)
             except VolumeQuotaError:

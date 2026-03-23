@@ -2596,7 +2596,7 @@ class LighterCopilot:
                         f"🚨 *SL FAILED ×{attempts}*\n"
                         f"{pos.side.upper()} {pos.symbol}\n"
                         f"ROE: {roe_pct:+.1f}%\n"
-                        f"Action: {labels.get(action, action)}\n"
+                        f"Action: {action.replace('_', ' ').upper()}\n"
                         f"Retry delays exhausted. Next retry in 15min.\n"
                         f"MANUAL INTERVENTION may be needed."
                     )

@@ -1351,10 +1351,18 @@ class LighterCopilot:
                 if success:
                     self._mark_order_submitted()
                     self._reset_volume_quota_backoff()
+
+                    # Verify position exists on exchange (BUG-03 fix)
+                    expected_size = size_usd / current_price
+                    verified_pos = await self._verify_position_opened(mid, expected_size, symbol)
+                    if verified_pos is None:
+                        logging.error(f"❌ Signal open: {symbol} order rejected by exchange (phantom position prevented)")
+                        continue  # Skip to next signal
+
                     self._opened_signals.add(mid)
                     self._pending_sync.add(mid)
-                    # Track in position tracker — entry at current price
-                    actual_size = size_usd / current_price
+                    # Use actual filled size from exchange (handles partial fills)
+                    actual_size = verified_pos["size"]
                     self.tracker.add_position(mid, symbol, direction, current_price, actual_size, leverage=self.cfg.default_leverage)
                     logging.info(f"📊 Quota remaining: {self.api.volume_quota_remaining}")
                     await self.alerts.send(
@@ -1514,8 +1522,17 @@ class LighterCopilot:
         if success:
             self._mark_order_submitted()
             self._reset_volume_quota_backoff()
+
+            # Verify position exists on exchange (BUG-03 fix)
+            expected_size = size_usd / current_price
+            verified_pos = await self._verify_position_opened(market_id, expected_size, symbol)
+            if verified_pos is None:
+                logging.error(f"❌ AI open: {symbol} order rejected by exchange (phantom position prevented)")
+                return False
+
             self._pending_sync.add(market_id)
-            actual_size = size_usd / current_price
+            # Use actual filled size from exchange (handles partial fills)
+            actual_size = verified_pos["size"]
             ai_sl_pct = decision.get("stop_loss_pct")
             self.tracker.add_position(market_id, symbol, direction, current_price, actual_size, leverage=self.cfg.default_leverage, sl_pct=ai_sl_pct)
             logging.info(f"📊 Quota remaining: {self.api.volume_quota_remaining}")

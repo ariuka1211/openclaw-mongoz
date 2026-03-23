@@ -1095,9 +1095,7 @@ class LighterCopilot:
         self._ai_close_cooldown: dict[str, float] = {}  # symbol → monotonic() deadline
         self._ai_cooldown_seconds = 300  # 5 minutes
         self._api_lag_warnings: dict[str, float] = {}  # symbol → last warning timestamp
-        self._pending_sync: set[int] = set()  # market_ids opened this tick — skip in sync
-        # Phantom position prevention: require 2 consecutive sync cycles to confirm new positions
-
+        self._pending_sync: set[int] = set()  # market_ids opened this tick — skip in sync to avoid race conditions
         self._recently_closed: dict[int, float] = {}  # market_id → monotonic() expire time (bot-closed positions)
         # Close attempt tracking — prevent infinite close loops
         self._close_attempts: dict[str, int] = {}  # symbol → consecutive close attempts
@@ -2593,18 +2591,25 @@ class LighterCopilot:
             if restored:
                 logging.info(f"🔄 Bot state restored: {', '.join(restored)}")
 
-            # If we restored a last decision timestamp, write ACK to unblock AI trader.
-            # After a crash, we don't retry the decision (exchange state is unknown),
-            # but we need the AI trader to move on instead of being stuck.
+            # If we restored a last decision timestamp, check if the current decision
+            # is the same one we were processing before the crash.
+            # - Same timestamp → ACK to unblock AI trader (post-crash unblock, from IPC fix)
+            # - Different timestamp → new decision arrived during downtime, skip ACK
+            #   so _tick() processes it normally (otherwise the decision is lost)
             if self._last_ai_decision_ts:
-                ack_path = str(Path(self._ai_decision_file)) + ".ack"
                 try:
-                    # Read current decision to get its ID for the ACK
                     current_decision = safe_read_json(Path(self._ai_decision_file))
-                    decision_id = current_decision.get("decision_id", "") if current_decision else ""
-                    with open(ack_path, "w") as f:
-                        f.write(decision_id)
-                    logging.info(f"🔓 Post-crash ACK written for decision {decision_id} (unblocking AI trader)")
+                    if current_decision and current_decision.get("timestamp") == self._last_ai_decision_ts:
+                        # Same decision bot was processing before crash — ACK to unblock AI trader
+                        ack_path = str(Path(self._ai_decision_file)) + ".ack"
+                        decision_id = current_decision.get("decision_id", "")
+                        with open(ack_path, "w") as f:
+                            f.write(decision_id)
+                        logging.info(f"🔓 Post-crash ACK written for decision {decision_id} (same decision, unblocking AI trader)")
+                    elif current_decision:
+                        logging.info("⏸️ New decision arrived during downtime — skipping ACK, will process on first tick")
+                    else:
+                        logging.info("⏸️ No decision file found — skipping ACK")
                 except Exception:
                     pass
         except Exception as e:

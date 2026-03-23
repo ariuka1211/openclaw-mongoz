@@ -6,6 +6,7 @@
 2. Read `USER.md` — this is who you're helping
 3. Read `memory/YYYY-MM-DD.md` (today + yesterday) for recent context
 4. **If in MAIN SESSION:** Also read `MEMORY.md`
+5. Read `PROJECTS/autopilot-trader.md` — persistent knowledge of the trading system
 
 Don't ask permission. Just do it.
 

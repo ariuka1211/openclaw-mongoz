@@ -2061,8 +2061,7 @@ class LighterCopilot:
         # Cache mark prices from unrealized_pnl (authoritative exchange price for PnL)
         self.api.update_mark_prices_from_positions(live_positions)
 
-        # Detect new positions (skip markets opened this tick to avoid race)
-        # Two-cycle confirmation: position must appear in 2 consecutive syncs before tracking
+        # Detect new positions (confirmed on first detection)
         for pos in live_positions:
             mid = pos["market_id"]
             if mid in self._pending_sync:
@@ -2077,6 +2076,11 @@ class LighterCopilot:
             # Skip if bot recently closed this position (stale API data)
             if mid in self._recently_closed:
                 logging.debug(f"⏭️ {symbol}: recently closed by bot, ignoring stale API data")
+                continue
+
+            # BUG-07: Skip positions the bot didn't open
+            if not self.cfg.track_manual_positions and mid not in self.bot_managed_market_ids:
+                logging.info(f"↩️ Unmanaged position detected, skipping: {pos['side'].upper()} {symbol} (market_id={mid})")
                 continue
 
             # Check AI close cooldown before re-tracking

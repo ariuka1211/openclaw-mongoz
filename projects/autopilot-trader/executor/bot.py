@@ -547,6 +547,8 @@ class LighterAPI:
 
         # Volume quota tracking — must exist before any async calls
         self._volume_quota_remaining: int | None = None
+        self._last_known_quota: int | None = None  # last non-None quota value
+        self._last_quota_time: float = 0  # when _last_known_quota was last updated
 
     async def _ensure_client(self):
         """Lazy initialization of API clients in async context."""
@@ -648,6 +650,17 @@ class LighterAPI:
     @property
     def volume_quota_remaining(self) -> int | None:
         return self._volume_quota_remaining
+
+    def _update_quota_cache(self, quota: int | None) -> None:
+        """Update volume quota and cache last-known value for alerting."""
+        if quota is not None:
+            self._volume_quota_remaining = quota
+            self._last_known_quota = quota
+            self._last_quota_time = time.time()
+            if quota == 0:
+                logging.warning("⚠️ Volume quota depleted — next orders need free window")
+        else:
+            self._volume_quota_remaining = None
 
     async def get_positions(self) -> list[dict]:
         """Fetch open positions from Lighter."""
@@ -864,10 +877,7 @@ class LighterAPI:
                     resp_code = getattr(resp, 'code', None)
                     resp_msg = getattr(resp, 'msg', None) or getattr(resp, 'message', None)
                     resp_quota = quota_val  # Use enhanced extraction result
-                    if resp_quota is not None:
-                        self._volume_quota_remaining = resp_quota
-                        if resp_quota == 0:
-                            logging.warning(f"⚠️ Volume quota depleted — next orders need free window")
+                    self._update_quota_cache(resp_quota)
                     if resp_msg and "didn't use volume quota" in str(resp_msg):
                         logging.info(f"✅ TP order submitted (free slot): tx={tx}, msg={resp_msg}")
                     logging.info(f"✅ TP order submitted: tx={tx}, resp_code={resp_code}, resp_msg={resp_msg}, vol_quota={resp_quota}")
@@ -924,10 +934,7 @@ class LighterAPI:
                     resp_code = getattr(resp, 'code', None)
                     resp_msg = getattr(resp, 'msg', None) or getattr(resp, 'message', None)
                     resp_quota = quota_val  # Use enhanced extraction result
-                    if resp_quota is not None:
-                        self._volume_quota_remaining = resp_quota
-                        if resp_quota == 0:
-                            logging.warning(f"⚠️ Volume quota depleted — next orders need free window")
+                    self._update_quota_cache(resp_quota)
                     if resp_msg and "didn't use volume quota" in str(resp_msg):
                         logging.info(f"✅ Open order submitted (free slot): tx={tx}, msg={resp_msg}")
                     logging.info(f"✅ Position opened: {'LONG' if is_long else 'SHORT'} {size_usd:.2f} USD -> tx={tx}, resp_code={resp_code}, resp_msg={resp_msg}, vol_quota={resp_quota}")
@@ -998,10 +1005,7 @@ class LighterAPI:
                     resp_tx_hash = getattr(resp, 'tx_hash', None)
                     resp_pred_ms = getattr(resp, 'predicted_execution_time_ms', None)
                     resp_quota = quota_val  # Use enhanced extraction result
-                    if resp_quota is not None:
-                        self._volume_quota_remaining = resp_quota
-                        if resp_quota == 0:
-                            logging.warning(f"⚠️ Volume quota depleted — next orders need free window")
+                    self._update_quota_cache(resp_quota)
                     if resp_msg and "didn't use volume quota" in str(resp_msg):
                         logging.info(f"✅ SL order submitted (free slot): tx={resp_tx_hash}, msg={resp_msg}")
                     else:
@@ -1917,25 +1921,6 @@ class LighterCopilot:
 
     async def _tick(self):
         """One cycle: sync positions, update prices, check triggers."""
-        # Periodic quota status alert (every 20 minutes) — fires even during cooldown
-        now = time.time()
-        if now - self._last_quota_alert_time > self._quota_alert_interval:
-            self._last_quota_alert_time = now
-            quota = self.api.volume_quota_remaining if self.api else None
-            in_cooldown = self._is_volume_quota_cooldown()
-            # When quota is None but we're in cooldown, it means quota is exhausted (0)
-            if quota is None and in_cooldown:
-                quota = 0
-            status = "0 TX" if quota is None else f"{quota} TX"
-            positions_count = len(self.tracker.positions)
-            emoji = "🔴" if (quota is not None and quota < 50) else "🟡" if (quota is not None and quota < 200) else "🟢"
-            await self.alerts.send(
-                f"{emoji} *Quota Status*\n"
-                f"Remaining: {status}\n"
-                f"Positions: {positions_count}\n"
-                f"Cooldown: {'active' if in_cooldown else 'none'}"
-            )
-
         # Skip tick if in volume quota cooldown
         if self._is_volume_quota_cooldown():
             return
@@ -2013,6 +1998,30 @@ class LighterCopilot:
                 pos = self.tracker.positions[mid]
                 logging.info(f"Position closed: {pos.symbol}")
                 self.tracker.remove_position(mid)
+
+        # Periodic quota status alert (every 20 minutes) — after position sync for accurate counts
+        now = time.time()
+        if now - self._last_quota_alert_time > self._quota_alert_interval:
+            self._last_quota_alert_time = now
+            api_quota = self.api.volume_quota_remaining if self.api else None
+            in_cooldown = self._is_volume_quota_cooldown()
+            if api_quota is not None:
+                status = f"{api_quota} TX"
+            elif self.api and self.api._last_known_quota is not None:
+                age = int((now - self.api._last_quota_time) / 60)
+                status = f"~{self.api._last_known_quota} TX (updated {age}m ago)"
+            elif in_cooldown:
+                status = "0 TX (exhausted)"
+            else:
+                status = "unknown"
+            positions_count = len(self.tracker.positions)
+            emoji = "🔴" if (api_quota is not None and api_quota < 50) or (api_quota is None and in_cooldown) else "🟡" if (api_quota is not None and api_quota < 200) else "🟢"
+            await self.alerts.send(
+                f"{emoji} *Quota Status*\n"
+                f"Remaining: {status}\n"
+                f"Positions: {positions_count}\n"
+                f"Cooldown: {'active' if in_cooldown else 'none'}"
+            )
 
         # 1.5. Process signals — AI mode or rule-based
         # NOTE: Moved AFTER position sync/confirmation so tracker is populated

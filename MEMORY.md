@@ -26,10 +26,9 @@
 - **2026-03-21:** Git workflow established, agent workspaces merged (PR #5). QMD cleaned (194→92 docs). LCM disabled. Workspace files trimmed. Backups → `~/.openclaw/backups/`
 - **2026-03-20:** Bot deployed 00:06 UTC. Close/reopen loop fixed (cooldown). Geo-restriction resolved (`mainnet.zklighter.elliot.ai` works from US VPS). Prompt rewritten with research-backed structure
 
-## ⚠️ CRITICAL: Lighter Deposit Rules
-- **NEVER give out the L1 address as a deposit address.** The `l1_address` from the API is just an account identifier, NOT a deposit address.
-- **ONLY way to deposit:** Go to **app.lighter.xyz**, connect wallet, deposit through their bridge UI.
-- Sending USDC directly to the L1 address = funds lost forever. This cost John $100 on 2026-03-23. Never again.
+## ⚠️ CRITICAL: Lighter Account Verification
+- **Always verify account index from .env** before giving any address. On 2026-03-23, gave address for account 4306 instead of actual account 719758. Cost John $100.
+- Account 719758, L1: 0x1D73456fA182B669783c5adaaB965AbB1A373bEE
 
 ## Environment
 - VPS: 4 vCPU, 8GB RAM, 80GB disk. OpenClaw at `/root/.openclaw`, Gateway port 5705

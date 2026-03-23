@@ -21,6 +21,7 @@
 - No public tweets about security findings
 
 ## Recent
+- **2026-03-22 (evening):** Critical bugs fixed: (1) Side detection — used `pos.position > 0` but Lighter position size always positive; fixed with `pos.sign` (+1/-1). This caused ALL shorts tracked as long, inverting DSL. (2) DSL close loop — no circuit breaker; added max 3 attempts + 15min cooldown + Telegram alert. (3) Order execution — switched to `create_market_order_if_slippage` then back to `create_market_order_limited_slippage` (2% slippage). Rate-limit detection added. (4) AI trader API URL fixed: `api.kilo.ai/v1` → `api.kilo.ai/api/gateway`. AI trader was completely broken (HTTP 404 on all calls). Services: lighter-bot, lighter-scanner, ai-trader all running. Volume quota issue on Lighter — account may have burned initial 1000 quota. BTC long opened manually @ $67,827.40 (0.00147, 10x). Open: position re-detection loop, avg_execution_price hard limit behavior.
 - **2026-03-22:** Mark price fix (use unrealized_pnl). Per-position leverage from exchange (3x/5x vs hardcoded 10x). SOCKS5 proxy confirmed working. SL verification added to DSL/legacy paths. Branches merged to main, stale branches cleaned. SL execution issue: `create_market_order_limited_slippage` accepted by API (code=200) but not executed — "didn't use volume quota". Switched from `if_slippage` to `limited_slippage`. John manually closed WLFI. Market orders work, limit orders don't. Root cause: exchange-level issue with `avg_execution_price` acting as hard limit. Need to test if new method works on next SL trigger.
 - **2026-03-21:** Git workflow established, agent workspaces merged (PR #5). QMD cleaned (194→92 docs). LCM disabled. Workspace files trimmed. Backups → `~/.openclaw/backups/`
 - **2026-03-20:** Bot deployed 00:06 UTC. Close/reopen loop fixed (cooldown). Geo-restriction resolved (`mainnet.zklighter.elliot.ai` works from US VPS). Prompt rewritten with research-backed structure
@@ -57,7 +58,12 @@
 
 ## Session Extract — 2026-03-22 [auto]
 
-- [fact] (trading) John is studying the trading bot architecture in depth, starting with the big picture of file connections and planning deeper dives. — distilled topics
-- [decision] (trading) Switched the trading bot's LLM provider from OpenRouter to Kilo Gateway using the xiaomi/mimo-v2-pro model, with updates to config.json and llm_client.py. — distilled topics
-- [open] (system) The ai-trader.service systemd service has a stale path reference and missing env file, requiring path update and KILOCODE_API_KEY addition before running. — distilled topics
+- [fact] (trading) Side detection bug: bot tracked all positions as 'long' regardless of direction because it used `pos.position` (always positive size) instead of `pos.sign` (+1/-1). Fixed in commit 6b94de8. — trading bot debug
+- [fact] (trading) AI trader completely broken: config had `api.kilo.ai/v1` instead of `api.kilo.ai/api/gateway`, causing HTTP 404 on all LLM calls. Fixed by updating URL. — trading bot debug
+- [fact] (trading) DSL close loop had no circuit breaker — retried every ~15s forever when close orders failed (volume quota). Added max 3 attempts + 15min cooldown + Telegram alert. — trading bot debug
+- [fact] (trading) Volume quota: Lighter DEX account may have burned through initial 1000 quota on failed orders. Need to check account tier. — trading bot debug
+- [fact] (trading) BTC long opened manually by John: $67,827.40, size=0.00147, 10x leverage. — trading bot debug
+- [open] (trading) DSL tier_lock triggers but stop-loss orders fail to execute, leaving positions stuck open after DSL fires. Distinct from the existing SL method issue — persists even with limited_slippage.
+- [open] (trading) Position re-detection loop: same positions detected as 'new' every sync cycle, creating duplicate DSLState entries.
+- [fact] (trading) ROE calculation in `DSLState.current_roe()` is correct for both long and short. Alert formatting was not buggy — only the side detection was wrong. — trading bot debug
 

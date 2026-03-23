@@ -171,10 +171,16 @@ class BotConfig:
         errors = []
 
         # Required non-empty string fields
-        for field_name in ("lighter_url", "account_index", "api_key_index", "api_key_private"):
+        for field_name in ("lighter_url", "api_key_private"):
             val = getattr(self, field_name)
             if val is None or (isinstance(val, str) and not val.strip()):
                 errors.append(f"Required field '{field_name}' is missing or empty")
+
+        # Required integer fields (non-negative)
+        for field_name in ("account_index", "api_key_index"):
+            val = getattr(self, field_name)
+            if not isinstance(val, int) or val < 0:
+                errors.append(f"Required field '{field_name}' must be a non-negative integer")
 
         # Positive numbers
         if not isinstance(self.sl_pct, (int, float)) or self.sl_pct <= 0:
@@ -919,7 +925,8 @@ class LighterAPI:
                     self._update_quota_cache(resp_quota)
                     if resp_msg and "didn't use volume quota" in str(resp_msg):
                         logging.info(f"✅ TP order submitted (free slot): tx={tx}, msg={resp_msg}")
-                    logging.info(f"✅ TP order submitted: tx={tx}, resp_code={resp_code}, resp_msg={resp_msg}, vol_quota={resp_quota}")
+                    else:
+                        logging.info(f"✅ TP order submitted: tx={tx}, resp_code={resp_code}, resp_msg={resp_msg}, vol_quota={resp_quota}")
                 else:
                     logging.info(f"✅ TP order submitted: {tx}")
                 return True
@@ -1065,7 +1072,8 @@ class LighterAPI:
         errors = []
         # Close main API client
         try:
-            await self._client.close()
+            if self._client is not None:
+                await self._client.close()
         except Exception as e:
             errors.append(f"main client: {e}")
         # Close signer's API client if it has its own proxy-configured client

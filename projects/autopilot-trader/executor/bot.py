@@ -178,6 +178,9 @@ class BotConfig:
     stagnation_minutes: int = 60
     dsl_tiers: list = field(default_factory=list)
 
+    # Position management scope
+    track_manual_positions: bool = False
+
     def validate(self) -> list[str]:
         """Validate config values. Returns list of error strings (empty = valid)."""
         errors = []
@@ -1128,6 +1131,8 @@ class LighterCopilot:
         self._last_quota_emergency_warn: float = 0  # rate-limit for quota emergency warnings
         # Saved positions for DSL state restoration across restarts
         self._saved_positions: dict | None = None
+        # BUG-07: Track which market_ids were opened by the bot
+        self.bot_managed_market_ids: set[int] = set()
 
 
     async def start(self):
@@ -1361,6 +1366,7 @@ class LighterCopilot:
 
                     self._opened_signals.add(mid)
                     self._pending_sync.add(mid)
+                    self.bot_managed_market_ids.add(mid)
                     # Use actual filled size from exchange (handles partial fills)
                     actual_size = verified_pos["size"]
                     self.tracker.add_position(mid, symbol, direction, current_price, actual_size, leverage=self.cfg.default_leverage)
@@ -1531,6 +1537,7 @@ class LighterCopilot:
                 return False
 
             self._pending_sync.add(market_id)
+            self.bot_managed_market_ids.add(market_id)
             # Use actual filled size from exchange (handles partial fills)
             actual_size = verified_pos["size"]
             ai_sl_pct = decision.get("stop_loss_pct")
@@ -1774,6 +1781,7 @@ class LighterCopilot:
         exit_price = fill_price if fill_price else current_price
         self._log_outcome(pos, exit_price, "ai_close")
         self._recently_closed[mid_to_close] = time.monotonic() + 300  # 5 min phantom guard
+        self.bot_managed_market_ids.discard(mid_to_close)
         self.tracker.remove_position(mid_to_close)
 
         roe = ((exit_price - pos.entry_price) / pos.entry_price * 100) if is_long \
@@ -1835,6 +1843,7 @@ class LighterCopilot:
                     else ((pos.entry_price - current_price) / pos.entry_price * 100)
                 logging.info(f"Emergency closed: {pos.side} {pos.symbol} ROE={roe:+.1f}%")
                 self._recently_closed[mid] = time.monotonic() + 300
+                self.bot_managed_market_ids.discard(mid)
                 self.tracker.remove_position(mid)
                 await self.alerts.send(
                     f"✅ *CLOSE ALL → {pos.side.upper()} {pos.symbol}* closed"
@@ -2106,6 +2115,7 @@ class LighterCopilot:
                 self._log_outcome(pos, exit_price, "exchange_close")
                 logging.info(f"Position closed by exchange: {pos.symbol}")
                 self._recently_closed[mid] = time.monotonic() + 300
+                self.bot_managed_market_ids.discard(mid)
                 self.tracker.remove_position(mid)
 
         # Periodic quota status alert (every 20 minutes) — after position sync for accurate counts
@@ -2309,6 +2319,7 @@ class LighterCopilot:
             exit_price = fill_price if fill_price else price
             self._log_outcome(pos, exit_price, f"dsl_{action}")
             self._recently_closed[mid] = time.monotonic() + 300  # 5 min phantom guard
+            self.bot_managed_market_ids.discard(mid)
             self.tracker.remove_position(mid)
             # Post-close completion alert
             roe_pct = ((exit_price - pos.entry_price) / pos.entry_price * 100) if is_long else ((pos.entry_price - exit_price) / pos.entry_price * 100)
@@ -2394,6 +2405,7 @@ class LighterCopilot:
 
         self._log_outcome(pos, price, action)
         self._recently_closed[mid] = time.monotonic() + 300  # 5 min phantom guard
+        self.bot_managed_market_ids.discard(mid)
         self.tracker.remove_position(mid)
 
     def _serialize_dsl_state(self, dsl: DSLState) -> dict:
@@ -2425,6 +2437,8 @@ class LighterCopilot:
             "close_attempt_cooldown": {s: max(0, t - now) for s, t in self._close_attempt_cooldown.items()},
             "dsl_close_attempts": self._dsl_close_attempts,
             "dsl_close_attempt_cooldown": {s: max(0, t - now) for s, t in self._dsl_close_attempt_cooldown.items()},
+            # BUG-07: Which market_ids were opened by the bot
+            "bot_managed_market_ids": sorted(self.bot_managed_market_ids),
             # Persist position state + DSL state for restart recovery
             "positions": {
                 str(mid): {
@@ -2486,6 +2500,10 @@ class LighterCopilot:
             for symbol, remaining in state.get("dsl_close_attempt_cooldown", {}).items():
                 if remaining > 0:
                     self._dsl_close_attempt_cooldown[symbol] = now + remaining
+
+            # BUG-07: Load bot-managed market IDs
+            managed_ids = state.get("bot_managed_market_ids", [])
+            self.bot_managed_market_ids = set(managed_ids)
 
             # Load saved positions for DSL state restoration (applied after exchange detection)
             self._saved_positions = state.get("positions") or None

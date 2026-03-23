@@ -93,7 +93,7 @@ interface MarketOpportunity {
 // --- Config ---
 
 const CONFIG = {
-  accountEquity: 1000,              // USD, simulation default
+  accountEquity: 60,                // USD — updated to actual account balance
   riskPct: 0.05,                    // 5% of equity risked per trade
   stopLossMultiple: 1.0,            // SL = dailyVolatility × this multiple
   maxLeverageCap: 20,               // never exceed 20x
@@ -104,6 +104,7 @@ const CONFIG = {
 };
 
 const BASE_URL = "https://mainnet.zklighter.elliot.ai";
+const LIGHTER_ACCOUNT_INDEX = "719758";
 const EIGHT_HR_MULTIPLIER = 8;
 
 // --- OKX Klines (for MA + Order Block signals) ---
@@ -366,6 +367,22 @@ function padL(s: string, len: number): string {
 }
 
 // --- API Fetchers ---
+
+async function fetchBalance(): Promise<number> {
+  try {
+    const res = await fetch(`${BASE_URL}/api/v1/account?by=index&value=${LIGHTER_ACCOUNT_INDEX}`, {
+      headers: { accept: "application/json" },
+    });
+    if (!res.ok) throw new Error(`account: ${res.status}`);
+    const data = await res.json();
+    if (data.accounts?.[0]?.collateral) {
+      return parseFloat(data.accounts[0].collateral);
+    }
+  } catch (e) {
+    console.error("⚠️ Failed to fetch balance, using fallback:", e);
+  }
+  return 0;
+}
 
 async function fetchOrderBookDetails(): Promise<OrderBookDetail[]> {
   const res = await fetch(`${BASE_URL}/api/v1/orderBookDetails`, {
@@ -665,6 +682,15 @@ async function main(): Promise<void> {
   if (!Number.isFinite(CONFIG.accountEquity) || CONFIG.accountEquity <= 0) {
     console.error("❌ Invalid account equity:", CONFIG.accountEquity);
     process.exit(1);
+  }
+
+  // Fetch actual balance from Lighter API
+  const liveBalance = await fetchBalance();
+  if (liveBalance > 0) {
+    CONFIG.accountEquity = liveBalance;
+    console.log(`  Live balance: $${liveBalance.toFixed(2)} (fetched from Lighter API)`);
+  } else {
+    console.log(`  Using fallback equity: $${CONFIG.accountEquity}`);
   }
 
   console.log("Fetching Lighter market data...");

@@ -2391,6 +2391,21 @@ class LighterCopilot:
                 restored.append(f"close_attempts={len(self._close_attempts)}")
             if restored:
                 logging.info(f"🔄 Bot state restored: {', '.join(restored)}")
+
+            # If we restored a last decision timestamp, write ACK to unblock AI trader.
+            # After a crash, we don't retry the decision (exchange state is unknown),
+            # but we need the AI trader to move on instead of being stuck.
+            if self._last_ai_decision_ts:
+                ack_path = str(Path(self._ai_decision_file)) + ".ack"
+                try:
+                    # Read current decision to get its ID for the ACK
+                    current_decision = safe_read_json(Path(self._ai_decision_file))
+                    decision_id = current_decision.get("decision_id", "") if current_decision else ""
+                    with open(ack_path, "w") as f:
+                        f.write(decision_id)
+                    logging.info(f"🔓 Post-crash ACK written for decision {decision_id} (unblocking AI trader)")
+                except Exception:
+                    pass
         except Exception as e:
             logging.warning(f"Failed to load bot state: {e}")
 

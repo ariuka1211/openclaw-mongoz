@@ -866,9 +866,10 @@ class LighterAPI:
                     resp_quota = quota_val  # Use enhanced extraction result
                     if resp_quota is not None:
                         self._volume_quota_remaining = resp_quota
+                        if resp_quota == 0:
+                            logging.warning(f"⚠️ Volume quota depleted — next orders need free window")
                     if resp_msg and "didn't use volume quota" in str(resp_msg):
-                        logging.warning(f"⚠️ TP order rate-limited (volume quota): {resp_msg}, vol_remaining={self._volume_quota_remaining}")
-                        raise VolumeQuotaError(resp_msg)
+                        logging.info(f"✅ TP order submitted (free slot): tx={tx}, msg={resp_msg}")
                     logging.info(f"✅ TP order submitted: tx={tx}, resp_code={resp_code}, resp_msg={resp_msg}, vol_quota={resp_quota}")
                 else:
                     logging.info(f"✅ TP order submitted: {tx}")
@@ -925,9 +926,10 @@ class LighterAPI:
                     resp_quota = quota_val  # Use enhanced extraction result
                     if resp_quota is not None:
                         self._volume_quota_remaining = resp_quota
+                        if resp_quota == 0:
+                            logging.warning(f"⚠️ Volume quota depleted — next orders need free window")
                     if resp_msg and "didn't use volume quota" in str(resp_msg):
-                        logging.warning(f"⚠️ Open order rate-limited (volume quota): {resp_msg}, vol_remaining={self._volume_quota_remaining}")
-                        raise VolumeQuotaError(resp_msg)
+                        logging.info(f"✅ Open order submitted (free slot): tx={tx}, msg={resp_msg}")
                     logging.info(f"✅ Position opened: {'LONG' if is_long else 'SHORT'} {size_usd:.2f} USD -> tx={tx}, resp_code={resp_code}, resp_msg={resp_msg}, vol_quota={resp_quota}")
                 else:
                     logging.info(f"✅ Position opened: {'LONG' if is_long else 'SHORT'} {size_usd:.2f} USD -> {tx}")
@@ -998,9 +1000,10 @@ class LighterAPI:
                     resp_quota = quota_val  # Use enhanced extraction result
                     if resp_quota is not None:
                         self._volume_quota_remaining = resp_quota
+                        if resp_quota == 0:
+                            logging.warning(f"⚠️ Volume quota depleted — next orders need free window")
                     if resp_msg and "didn't use volume quota" in str(resp_msg):
-                        logging.warning(f"⚠️ SL order rate-limited (volume quota): {resp_msg}, vol_remaining={self._volume_quota_remaining}")
-                        raise VolumeQuotaError(resp_msg)  # Don't pretend SL succeeded — position is unprotected
+                        logging.info(f"✅ SL order submitted (free slot): tx={resp_tx_hash}, msg={resp_msg}")
                     else:
                         logging.info(
                             f"✅ SL order submitted: code={resp_code}, msg={resp_msg}, "

@@ -1683,7 +1683,10 @@ class LighterCopilot:
             logging.warning(f"⚠️ Failed to submit close order for {pos.side} {symbol} (attempt {attempts}, retry in {retry_delay}s)")
             return False
 
-        # Order submitted — now verify it actually filled by polling the API
+        # Order submitted — log outcome NOW with estimated price to prevent data loss on crash
+        self._log_outcome(pos, current_price, "ai_close", estimated=True)
+
+        # Now verify it actually filled by polling the API
         position_closed = await self._verify_position_closed(mid_to_close, symbol)
 
         if not position_closed:
@@ -1713,7 +1716,8 @@ class LighterCopilot:
 
         fill_price = await self._get_fill_price(mid_to_close, sl_coi)
         exit_price = fill_price if fill_price else current_price
-        self._log_outcome(pos, exit_price, "ai_close")
+        # Update the outcome with actual fill price (was logged as estimated before verification)
+        self._update_outcome(pos, exit_price, "ai_close")
         self._recently_closed[mid_to_close] = time.monotonic() + 300  # 5 min phantom guard
         self.tracker.remove_position(mid_to_close)
 

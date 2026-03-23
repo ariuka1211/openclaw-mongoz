@@ -1908,7 +1908,7 @@ class LighterCopilot:
         now = time.time()
         if now - self._last_quota_alert_time > self._quota_alert_interval:
             self._last_quota_alert_time = now
-            quota = self._volume_quota_remaining
+            quota = self.api.volume_quota_remaining if self.api else None
             status = "unknown" if quota is None else f"{quota} TX"
             positions_count = len(self.tracker.positions)
             emoji = "🔴" if (quota is not None and quota < 50) else "🟡" if (quota is not None and quota < 200) else "🟢"

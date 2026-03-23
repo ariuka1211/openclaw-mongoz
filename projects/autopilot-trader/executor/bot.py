@@ -1856,11 +1856,13 @@ class LighterCopilot:
         try:
             positions = []
             for mid, pos in self.tracker.positions.items():
+                current_price = self.api.get_mark_price(mid) if self.api else None
                 positions.append({
                     "market_id": mid,
                     "symbol": pos.symbol,
                     "side": pos.side,
                     "entry_price": pos.entry_price,
+                    "current_price": current_price if current_price and current_price > 0 else pos.entry_price,
                     "size": pos.size,
                     "size_usd": pos.size * pos.entry_price,
                 })
@@ -1964,9 +1966,12 @@ class LighterCopilot:
 
     async def _tick(self):
         """One cycle: sync positions, update prices, check triggers."""
-        # Skip tick if in volume quota cooldown
-        if self._is_volume_quota_cooldown():
-            return
+        # NOTE: Don't skip entire tick during quota cooldown —
+        # position sync, DSL evaluation, and AI decisions still need to run.
+        # Order submission points handle quota errors individually via VolumeQuotaError.
+        quota_cooldown = self._is_volume_quota_cooldown()
+        if quota_cooldown:
+            logging.debug("⏳ Quota cooldown active — running tick with order submission guards")
 
         self._prune_caches()
         if not self.api:

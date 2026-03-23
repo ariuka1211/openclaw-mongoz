@@ -590,6 +590,48 @@ class LighterAPI:
         # Volume quota tracking
         self._volume_quota_remaining: int | None = None
 
+    def _analyze_quota_response(self, resp) -> dict:
+        """Analyze response object for quota field debugging."""
+        analysis = {
+            'type': type(resp).__name__,
+            'has_volume_quota_remaining': hasattr(resp, 'volume_quota_remaining'),
+            'volume_quota_value': getattr(resp, 'volume_quota_remaining', 'NOT_FOUND'),
+            'all_attributes': [attr for attr in dir(resp) if not attr.startswith('_')],
+            'quota_related_attrs': [attr for attr in dir(resp) if 'quota' in attr.lower() or 'volume' in attr.lower()],
+        }
+        
+        # Try different field name variations
+        for field in ['volume_quota_remaining', 'volumeQuotaRemaining', 'quota_remaining', 'quota', 'volume_quota']:
+            if hasattr(resp, field):
+                analysis[f'found_{field}'] = getattr(resp, field)
+        
+        return analysis
+
+    def _extract_quota_from_response(self, resp) -> tuple[int | None, str]:
+        """Extract quota with detailed field analysis."""
+        if resp is None:
+            return None, "no_response_object"
+        
+        # Standard field
+        if hasattr(resp, 'volume_quota_remaining'):
+            val = getattr(resp, 'volume_quota_remaining')
+            return val, f"standard_field_value:{val}"
+        
+        # Try alternative field names
+        for field in ['volumeQuotaRemaining', 'quota_remaining', 'quota', 'volume_quota']:
+            if hasattr(resp, field):
+                val = getattr(resp, field)
+                return val, f"alt_field_{field}_value:{val}"
+        
+        # Check if it's in a nested object
+        if hasattr(resp, 'additional_properties'):
+            props = getattr(resp, 'additional_properties')
+            if props and 'volume_quota_remaining' in props:
+                val = props['volume_quota_remaining']
+                return val, f"additional_properties_value:{val}"
+        
+        return None, f"not_found_in_response_type:{type(resp).__name__}"
+
     @property
     def volume_quota_remaining(self) -> int | None:
         return self._volume_quota_remaining
@@ -799,15 +841,22 @@ class LighterAPI:
                 tx = result[0]
                 resp = result[1] if len(result) > 1 else None
                 if resp is not None:
+                    # 🔍 DEBUG: Raw response structure analysis
+                    quota_val, quota_detail = self._extract_quota_from_response(resp)
+                    logging.debug(f"🔍 TP response quota extraction: {quota_detail}")
+                    if quota_val is None:
+                        quota_analysis = self._analyze_quota_response(resp)
+                        logging.debug(f"🔍 TP response full analysis: {json.dumps(quota_analysis, indent=2)}")
+                    
                     resp_code = getattr(resp, 'code', None)
                     resp_msg = getattr(resp, 'msg', None) or getattr(resp, 'message', None)
-                    resp_quota = getattr(resp, 'volume_quota_remaining', None)
+                    resp_quota = quota_val  # Use enhanced extraction result
                     if resp_quota is not None:
                         self._volume_quota_remaining = resp_quota
                     if resp_msg and "didn't use volume quota" in str(resp_msg):
                         logging.warning(f"⚠️ TP order rate-limited (volume quota): {resp_msg}, vol_remaining={self._volume_quota_remaining}")
                         raise VolumeQuotaError(resp_msg)
-                    logging.info(f"✅ TP order submitted: tx={tx}, resp_code={resp_code}, resp_msg={resp_msg}")
+                    logging.info(f"✅ TP order submitted: tx={tx}, resp_code={resp_code}, resp_msg={resp_msg}, vol_quota={resp_quota}")
                 else:
                     logging.info(f"✅ TP order submitted: {tx}")
                 return True
@@ -851,15 +900,22 @@ class LighterAPI:
                 tx = result[0]
                 resp = result[1] if len(result) > 1 else None
                 if resp is not None:
+                    # 🔍 DEBUG: Raw response structure analysis
+                    quota_val, quota_detail = self._extract_quota_from_response(resp)
+                    logging.debug(f"🔍 Open response quota extraction: {quota_detail}")
+                    if quota_val is None:
+                        quota_analysis = self._analyze_quota_response(resp)
+                        logging.debug(f"🔍 Open response full analysis: {json.dumps(quota_analysis, indent=2)}")
+                    
                     resp_code = getattr(resp, 'code', None)
                     resp_msg = getattr(resp, 'msg', None) or getattr(resp, 'message', None)
-                    resp_quota = getattr(resp, 'volume_quota_remaining', None)
+                    resp_quota = quota_val  # Use enhanced extraction result
                     if resp_quota is not None:
                         self._volume_quota_remaining = resp_quota
                     if resp_msg and "didn't use volume quota" in str(resp_msg):
                         logging.warning(f"⚠️ Open order rate-limited (volume quota): {resp_msg}, vol_remaining={self._volume_quota_remaining}")
                         raise VolumeQuotaError(resp_msg)
-                    logging.info(f"✅ Position opened: {'LONG' if is_long else 'SHORT'} {size_usd:.2f} USD -> tx={tx}, resp_code={resp_code}, resp_msg={resp_msg}")
+                    logging.info(f"✅ Position opened: {'LONG' if is_long else 'SHORT'} {size_usd:.2f} USD -> tx={tx}, resp_code={resp_code}, resp_msg={resp_msg}, vol_quota={resp_quota}")
                 else:
                     logging.info(f"✅ Position opened: {'LONG' if is_long else 'SHORT'} {size_usd:.2f} USD -> {tx}")
                 return True
@@ -915,11 +971,18 @@ class LighterAPI:
                 tx = result[0]
                 resp = result[1] if len(result) > 1 else None
                 if resp is not None:
+                    # 🔍 DEBUG: Raw response structure analysis
+                    quota_val, quota_detail = self._extract_quota_from_response(resp)
+                    logging.debug(f"🔍 SL response quota extraction: {quota_detail}")
+                    if quota_val is None:
+                        quota_analysis = self._analyze_quota_response(resp)
+                        logging.debug(f"🔍 SL response full analysis: {json.dumps(quota_analysis, indent=2)}")
+                    
                     resp_code = getattr(resp, 'code', None)
                     resp_msg = getattr(resp, 'msg', None) or getattr(resp, 'message', None)
                     resp_tx_hash = getattr(resp, 'tx_hash', None)
                     resp_pred_ms = getattr(resp, 'predicted_execution_time_ms', None)
-                    resp_quota = getattr(resp, 'volume_quota_remaining', None)
+                    resp_quota = quota_val  # Use enhanced extraction result
                     if resp_quota is not None:
                         self._volume_quota_remaining = resp_quota
                     if resp_msg and "didn't use volume quota" in str(resp_msg):
@@ -943,6 +1006,34 @@ class LighterAPI:
         except Exception as e:
             logging.error(f"Failed to execute SL: {e}")
             return False, None
+
+    async def _test_quota_response(self):
+        """Test method to capture quota response structure. Does NOT submit real orders."""
+        try:
+            await self._ensure_signer()
+            
+            # Try to get current account info first
+            result = await self._account_api.account(
+                by="index", value=str(self.cfg.account_index)
+            )
+            
+            logging.info("🧪 Testing quota response structure...")
+            
+            # Analyze account API response for quota fields
+            if hasattr(result, 'accounts') and result.accounts:
+                for acc in result.accounts:
+                    acc_analysis = self._analyze_quota_response(acc)
+                    logging.info(f"🧪 Account response analysis: type={acc_analysis['type']}, quota_attrs={acc_analysis['quota_related_attrs']}")
+                    # Check all attributes for quota-related fields
+                    for attr in dir(acc):
+                        if 'quota' in attr.lower() or 'volume' in attr.lower():
+                            val = getattr(acc, attr, None)
+                            logging.info(f"🧪   Account.{attr} = {val}")
+            
+            logging.info("🧪 Quota response structure test complete (no orders submitted)")
+                
+        except Exception as e:
+            logging.info(f"🧪 Quota test encountered error: {e}")
 
     async def close(self):
         """Close all aiohttp sessions."""
@@ -1197,24 +1288,23 @@ class LighterCopilot:
                 logging.debug(f"⏳ {symbol}: pacing orders (low quota), skipping open")
                 return
 
-            # Quota prioritization: skip new opens when quota < 50 to preserve for SL orders
-            if self._should_skip_open_for_quota():
-                logging.warning(f"🚫 {symbol}: new opens paused (quota={self.api.volume_quota_remaining} < 50, SL protection prioritized)")
-                return
-
             # Open the position
             logging.info(f"📡 Signal: {direction.upper()} {symbol} score={opp['compositeScore']} size=${size_usd:.2f}")
             if self.api:
-                success = await self.api.open_position(mid, size_usd, is_long, current_price)
+                try:
+                    success = await self.api.open_position(mid, size_usd, is_long, current_price)
+                except VolumeQuotaError:
+                    self._start_volume_quota_cooldown()
+                    continue
                 if success:
                     self._mark_order_submitted()
                     self._reset_volume_quota_backoff()
-                if success:
                     self._opened_signals.add(mid)
                     self._pending_sync.add(mid)
                     # Track in position tracker — entry at current price
                     actual_size = size_usd / current_price
                     self.tracker.add_position(mid, symbol, direction, current_price, actual_size, leverage=self.cfg.default_leverage)
+                    logging.info(f"📊 Quota remaining: {self.api.volume_quota_remaining}")
                     await self.alerts.send(
                         f"📡 *SIGNAL → OPENED*\n"
                         f"{direction.upper()} {symbol}\n"
@@ -1338,10 +1428,12 @@ class LighterCopilot:
             logging.info(f"AI open: max positions reached, skipping {symbol}")
             return False
 
-        # Quota prioritization: skip new opens when quota < 50 to preserve for SL orders
-        if self._should_skip_open_for_quota():
-            quota = self.api.volume_quota_remaining if self.api else None
-            logging.warning(f"🚫 {symbol}: new opens paused (quota={quota} < 50, SL protection prioritized)")
+        # Check quota cooldown and pacing
+        if self._is_volume_quota_cooldown():
+            logging.info(f"⏳ AI open: {symbol} in volume quota cooldown — skipping")
+            return False
+        if self._should_pace_orders():
+            logging.info(f"⏱️ AI open: {symbol} pacing orders (low quota) — skipping")
             return False
 
         is_long = direction == "long"
@@ -1350,11 +1442,18 @@ class LighterCopilot:
             logging.warning(f"AI open: no price for {symbol}")
             return False
 
-        success = await self.api.open_position(market_id, size_usd, is_long, current_price)
+        try:
+            success = await self.api.open_position(market_id, size_usd, is_long, current_price)
+        except VolumeQuotaError:
+            self._start_volume_quota_cooldown()
+            return False
         if success:
+            self._mark_order_submitted()
+            self._reset_volume_quota_backoff()
             self._pending_sync.add(market_id)
             actual_size = size_usd / current_price
             self.tracker.add_position(market_id, symbol, direction, current_price, actual_size, leverage=self.cfg.default_leverage)
+            logging.info(f"📊 Quota remaining: {self.api.volume_quota_remaining}")
             # Reset close attempt tracking for this symbol
             self._close_attempts.pop(symbol, None)
             self._close_attempt_cooldown.pop(symbol, None)
@@ -1490,7 +1589,12 @@ class LighterCopilot:
         if not current_price:
             return False
 
-        sl_success, sl_coi = await self.api.execute_sl(mid_to_close, pos.size, current_price, is_long)
+        try:
+            sl_success, sl_coi = await self.api.execute_sl(mid_to_close, pos.size, current_price, is_long)
+        except VolumeQuotaError:
+            self._start_volume_quota_cooldown()
+            logging.warning(f"⚠️ AI close: {symbol} volume quota exhausted — cooldown started, keeping in tracker")
+            return False
         if not sl_success:
             logging.warning(f"⚠️ Failed to submit close order for {pos.side} {symbol} — keeping in tracker")
             return False
@@ -1559,9 +1663,13 @@ class LighterCopilot:
             if i < len(self.tracker.positions) - 1:
                 await asyncio.sleep(self.cfg.price_call_delay)
             if current_price:
-                sl_success, sl_coi = await self.api.execute_sl(mid, pos.size, current_price, is_long)
+                try:
+                    sl_success, sl_coi = await self.api.execute_sl(mid, pos.size, current_price, is_long)
+                except VolumeQuotaError:
+                    self._start_volume_quota_cooldown()
+                    logging.warning(f"⚠️ AI close_all: volume quota exhausted for {pos.symbol} — cooldown started")
+                    sl_success = False
                 if sl_success:
-                    self._log_outcome(pos, current_price, "ai_close_all")
                     roe = ((current_price - pos.entry_price) / pos.entry_price * 100) if is_long \
                         else ((pos.entry_price - current_price) / pos.entry_price * 100)
                     logging.info(f"Emergency closed: {pos.side} {pos.symbol} ROE={roe:+.1f}%")
@@ -1805,6 +1913,7 @@ class LighterCopilot:
                 mid, pos["symbol"], pos["side"], pos["entry_price"], pos["size"],
                 leverage=pos.get("leverage")
             )
+            logging.info(f"📊 Quota remaining: {self.api.volume_quota_remaining}")
             self._pending_positions.pop(mid, None)
             await self.alerts.send(
                 f"📌 *New position confirmed*\n"
@@ -1932,7 +2041,12 @@ class LighterCopilot:
                 logging.info(f"🧊 DSL close: {pos.symbol} in DSL close cooldown ({remaining}s remaining) — skipping. Position may need manual intervention.")
                 return  # Don't remove from tracker, but stop retrying
 
-            sl_success, sl_coi = await self.api.execute_sl(mid, pos.size, price, is_long)
+            try:
+                sl_success, sl_coi = await self.api.execute_sl(mid, pos.size, price, is_long)
+            except VolumeQuotaError:
+                self._start_volume_quota_cooldown()
+                logging.warning(f"⚠️ DSL close: {pos.symbol} volume quota exhausted — cooldown started")
+                return  # Don't remove from tracker, will retry after cooldown
             if sl_success:
                 position_closed = await self._verify_position_closed(mid, pos.symbol)
                 if not position_closed:
@@ -1986,9 +2100,19 @@ class LighterCopilot:
 
         # Execute the order
         if action == "trailing_take_profit":
-            await self.api.execute_tp(mid, pos.size, price, is_long)
+            try:
+                await self.api.execute_tp(mid, pos.size, price, is_long)
+            except VolumeQuotaError:
+                self._start_volume_quota_cooldown()
+                logging.warning(f"⚠️ TP: {pos.symbol} volume quota exhausted — cooldown started")
+                return  # Keep position, will retry after cooldown
         else:
-            sl_success, sl_coi = await self.api.execute_sl(mid, pos.size, price, is_long)
+            try:
+                sl_success, sl_coi = await self.api.execute_sl(mid, pos.size, price, is_long)
+            except VolumeQuotaError:
+                self._start_volume_quota_cooldown()
+                logging.warning(f"⚠️ SL: {pos.symbol} volume quota exhausted — cooldown started")
+                return  # Don't remove from tracker, will retry after cooldown
             if sl_success:
                 position_closed = await self._verify_position_closed(mid, pos.symbol)
                 if not position_closed:

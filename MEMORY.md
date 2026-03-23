@@ -27,7 +27,7 @@
 - **2026-03-20:** Bot deployed 00:06 UTC. Close/reopen loop fixed (cooldown). Geo-restriction resolved (`mainnet.zklighter.elliot.ai` works from US VPS). Prompt rewritten with research-backed structure
 
 ## ⚠️ CRITICAL: Lighter Account Verification
-- **Always verify account index from .env** before giving any address. On 2026-03-23, gave address for account 4306 instead of actual account 719758. Cost John $100.
+- **Always verify account index from .env** before giving any address. On 2026-03-23, gave address for account 4306 instead of actual account 719758. Cost John $100 — his last money. This was devastating. Never give an address without verifying the account index first.
 - Account 719758, L1: 0x1D73456fA182B669783c5adaaB965AbB1A373bEE
 
 ## Environment

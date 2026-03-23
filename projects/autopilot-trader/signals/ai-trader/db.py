@@ -232,15 +232,19 @@ class DecisionDB:
 
     def get_daily_pnl(self) -> float:
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        start_of_day = f"{today}T00:00:00+00:00"
+        end_of_day = f"{today}T23:59:59.999999+00:00"
         with self._lock:
             row = self._conn.execute(
-                "SELECT COALESCE(SUM(pnl_usd), 0) FROM outcomes WHERE timestamp LIKE ?",
-                (f"{today}%",),
+                "SELECT COALESCE(SUM(pnl_usd), 0) FROM outcomes WHERE timestamp >= ? AND timestamp <= ?",
+                (start_of_day, end_of_day),
             ).fetchone()
         return row[0] if row else 0.0
 
     def get_performance_stats(self) -> dict:
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        start_of_day = f"{today}T00:00:00+00:00"
+        end_of_day = f"{today}T23:59:59.999999+00:00"
         with self._lock:
             # Win rate
             total = self._conn.execute(
@@ -266,13 +270,13 @@ class DecisionDB:
             ).fetchone()[0]
             # Trades today
             trades_today = self._conn.execute(
-                "SELECT COUNT(*) FROM outcomes WHERE timestamp LIKE ?",
-                (f"{today}%",),
+                "SELECT COUNT(*) FROM outcomes WHERE timestamp >= ? AND timestamp <= ?",
+                (start_of_day, end_of_day),
             ).fetchone()[0]
             # Today PnL (inlined to avoid reentrant lock)
             today_pnl = self._conn.execute(
-                "SELECT COALESCE(SUM(pnl_usd), 0) FROM outcomes WHERE timestamp LIKE ?",
-                (f"{today}%",),
+                "SELECT COALESCE(SUM(pnl_usd), 0) FROM outcomes WHERE timestamp >= ? AND timestamp <= ?",
+                (start_of_day, end_of_day),
             ).fetchone()[0]
 
         return {

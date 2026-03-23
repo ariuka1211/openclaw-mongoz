@@ -1139,7 +1139,7 @@ class LighterCopilot:
             auth = self._auth_manager.get_auth_token()
             limits = await self.api._account_api.account_limits(
                 account_index=self.cfg.account_index,
-                authorization=auth,
+                auth=auth,
                 _request_timeout=30,
             )
             logging.info(

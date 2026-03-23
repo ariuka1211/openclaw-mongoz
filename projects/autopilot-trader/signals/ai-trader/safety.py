@@ -29,6 +29,10 @@ class SafetyLayer:
         self.max_orders_per_hour = cfg.get("max_orders_per_hour", 12)
         self.cooldown_after_loss_seconds = cfg.get("cooldown_after_loss_seconds", 300)
 
+        # Kill switch thresholds (from config, not hardcoded)
+        self.max_consecutive_failures = config.get("max_consecutive_failures", 5)
+        self.max_rejection_halt_count = config.get("max_rejection_halt_count", 15)
+
         self.db = db
         self._order_timestamps: list[float] = []
         self._last_loss_time: float | None = None
@@ -223,11 +227,11 @@ class SafetyLayer:
             triggers.append(f"Daily drawdown {dd:.1f}% > {self.max_daily_drawdown_pct}%")
 
         # Consecutive failures
-        if consecutive_failures >= 5:
-            triggers.append(f"{consecutive_failures} consecutive LLM failures")
+        if consecutive_failures >= self.max_consecutive_failures:
+            triggers.append(f"{consecutive_failures} consecutive LLM failures (limit: {self.max_consecutive_failures})")
 
-        # Too many rejections
-        if rejection_window_count >= 5:
-            triggers.append(f"{rejection_window_count} safety rejections in 30 min")
+        # Too many rejections (within the configured time window)
+        if rejection_window_count >= self.max_rejection_halt_count:
+            triggers.append(f"{rejection_window_count} safety rejections in {self.config.get('rejection_halt_window_minutes', 30)} min (limit: {self.max_rejection_halt_count})")
 
         return triggers

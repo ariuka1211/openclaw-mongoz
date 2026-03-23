@@ -87,7 +87,6 @@ def parse_decision_json(raw: str) -> dict:
 
 
 class AITrader:
-    MAX_CONSECUTIVE_FAILURES = 5
 
     def __init__(self, config: dict):
         self.config = config
@@ -98,6 +97,9 @@ class AITrader:
         self.system_prompt, self.decision_template = load_prompts()
 
         self.cycle_interval = config.get("cycle_interval_seconds", 180)
+        self.MAX_CONSECUTIVE_FAILURES = config.get("max_consecutive_failures", 5)
+        self.max_rejection_halt_count = config.get("max_rejection_halt_count", 15)
+        self.rejection_halt_window_minutes = config.get("rejection_halt_window_minutes", 30)
         self.running = True
         self.emergency_halt = False
         self.consecutive_failures = 0
@@ -114,6 +116,7 @@ class AITrader:
         log.info(f"  Models: {config['llm']['primary_model']} / {config['llm']['fallback_model']}")
         log.info(f"  DB: {config['db_path']}")
         log.info(f"  Decision file: {self.decision_file}")
+        log.info(f"  Kill switch: {self.MAX_CONSECUTIVE_FAILURES} failures, {self.max_rejection_halt_count} rejections/{self.rejection_halt_window_minutes}min")
 
     async def run_forever(self):
         """Main daemon loop — runs until shutdown or emergency halt."""
@@ -143,18 +146,16 @@ class AITrader:
                 self.db.log_alert("error", f"Cycle failed: {e}")
 
                 if self.consecutive_failures >= self.MAX_CONSECUTIVE_FAILURES:
-                    self._emergency_halt("5+ consecutive failures")
-                    log.critical("🚨 Emergency halt — 5+ consecutive failures")
-                    self.db.log_alert("critical", "Emergency halt — 5+ consecutive failures")
+                    self._emergency_halt(f"{self.MAX_CONSECUTIVE_FAILURES}+ consecutive failures")
+                    log.critical(f"🚨 Emergency halt — {self.MAX_CONSECUTIVE_FAILURES}+ consecutive failures")
+                    self.db.log_alert("critical", f"Emergency halt — {self.MAX_CONSECUTIVE_FAILURES}+ consecutive failures")
 
             # Check kill switches
             signals, signals_config = self.context_builder.read_signals()
             equity = signals_config.get("accountEquity", 0)
             kill_triggers = self.safety.check_kill_switch(
                 self.consecutive_failures,
-                self.db.count_recent_rejections(
-                    self.config.get("rejection_halt_window_minutes", 30)
-                ),
+                self.db.count_recent_rejections(self.rejection_halt_window_minutes),
                 equity=equity,
             )
             if kill_triggers:

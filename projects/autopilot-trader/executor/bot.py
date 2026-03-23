@@ -2241,10 +2241,10 @@ class LighterCopilot:
                 if cooldown_until and time.monotonic() < cooldown_until:
                     remaining = int(cooldown_until - time.monotonic())
                     # Rate limit API lag warnings (once per minute per symbol)
-                    now = time.monotonic()
+                    now_mono = time.monotonic()
                     last_warned = self._api_lag_warnings.get(symbol, 0)
-                    if now - last_warned > 60:
-                        self._api_lag_warnings[symbol] = now
+                    if now_mono - last_warned > 60:
+                        self._api_lag_warnings[symbol] = now_mono
                         logging.warning(f"🧊 DETECTED {symbol} from Lighter API but AI close cooldown active ({remaining}s) - API lag? IGNORING")
                     continue
 
@@ -2277,7 +2277,7 @@ class LighterCopilot:
 
         # Fix #17: Quota staleness warning — alert if no quota update for 10+ minutes
         if self.api and self.api._last_known_quota is not None and self.api._last_quota_time > 0:
-            quota_age = now - self.api._last_quota_time
+            quota_age = time.time() - self.api._last_quota_time
             if quota_age > 600:  # 10 minutes
                 age_min = int(quota_age / 60)
                 logging.warning(
@@ -2286,7 +2286,7 @@ class LighterCopilot:
                     f"Guards still active with last known value."
                 )
                 # Reset timer to avoid spamming every tick (warn once per 10 min)
-                self.api._last_quota_time = now
+                self.api._last_quota_time = time.time()
 
         # Periodic quota status alert (every 20 minutes) — after position sync for accurate counts
         now = time.time()

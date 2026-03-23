@@ -25,10 +25,19 @@ class LLMStats:
     avg_latency_ms: float = 0.0
     _latency_samples: list = field(default_factory=list)
 
+    # Approximate cost rates (USD per 1M tokens) — conservative mid-range estimate
+    # Covers typical OpenRouter models via Kilo gateway; not exact but directionally useful
+    COST_PER_1M_INPUT = 0.50
+    COST_PER_1M_OUTPUT = 1.50
+
     def record(self, tokens_in: int, tokens_out: int, latency_ms: int):
         self.total_calls += 1
         self.total_tokens_in += tokens_in
         self.total_tokens_out += tokens_out
+        self.total_cost += (
+            tokens_in * self.COST_PER_1M_INPUT / 1_000_000
+            + tokens_out * self.COST_PER_1M_OUTPUT / 1_000_000
+        )
         self._latency_samples.append(latency_ms)
         # Rolling average over last 100
         self._latency_samples = self._latency_samples[-100:]
@@ -39,7 +48,7 @@ class LLMStats:
             "total_calls": self.total_calls,
             "total_tokens_in": self.total_tokens_in,
             "total_tokens_out": self.total_tokens_out,
-            "total_cost": self.total_cost,
+            "total_cost": round(self.total_cost, 4),
             "fallback_count": self.fallback_count,
             "error_count": self.error_count,
             "avg_latency_ms": round(self.avg_latency_ms, 1),
@@ -147,8 +156,15 @@ class LLMClient:
 
         latency_ms = int((time.time() - t0) * 1000)
 
-        # Extract response
-        content = data["choices"][0]["message"]["content"]
+        # Validate response structure
+        choices = data.get("choices", [])
+        if not choices:
+            raise RuntimeError(f"Empty choices in LLM response: {data}")
+        message = choices[0].get("message", {})
+        content = message.get("content")
+        if not content:
+            raise RuntimeError(f"No content in LLM response: {choices[0]}")
+
         usage = data.get("usage", {})
         tokens_in = usage.get("prompt_tokens", 0)
         tokens_out = usage.get("completion_tokens", 0)

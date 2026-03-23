@@ -115,27 +115,12 @@ except Exception as _e:
     logging.warning(f"⚠️ Could not init DecisionDB: {_e} — outcomes will not be logged")
     _db = None
 
-# ── Safe JSON reader ────────────────────────────────────────────────
+# Add shared/ to path for IPC utilities
+_shared_dir = Path(__file__).resolve().parent.parent / "shared"
+if str(_shared_dir) not in sys.path:
+    sys.path.insert(0, str(_shared_dir))
+from ipc_utils import safe_read_json
 
-def safe_read_json(path: Path, retries: int = 2, delay: float = 0.1) -> dict | None:
-    """Read JSON with retry — handles race conditions from concurrent writes.
-
-    os.replace (used in atomic_write) is atomic, but we can still catch a file
-    mid-flush. 1 retry with a tiny delay is almost always enough.
-    """
-    for attempt in range(retries + 1):
-        try:
-            with open(path) as f:
-                return json.load(f)
-        except (json.JSONDecodeError, OSError) as e:
-            if attempt < retries:
-                time.sleep(delay)
-            else:
-                # Only log non-"file not found" errors (permission, disk full, etc.)
-                if not isinstance(e, FileNotFoundError):
-                    logging.warning(f"Failed to read {path}: {e}")
-                return None
-    return None
 
 # ── Config ───────────────────────────────────────────────────────────
 
@@ -1136,6 +1121,9 @@ class LighterCopilot:
         self._saved_positions: dict | None = None
         # BUG-07: Track which market_ids were opened by the bot
         self.bot_managed_market_ids: set[int] = set()
+        # Orphaned position detection — track consecutive no-price ticks per market
+        self._no_price_ticks: dict[int, int] = {}  # market_id → consecutive no-price tick count
+        self._no_price_alert_threshold: int = 3  # alert after N consecutive no-price ticks
 
 
     async def start(self):

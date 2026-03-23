@@ -590,6 +590,48 @@ class LighterAPI:
         # Volume quota tracking
         self._volume_quota_remaining: int | None = None
 
+    def _analyze_quota_response(self, resp) -> dict:
+        """Analyze response object for quota field debugging."""
+        analysis = {
+            'type': type(resp).__name__,
+            'has_volume_quota_remaining': hasattr(resp, 'volume_quota_remaining'),
+            'volume_quota_value': getattr(resp, 'volume_quota_remaining', 'NOT_FOUND'),
+            'all_attributes': [attr for attr in dir(resp) if not attr.startswith('_')],
+            'quota_related_attrs': [attr for attr in dir(resp) if 'quota' in attr.lower() or 'volume' in attr.lower()],
+        }
+        
+        # Try different field name variations
+        for field in ['volume_quota_remaining', 'volumeQuotaRemaining', 'quota_remaining', 'quota', 'volume_quota']:
+            if hasattr(resp, field):
+                analysis[f'found_{field}'] = getattr(resp, field)
+        
+        return analysis
+
+    def _extract_quota_from_response(self, resp) -> tuple[int | None, str]:
+        """Extract quota with detailed field analysis."""
+        if resp is None:
+            return None, "no_response_object"
+        
+        # Standard field
+        if hasattr(resp, 'volume_quota_remaining'):
+            val = getattr(resp, 'volume_quota_remaining')
+            return val, f"standard_field_value:{val}"
+        
+        # Try alternative field names
+        for field in ['volumeQuotaRemaining', 'quota_remaining', 'quota', 'volume_quota']:
+            if hasattr(resp, field):
+                val = getattr(resp, field)
+                return val, f"alt_field_{field}_value:{val}"
+        
+        # Check if it's in a nested object
+        if hasattr(resp, 'additional_properties'):
+            props = getattr(resp, 'additional_properties')
+            if props and 'volume_quota_remaining' in props:
+                val = props['volume_quota_remaining']
+                return val, f"additional_properties_value:{val}"
+        
+        return None, f"not_found_in_response_type:{type(resp).__name__}"
+
     @property
     def volume_quota_remaining(self) -> int | None:
         return self._volume_quota_remaining
@@ -799,15 +841,22 @@ class LighterAPI:
                 tx = result[0]
                 resp = result[1] if len(result) > 1 else None
                 if resp is not None:
+                    # 🔍 DEBUG: Raw response structure analysis
+                    quota_val, quota_detail = self._extract_quota_from_response(resp)
+                    logging.debug(f"🔍 TP response quota extraction: {quota_detail}")
+                    if quota_val is None:
+                        quota_analysis = self._analyze_quota_response(resp)
+                        logging.debug(f"🔍 TP response full analysis: {json.dumps(quota_analysis, indent=2)}")
+                    
                     resp_code = getattr(resp, 'code', None)
                     resp_msg = getattr(resp, 'msg', None) or getattr(resp, 'message', None)
-                    resp_quota = getattr(resp, 'volume_quota_remaining', None)
+                    resp_quota = quota_val  # Use enhanced extraction result
                     if resp_quota is not None:
                         self._volume_quota_remaining = resp_quota
                     if resp_msg and "didn't use volume quota" in str(resp_msg):
                         logging.warning(f"⚠️ TP order rate-limited (volume quota): {resp_msg}, vol_remaining={self._volume_quota_remaining}")
                         raise VolumeQuotaError(resp_msg)
-                    logging.info(f"✅ TP order submitted: tx={tx}, resp_code={resp_code}, resp_msg={resp_msg}")
+                    logging.info(f"✅ TP order submitted: tx={tx}, resp_code={resp_code}, resp_msg={resp_msg}, vol_quota={resp_quota}")
                 else:
                     logging.info(f"✅ TP order submitted: {tx}")
                 return True
@@ -851,15 +900,22 @@ class LighterAPI:
                 tx = result[0]
                 resp = result[1] if len(result) > 1 else None
                 if resp is not None:
+                    # 🔍 DEBUG: Raw response structure analysis
+                    quota_val, quota_detail = self._extract_quota_from_response(resp)
+                    logging.debug(f"🔍 Open response quota extraction: {quota_detail}")
+                    if quota_val is None:
+                        quota_analysis = self._analyze_quota_response(resp)
+                        logging.debug(f"🔍 Open response full analysis: {json.dumps(quota_analysis, indent=2)}")
+                    
                     resp_code = getattr(resp, 'code', None)
                     resp_msg = getattr(resp, 'msg', None) or getattr(resp, 'message', None)
-                    resp_quota = getattr(resp, 'volume_quota_remaining', None)
+                    resp_quota = quota_val  # Use enhanced extraction result
                     if resp_quota is not None:
                         self._volume_quota_remaining = resp_quota
                     if resp_msg and "didn't use volume quota" in str(resp_msg):
                         logging.warning(f"⚠️ Open order rate-limited (volume quota): {resp_msg}, vol_remaining={self._volume_quota_remaining}")
                         raise VolumeQuotaError(resp_msg)
-                    logging.info(f"✅ Position opened: {'LONG' if is_long else 'SHORT'} {size_usd:.2f} USD -> tx={tx}, resp_code={resp_code}, resp_msg={resp_msg}")
+                    logging.info(f"✅ Position opened: {'LONG' if is_long else 'SHORT'} {size_usd:.2f} USD -> tx={tx}, resp_code={resp_code}, resp_msg={resp_msg}, vol_quota={resp_quota}")
                 else:
                     logging.info(f"✅ Position opened: {'LONG' if is_long else 'SHORT'} {size_usd:.2f} USD -> {tx}")
                 return True
@@ -915,11 +971,18 @@ class LighterAPI:
                 tx = result[0]
                 resp = result[1] if len(result) > 1 else None
                 if resp is not None:
+                    # 🔍 DEBUG: Raw response structure analysis
+                    quota_val, quota_detail = self._extract_quota_from_response(resp)
+                    logging.debug(f"🔍 SL response quota extraction: {quota_detail}")
+                    if quota_val is None:
+                        quota_analysis = self._analyze_quota_response(resp)
+                        logging.debug(f"🔍 SL response full analysis: {json.dumps(quota_analysis, indent=2)}")
+                    
                     resp_code = getattr(resp, 'code', None)
                     resp_msg = getattr(resp, 'msg', None) or getattr(resp, 'message', None)
                     resp_tx_hash = getattr(resp, 'tx_hash', None)
                     resp_pred_ms = getattr(resp, 'predicted_execution_time_ms', None)
-                    resp_quota = getattr(resp, 'volume_quota_remaining', None)
+                    resp_quota = quota_val  # Use enhanced extraction result
                     if resp_quota is not None:
                         self._volume_quota_remaining = resp_quota
                     if resp_msg and "didn't use volume quota" in str(resp_msg):
@@ -943,6 +1006,34 @@ class LighterAPI:
         except Exception as e:
             logging.error(f"Failed to execute SL: {e}")
             return False, None
+
+    async def _test_quota_response(self):
+        """Test method to capture quota response structure. Does NOT submit real orders."""
+        try:
+            await self._ensure_signer()
+            
+            # Try to get current account info first
+            result = await self._account_api.account(
+                by="index", value=str(self.cfg.account_index)
+            )
+            
+            logging.info("🧪 Testing quota response structure...")
+            
+            # Analyze account API response for quota fields
+            if hasattr(result, 'accounts') and result.accounts:
+                for acc in result.accounts:
+                    acc_analysis = self._analyze_quota_response(acc)
+                    logging.info(f"🧪 Account response analysis: type={acc_analysis['type']}, quota_attrs={acc_analysis['quota_related_attrs']}")
+                    # Check all attributes for quota-related fields
+                    for attr in dir(acc):
+                        if 'quota' in attr.lower() or 'volume' in attr.lower():
+                            val = getattr(acc, attr, None)
+                            logging.info(f"🧪   Account.{attr} = {val}")
+            
+            logging.info("🧪 Quota response structure test complete (no orders submitted)")
+                
+        except Exception as e:
+            logging.info(f"🧪 Quota test encountered error: {e}")
 
     async def close(self):
         """Close all aiohttp sessions."""

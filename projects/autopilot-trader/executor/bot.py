@@ -217,6 +217,10 @@ class BotConfig:
                     if not isinstance(breaches, int) or breaches < 1:
                         errors.append(f"dsl_tiers[{i}].consecutive_breaches must be >= 1, got {breaches}")
 
+                    buf = tier.get("trailing_buffer_roe")
+                    if buf is not None and not isinstance(buf, (int, float)):
+                        errors.append(f"dsl_tiers[{i}].trailing_buffer_roe must be numeric or null, got {buf!r}")
+
                     # Check ascending order
                     if trigger is not None and trigger <= prev_trigger:
                         errors.append(f"dsl_tiers[{i}].trigger_pct ({trigger}) must be > previous ({prev_trigger}) — tiers must be sorted ascending")
@@ -246,6 +250,14 @@ class BotConfig:
                      "default_leverage", "stagnation_roe_pct", "price_call_delay"):
             if key in filtered and isinstance(filtered[key], str):
                 filtered[key] = float(filtered[key])
+        # Coerce nested dsl_tiers numeric fields (may be strings from env var expansion)
+        if "dsl_tiers" in filtered and isinstance(filtered["dsl_tiers"], list):
+            for tier in filtered["dsl_tiers"]:
+                for tkey in ("trigger_pct", "lock_hw_pct", "consecutive_breaches"):
+                    if tkey in tier and isinstance(tier[tkey], str):
+                        tier[tkey] = float(tier[tkey]) if tkey != "consecutive_breaches" else int(tier[tkey])
+                if "trailing_buffer_roe" in tier and isinstance(tier["trailing_buffer_roe"], str):
+                    tier["trailing_buffer_roe"] = float(tier["trailing_buffer_roe"])
         return cls(**filtered)
 
 
@@ -653,7 +665,8 @@ class LighterAPI:
         try:
             await self._ensure_client()
             result = await self._account_api.account(
-                by="index", value=str(self.cfg.account_index)
+                by="index", value=str(self.cfg.account_index),
+                _request_timeout=30,
             )
             positions = []
             for account in result.accounts:
@@ -1371,6 +1384,11 @@ class LighterCopilot:
                     actual_size = verified_pos["size"]
                     self.tracker.add_position(mid, symbol, direction, current_price, actual_size, leverage=min(self.cfg.default_leverage, 10))
 
+                    # Update DSL state with effective leverage from exchange (L3 fix)
+                    pos = self.tracker.positions.get(mid)
+                    if pos and pos.dsl_state and verified_pos.get("leverage"):
+                        pos.dsl_state.leverage = verified_pos["leverage"]
+
                     # BUG-06: Verify we can actually fetch price for this position after open
                     price_ok = False
                     for attempt in range(1, 4):
@@ -1579,6 +1597,11 @@ class LighterCopilot:
             ai_leverage = min(float(decision.get("leverage", self.cfg.default_leverage)), 10)
             self.tracker.add_position(market_id, symbol, direction, current_price, actual_size, leverage=ai_leverage, sl_pct=ai_sl_pct)
 
+            # Update DSL state with effective leverage from exchange (L3 fix)
+            pos = self.tracker.positions.get(market_id)
+            if pos and pos.dsl_state and verified_pos.get("leverage"):
+                pos.dsl_state.leverage = verified_pos["leverage"]
+
             # BUG-06: Verify we can actually fetch price for this position after open
             # If price is unavailable, the position becomes "orphaned" — DSL can't compute ROE
             price_ok = False
@@ -1617,7 +1640,11 @@ class LighterCopilot:
         return success
 
     async def _check_active_orders(self, market_id: int) -> list[dict]:
-        """Check if there are any active (unfilled) orders for this market on our account."""
+        """Check if there are any active (unfilled) orders for this market on our account.
+
+        TODO: Use this to cancel stale orders before placing new SL orders.
+        Requires implementing _cancel_order() using the Lighter order API.
+        """
         try:
             await self.api._ensure_client()
             # Generate auth token for the request
@@ -2321,7 +2348,7 @@ class LighterCopilot:
             )
 
         # 1.4. Reconcile saved DSL state with detected positions (first tick after restart)
-        self._reconcile_positions(live_positions)
+        await self._reconcile_positions(live_positions)
 
         # 1.5. Process signals — AI mode or rule-based
         # NOTE: Moved AFTER position sync/confirmation so tracker is populated
@@ -2673,7 +2700,7 @@ class LighterCopilot:
             },
         }
         try:
-            state_path = Path("state/bot_state.json")
+            state_path = Path(__file__).parent / "state" / "bot_state.json"
             state_path.parent.mkdir(parents=True, exist_ok=True)
             tmp = str(state_path) + ".tmp"
             with open(tmp, "w") as f:
@@ -2684,7 +2711,7 @@ class LighterCopilot:
 
     def _load_state(self):
         """Restore critical ephemeral state from disk after restart."""
-        state_path = Path("state/bot_state.json")
+        state_path = Path(__file__).parent / "state" / "bot_state.json"
         if not state_path.exists():
             return
         try:
@@ -2719,6 +2746,16 @@ class LighterCopilot:
             # BUG-07: Load bot-managed market IDs
             managed_ids = state.get("bot_managed_market_ids", [])
             self.bot_managed_market_ids = set(managed_ids)
+
+            # If managed market IDs were lost but we have saved positions, reconstruct
+            if not self.bot_managed_market_ids and state.get("positions"):
+                for mid_str in state["positions"]:
+                    try:
+                        self.bot_managed_market_ids.add(int(mid_str))
+                    except (ValueError, TypeError):
+                        pass
+                if self.bot_managed_market_ids:
+                    logging.warning(f"Reconstructed bot_managed_market_ids from saved positions: {sorted(self.bot_managed_market_ids)}")
 
             # Load saved positions for DSL state restoration (applied after exchange detection)
             self._saved_positions = state.get("positions") or None
@@ -2761,7 +2798,7 @@ class LighterCopilot:
         except Exception as e:
             logging.warning(f"Failed to load bot state: {e}")
 
-    def _restore_dsl_state(self, dsl_data: dict, pos: TrackedPosition):
+    async def _restore_dsl_state(self, dsl_data: dict, pos: TrackedPosition):
         """Restore saved DSL state onto a live TrackedPosition.
 
         Overwrites all tracked fields on the existing DSLState from saved data.
@@ -2802,8 +2839,12 @@ class LighterCopilot:
             )
         except Exception as e:
             logging.warning(f"Failed to restore DSL state for {pos.symbol}: {e}")
+            try:
+                await self.alerts.send(f"⚠️ *DSL State Lost:* {pos.symbol}\nRestart reset tier progress. Starting fresh.")
+            except Exception:
+                pass
 
-    def _reconcile_positions(self, live_positions: list[dict] | None):
+    async def _reconcile_positions(self, live_positions: list[dict] | None):
         """Reconcile saved positions with live exchange positions.
 
         Called once per tick (no-op after first successful reconciliation).
@@ -2829,7 +2870,7 @@ class LighterCopilot:
                 pos = self.tracker.positions[mid]
                 dsl_data = saved_pos.get("dsl")
                 if dsl_data:
-                    self._restore_dsl_state(dsl_data, pos)
+                    await self._restore_dsl_state(dsl_data, pos)
                 # Also restore legacy trailing state
                 if saved_pos.get("trailing_sl_level") is not None:
                     pos.trailing_sl_level = saved_pos["trailing_sl_level"]

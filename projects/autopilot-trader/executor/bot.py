@@ -2154,6 +2154,9 @@ class LighterCopilot:
     async def _tick(self):
         """One cycle: sync positions, update prices, check triggers."""
         # Fix #16: Clear pending sync at START so exceptions don't block position detection
+        # This is correct: _pending_sync only tracks positions opened in THIS tick's execution
+        # phase. Positions from previous ticks are already in tracker.positions and will be
+        # skipped by sync. New opens in this tick add to _pending_sync AFTER sync runs.
         self._pending_sync.clear()
 
         # ── Kill switch check ──
@@ -2587,6 +2590,9 @@ class LighterCopilot:
                 self._update_outcome(pos, price, action)
             else:
                 # SL order failed (rate-limited or rejected) — track attempts with graduated delay
+                # Note: _close_attempts is shared between AI close and legacy SL paths.
+                # This is intentional — both paths count toward the same circuit breaker,
+                # preventing either from hammering a stuck position independently.
                 attempts = self._close_attempts.get(pos.symbol, 0) + 1
                 self._close_attempts[pos.symbol] = attempts
                 delay_idx = min(attempts - 1, len(self._sl_retry_delays) - 1)

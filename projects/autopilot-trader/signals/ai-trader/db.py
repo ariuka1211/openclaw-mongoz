@@ -25,6 +25,11 @@ class DecisionDB:
         self._conn.execute("PRAGMA busy_timeout=5000")
         self._init_tables()
 
+    @property
+    def conn(self):
+        """Direct access to the connection (for simple read queries)."""
+        return self._conn
+
     def _init_tables(self):
         with self._lock:
             self._conn.executescript("""

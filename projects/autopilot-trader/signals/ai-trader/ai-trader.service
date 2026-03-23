@@ -12,7 +12,7 @@ ExecStart=/usr/bin/python3 ai_trader.py
 Restart=always
 RestartSec=10
 MemoryMax=512M
-EnvironmentFile=/root/.openclaw/workspace/signals/ai-trader/ai-trader.env
+EnvironmentFile=/root/.openclaw/workspace/.env
 StandardOutput=journal
 StandardError=journal
 

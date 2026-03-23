@@ -17,3 +17,4 @@ state/
 # Databases
 *.db
 *.sqlite
+.auth_token.json

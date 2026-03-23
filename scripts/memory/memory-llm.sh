@@ -4,7 +4,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/.env" 2>/dev/null || true
+source "/root/.openclaw/workspace/.env" 2>/dev/null || true
 
 API_KEY="${KILOCODE_API_KEY:-}"
 MODEL="${2:-xiaomi/mimo-v2-pro}"

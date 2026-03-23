@@ -4,6 +4,7 @@
   "signals_file": "../signals.json",
   "strategy_memory_file": "state/strategy_memory.md",
 
+  "max_signals": 15,
   "cycle_interval_seconds": 120,
   "max_consecutive_failures": 5,
   "max_rejection_halt_count": 5,
@@ -14,7 +15,7 @@
     "fallback_model": "xiaomi/mimo-v2-pro",
     "reflection_model": "xiaomi/mimo-v2-pro",
     "api_base": "https://api.kilo.ai/api/gateway",
-    "timeout_seconds": 30,
+    "timeout_seconds": 60,
     "max_retries": 2
   },
 

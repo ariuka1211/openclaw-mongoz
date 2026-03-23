@@ -27,7 +27,7 @@ import yaml
 from dotenv import load_dotenv
 
 # Load .env before anything else so ${ENV_VAR} placeholders resolve
-load_dotenv(Path(__file__).parent / ".env")
+load_dotenv("/root/.openclaw/workspace/.env")
 
 import lighter
 from auth_helper import LighterAuthManager

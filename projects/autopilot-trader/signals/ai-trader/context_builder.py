@@ -56,7 +56,10 @@ class ContextBuilder:
         self.memory_file = Path(config.get("strategy_memory_file", "state/strategy_memory.md"))
 
     def read_signals(self) -> tuple[list[dict], dict]:
-        """Read signals.json. Returns (opportunities_list, config_dict)."""
+        """Read signals.json. Returns (top_opportunities_list, config_dict).
+
+        Filters to top N signals by compositeScore to keep prompt size manageable.
+        """
         if not self.signals_file.exists():
             log.warning(f"Signals file not found: {self.signals_file}")
             return [], {}
@@ -64,10 +67,56 @@ class ContextBuilder:
         try:
             with open(self.signals_file) as f:
                 data = json.load(f)
-            return data.get("opportunities", []), data.get("config", {})
+
+            opportunities = data.get("opportunities", [])
+            if not opportunities:
+                return [], data.get("config", {})
+
+            max_signals = self.config.get("max_signals", 15)
+
+            # Filter to top N by compositeScore descending
+            top_opportunities = sorted(
+                opportunities,
+                key=lambda x: x.get("compositeScore", 0),
+                reverse=True,
+            )[:max_signals]
+
+            # Remove symbols that were recently traded (last 2 hours)
+            top_opportunities = self._filter_traded_symbols(top_opportunities)
+
+            log.info(
+                f"Filtered {len(opportunities)} signals to top {len(top_opportunities)} "
+                f"(max_signals={max_signals})"
+            )
+            return top_opportunities, data.get("config", {})
+
         except (json.JSONDecodeError, OSError) as e:
             log.error(f"Failed to read signals: {e}")
             return [], {}
+
+    def _filter_traded_symbols(self, opportunities: list[dict]) -> list[dict]:
+        """Remove opportunities for symbols that were recently traded."""
+        try:
+            cursor = self.db.conn.cursor()
+            cursor.execute('''
+                SELECT DISTINCT symbol
+                FROM outcomes
+                WHERE timestamp > datetime('now', '-2 hours')
+            ''')
+            traded_symbols = {row[0] for row in cursor.fetchall()}
+
+            if not traded_symbols:
+                return opportunities
+
+            filtered = [o for o in opportunities if o.get('symbol') not in traded_symbols]
+            removed = len(opportunities) - len(filtered)
+            if removed > 0:
+                log.info(f"Filtered out {removed} traded symbols: {traded_symbols}")
+
+            return filtered
+        except Exception as e:
+            log.warning(f"Failed to filter traded symbols: {e}")
+            return opportunities
 
     def read_positions(self) -> list[dict]:
         """Read current positions from the shared decision result file."""

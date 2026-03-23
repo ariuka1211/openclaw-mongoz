@@ -67,3 +67,9 @@
 - [open] (trading) Position re-detection loop: same positions detected as 'new' every sync cycle, creating duplicate DSLState entries.
 - [fact] (trading) ROE calculation in `DSLState.current_roe()` is correct for both long and short. Alert formatting was not buggy — only the side detection was wrong. — trading bot debug
 
+
+## Session Extract — 2026-03-22 [auto]
+
+- [fact] (trading) Lighter REST API auth helper implemented: `LighterAuthManager` class in `auth_helper.py` with in-memory + disk caching, auto-refreshes 7 days before 30-day token expiry, tokens stored with 600 permissions. Ready for integration into `bot.py` pending John's approval. — trading bot development
+- [open] (trading) Critical bug: bot flips position direction after restart — positions correctly detected as LONG before restart, re-detected as SHORT after restart (e.g. RESOLV/MORPHO/ROBO at 17:38). Root cause in position sync logic around bot.py lines 611-612 where `sign` field extraction fails during post-restart re-sync. This is distinct from the earlier `pos.position` vs `pos.sign` bug. — trading bot debug
+

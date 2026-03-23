@@ -87,6 +87,7 @@ interface MarketOpportunity {
   liquidationDistancePct: number; // % from entry to liquidation
   safetyPass: boolean;
   safetyReason: string;
+  detectedAt: string;             // ISO timestamp when opportunity was detected
 }
 
 // --- Config ---
@@ -806,6 +807,7 @@ async function main(): Promise<void> {
       liquidationDistancePct: pos.liqDistPct,
       safetyPass: pos.pass,
       safetyReason: pos.reason,
+      detectedAt: new Date().toISOString(),
     });
   }
 
@@ -973,11 +975,24 @@ async function main(): Promise<void> {
   }
   console.log("═══════════════════════════════════════════════════════════════════════════════════════════════════════════════");
 
-  // Write signals.json with all opportunities (including MA/OB fields)
+  // === Signal Cleanup: Remove opportunities older than 20 minutes ===
+  const MAX_SIGNAL_AGE_MS = 20 * 60 * 1000; // 20 minutes
+  const cleanupNow = new Date();
+  const freshOpportunities = opportunities.filter(o => {
+    if (!o.detectedAt) return true; // Keep if no timestamp (legacy)
+    const age = cleanupNow.getTime() - new Date(o.detectedAt).getTime();
+    return age <= MAX_SIGNAL_AGE_MS;
+  });
+  const removedCount = opportunities.length - freshOpportunities.length;
+  if (removedCount > 0) {
+    console.log(`  🗑️ Cleanup: Removed ${removedCount} stale opportunities (>20min old)`);
+  }
+
+  // Write signals.json with fresh opportunities only
   const signalsOutput = {
     timestamp: new Date().toISOString(),
     config: { ...CONFIG },
-    opportunities: opportunities.map(o => ({
+    opportunities: freshOpportunities.map(o => ({
       symbol: o.symbol,
       marketId: o.marketId,
       compositeScore: o.compositeScore,
@@ -1007,6 +1022,7 @@ async function main(): Promise<void> {
       liquidationDistancePct: o.liquidationDistancePct,
       safetyPass: o.safetyPass,
       safetyReason: o.safetyReason,
+      detectedAt: o.detectedAt,
     })),
   };
   await Bun.write("signals.json.tmp", JSON.stringify(signalsOutput, null, 2));

@@ -10,7 +10,6 @@ set -euo pipefail
 
 W="/root/.openclaw/workspace"
 source "$W/.env" 2>/dev/null || true
-source "$W/scripts/memory/.env" 2>/dev/null || true
 [ -z "${KILOCODE_API_KEY:-}" ] && echo "⚠️ No API key" && exit 1
 
 LOG="/tmp/memory-nightly-cleanup.log"

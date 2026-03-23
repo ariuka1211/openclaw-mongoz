@@ -30,6 +30,7 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent / ".env")
 
 import lighter
+from auth_helper import LighterAuthManager
 from dsl import DSLConfig, DSLState, DSLTier, evaluate_dsl
 
 # ── SOCKS5 Proxy Patch ──────────────────────────────────────────────
@@ -1302,10 +1303,12 @@ class LighterCopilot:
             try:
                 await self.api._ensure_signer()
                 if self.api._signer is not None:
-                    auth, err = self.api._signer.create_auth_token_with_expiry()
-                    if err:
-                        logging.warning(f"⚠️ Auth token generation error: {err}")
-                        auth = None
+                    if not hasattr(self, '_auth_manager'):
+                        self._auth_manager = LighterAuthManager(
+                            signer=self.api._signer,
+                            account_index=self.cfg.account_index
+                        )
+                    auth = self._auth_manager.get_auth_token()
             except Exception as auth_err:
                 logging.debug(f"Auth generation skipped: {auth_err}")
             orders = await self.api._order_api.account_active_orders(
@@ -1358,7 +1361,6 @@ class LighterCopilot:
         if not client_order_index:
             return None
         try:
-            from auth_helper import LighterAuthManager
             if not hasattr(self, '_auth_manager'):
                 self._auth_manager = LighterAuthManager(
                     signer=self.api._signer,

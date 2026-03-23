@@ -218,8 +218,8 @@ class AITrader:
         # Cleanup
         if self.emergency_halt:
             # Give bot time to process the close_all decision before we exit
-            log.info("Waiting 10s for bot to process close_all...")
-            await asyncio.sleep(10)
+            log.info("Waiting 60s for bot to process close_all...")
+            await asyncio.sleep(60)
         await self.llm.close()
         self.db.close()
 

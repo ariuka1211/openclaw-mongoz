@@ -1375,16 +1375,22 @@ class LighterCopilot:
                     self._mark_order_submitted()
                     self._reset_volume_quota_backoff()
 
+                    # Fix #13: Add to pending_sync and bot_managed BEFORE verification
+                    # to prevent race conditions if _tick() sync cycle runs mid-verification
+                    self._pending_sync.add(mid)
+                    self.bot_managed_market_ids.add(mid)
+
                     # Verify position exists on exchange (BUG-03 fix)
                     expected_size = size_usd / current_price
                     verified_pos = await self._verify_position_opened(mid, expected_size, symbol)
                     if verified_pos is None:
                         logging.error(f"❌ Signal open: {symbol} order rejected by exchange (phantom position prevented)")
+                        # Clean up — position wasn't actually opened
+                        self._pending_sync.discard(mid)
+                        self.bot_managed_market_ids.discard(mid)
                         continue  # Skip to next signal
 
                     self._opened_signals.add(mid)
-                    self._pending_sync.add(mid)
-                    self.bot_managed_market_ids.add(mid)
                     # Use actual filled size from exchange (handles partial fills)
                     actual_size = verified_pos["size"]
                     self.tracker.add_position(mid, symbol, direction, current_price, actual_size, leverage=min(self.cfg.default_leverage, 10))
@@ -1577,15 +1583,20 @@ class LighterCopilot:
             self._mark_order_submitted()
             self._reset_volume_quota_backoff()
 
+            # Fix #13: Add to pending_sync and bot_managed BEFORE verification
+            # to prevent race conditions if _tick() sync cycle runs mid-verification
+            self._pending_sync.add(market_id)
+            self.bot_managed_market_ids.add(market_id)
+
             # Verify position exists on exchange (BUG-03 fix)
             expected_size = size_usd / current_price
             verified_pos = await self._verify_position_opened(market_id, expected_size, symbol)
             if verified_pos is None:
                 logging.error(f"❌ AI open: {symbol} order rejected by exchange (phantom position prevented)")
+                # Clean up — position wasn't actually opened
+                self._pending_sync.discard(market_id)
+                self.bot_managed_market_ids.discard(market_id)
                 return False
-
-            self._pending_sync.add(market_id)
-            self.bot_managed_market_ids.add(market_id)
             # Use actual filled size from exchange (handles partial fills)
             actual_size = verified_pos["size"]
             ai_sl_pct = decision.get("stop_loss_pct")
@@ -1714,13 +1725,15 @@ class LighterCopilot:
                 for p in live_positions:
                     if p["market_id"] == market_id and abs(p.get("size", 0)) > 0.001:
                         actual_size = p["size"]
-                        # Check for partial fill (allow 10% tolerance for rounding/slippage)
+                        # Fix #14: Reject severely underfilled positions (< 20%)
+                        # Bot DSL logic is designed for full-size — don't manage tiny positions
                         fill_ratio = actual_size / expected_size if expected_size > 0 else 0
-                        if fill_ratio < 0.1:
-                            logging.warning(
-                                f"⚠️ {symbol}: position exists but severely underfilled "
+                        if fill_ratio < 0.2:
+                            logging.error(
+                                f"❌ {symbol}: position severely underfilled, REJECTING "
                                 f"(actual={actual_size:.6f}, expected={expected_size:.6f}, fill={fill_ratio:.1%})"
                             )
+                            return None  # Abort — don't manage severely underfilled positions
                         elif fill_ratio < 0.9:
                             logging.info(
                                 f"📊 {symbol}: partial fill detected "
@@ -2091,6 +2104,11 @@ class LighterCopilot:
         expired_close_cd = [s for s, t in self._close_attempt_cooldown.items() if t < now]
         for s in expired_close_cd:
             del self._close_attempt_cooldown[s]
+        # Fix #15: Prune _close_attempts for symbols whose cooldown has expired
+        # (counter is only useful while cooldown is active)
+        for s in list(self._close_attempts.keys()):
+            if s not in self._close_attempt_cooldown:
+                del self._close_attempts[s]
         # Prune DSL close attempt cooldowns
         expired_dsl_close_cd = [s for s, t in self._dsl_close_attempt_cooldown.items() if t < now]
         for s in expired_dsl_close_cd:
@@ -2163,6 +2181,9 @@ class LighterCopilot:
 
     async def _tick(self):
         """One cycle: sync positions, update prices, check triggers."""
+        # Fix #16: Clear pending sync at START so exceptions don't block position detection
+        self._pending_sync.clear()
+
         # ── Kill switch check ──
         kill_switch_now = self._kill_switch_path.exists()
         if kill_switch_now and not self._kill_switch_active:
@@ -2279,6 +2300,19 @@ class LighterCopilot:
                     self.bot_managed_market_ids.discard(mid)
                     self.tracker.remove_position(mid)
 
+        # Fix #17: Quota staleness warning — alert if no quota update for 10+ minutes
+        if self.api and self.api._last_known_quota is not None and self.api._last_quota_time > 0:
+            quota_age = now - self.api._last_quota_time
+            if quota_age > 600:  # 10 minutes
+                age_min = int(quota_age / 60)
+                logging.warning(
+                    f"⚠️ Quota tracking stale — no update for {age_min}m "
+                    f"(last known: {self.api._last_known_quota} TX). "
+                    f"Guards still active with last known value."
+                )
+                # Reset timer to avoid spamming every tick (warn once per 10 min)
+                self.api._last_quota_time = now
+
         # Periodic quota status alert (every 20 minutes) — after position sync for accurate counts
         now = time.time()
         if now - self._last_quota_alert_time > self._quota_alert_interval:
@@ -2328,9 +2362,6 @@ class LighterCopilot:
             except Exception as e:
                 logging.error(f"Error processing {pos.symbol} (market {mid}): {e}", exc_info=True)
                 continue  # one bad position doesn't kill the rest
-
-        # Clear pending sync — must be outside position loop so it runs even on exceptions
-        self._pending_sync.clear()
 
         # Persist state for crash/restart recovery
         self._save_state()

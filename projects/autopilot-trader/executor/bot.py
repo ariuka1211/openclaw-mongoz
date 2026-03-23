@@ -1419,8 +1419,15 @@ class LighterCopilot:
             return  # hold or unknown — do nothing
 
         if action == "close_all":
-            await self._execute_ai_close_all(decision)
-            self._write_ai_result(decision, success=True)
+            success = await self._execute_ai_close_all(decision)
+            self._write_ai_result(decision, success=success)
+            # Write ACK so AI trader knows this decision was consumed
+            ack_path = str(path) + ".ack"
+            try:
+                with open(ack_path, "w") as f:
+                    f.write(decision.get("decision_id", ""))
+            except Exception:
+                pass
             return
         elif action == "open":
             success = await self._execute_ai_open(decision)
@@ -1431,6 +1438,13 @@ class LighterCopilot:
 
         # Write result back for the AI trader
         self._write_ai_result(decision, success=success)
+        # Write ACK so AI trader knows this decision was consumed
+        ack_path = str(path) + ".ack"
+        try:
+            with open(ack_path, "w") as f:
+                f.write(decision.get("decision_id", ""))
+        except Exception:
+            pass
 
     async def _execute_ai_open(self, decision: dict) -> bool:
         """Execute an AI-recommended open. Returns True on success."""
@@ -1714,39 +1728,61 @@ class LighterCopilot:
         logging.info(f"🧊 {symbol}: AI close cooldown set ({self._ai_cooldown_seconds}s)")
         return True
 
-    async def _execute_ai_close_all(self, decision: dict):
-        """Emergency close all positions."""
+    async def _execute_ai_close_all(self, decision: dict) -> bool:
+        """Emergency close all positions — with verification."""
         reasoning = decision.get("reasoning", "Emergency halt")
         logging.warning(f"🚨 AI close_all triggered: {reasoning}")
         await self.alerts.send(
             f"🚨 *AI → CLOSE ALL*\n"
             f"Reason: {reasoning[:200]}"
         )
+
+        failed_positions = []
+
         for i, (mid, pos) in enumerate(list(self.tracker.positions.items())):
             is_long = pos.side == "long"
             current_price = await self.api.get_price(mid) if self.api else None
             if i < len(self.tracker.positions) - 1:
                 await asyncio.sleep(self.cfg.price_call_delay)
-            if current_price:
-                try:
-                    sl_success, sl_coi = await self.api.execute_sl(mid, pos.size, current_price, is_long)
-                except VolumeQuotaError:
-                    self._start_volume_quota_cooldown()
-                    logging.warning(f"⚠️ AI close_all: volume quota exhausted for {pos.symbol} — cooldown started")
-                    sl_success = False
-                if sl_success:
-                    roe = ((current_price - pos.entry_price) / pos.entry_price * 100) if is_long \
-                        else ((pos.entry_price - current_price) / pos.entry_price * 100)
-                    logging.info(f"Emergency closed: {pos.side} {pos.symbol} ROE={roe:+.1f}%")
-                    self._recently_closed[mid] = time.monotonic() + 300  # 5 min phantom guard
-                    self.tracker.remove_position(mid)
-                    await self.alerts.send(
-                        f"✅ *CLOSE ALL → {pos.side.upper()} {pos.symbol}* closed"
-                    )
-                else:
-                    logging.warning(f"⚠️ Failed to close {pos.side} {pos.symbol} — keeping in tracker")
-            else:
+
+            if not current_price:
                 logging.warning(f"⚠️ No price for {pos.symbol} — skipping close, keeping in tracker")
+                failed_positions.append(pos.symbol)
+                continue
+
+            try:
+                sl_success, sl_coi = await self.api.execute_sl(mid, pos.size, current_price, is_long)
+            except VolumeQuotaError:
+                self._start_volume_quota_cooldown()
+                logging.warning(f"⚠️ AI close_all: volume quota exhausted for {pos.symbol} — cooldown started")
+                failed_positions.append(pos.symbol)
+                continue
+
+            if not sl_success:
+                logging.warning(f"⚠️ Failed to submit close order for {pos.side} {pos.symbol}")
+                failed_positions.append(pos.symbol)
+                continue
+
+            # Order submitted — verify it actually filled
+            position_closed = await self._verify_position_closed(mid, pos.symbol)
+
+            if position_closed:
+                roe = ((current_price - pos.entry_price) / pos.entry_price * 100) if is_long \
+                    else ((pos.entry_price - current_price) / pos.entry_price * 100)
+                logging.info(f"Emergency closed: {pos.side} {pos.symbol} ROE={roe:+.1f}%")
+                self._recently_closed[mid] = time.monotonic() + 300
+                self.tracker.remove_position(mid)
+                await self.alerts.send(
+                    f"✅ *CLOSE ALL → {pos.side.upper()} {pos.symbol}* closed"
+                )
+            else:
+                logging.warning(f"⚠️ {pos.symbol}: close order submitted but position still open after verification")
+                failed_positions.append(pos.symbol)
+                await self.alerts.send(
+                    f"⚠️ *CLOSE ALL → {pos.symbol}* verification failed — position may still be open"
+                )
+
+        return len(failed_positions) == 0
 
     def _resolve_market_id(self, symbol: str) -> int | None:
         """Resolve symbol to market_id. Tries scanner signals first, then cached positions."""

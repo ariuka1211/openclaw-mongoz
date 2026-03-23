@@ -313,6 +313,25 @@ class AITrader:
     async def _send_to_bot(self, decision: dict) -> bool:
         """Write decision to shared JSON file for bot to consume."""
         try:
+            # ACK check — don't overwrite unprocessed decisions
+            ack_path = str(self.decision_file) + ".ack"
+            if self.decision_file.exists():
+                current = safe_read_json(self.decision_file)
+                if current:
+                    current_id = current.get("decision_id", "")
+                    # Check if bot acked this decision
+                    try:
+                        if Path(ack_path).exists():
+                            acked_id = Path(ack_path).read_text().strip()
+                        else:
+                            acked_id = ""
+                    except Exception:
+                        acked_id = ""
+
+                    if current_id and acked_id != current_id:
+                        log.info(f"⏳ Bot hasn't processed decision {current_id} yet (acked={acked_id}), skipping write")
+                        return False
+
             decision_id = str(uuid.uuid4())[:8]
             output = {
                 "decision_id": decision_id,
@@ -337,6 +356,13 @@ class AITrader:
             self.decision_file.parent.mkdir(parents=True, exist_ok=True)
             atomic_write(self.decision_file, output)
 
+            # Clean up ACK file after writing new decision
+            try:
+                if Path(ack_path).exists():
+                    Path(ack_path).unlink()
+            except Exception:
+                pass
+
             log.info(f"📤 Decision written [{decision_id}]: {decision.get('action')} {decision.get('symbol', '')}")
             self.safety.record_order()
             return True
@@ -358,6 +384,13 @@ class AITrader:
                 "reasoning": f"Emergency halt triggered: {reason}",
                 "positions": [],
             }
+            # Clean up ACK file so bot can process emergency halt immediately
+            ack_path = str(self.decision_file) + ".ack"
+            try:
+                if Path(ack_path).exists():
+                    Path(ack_path).unlink()
+            except Exception:
+                pass
             atomic_write(self.decision_file, close_all)
             log.info("📤 close_all decision written to bot")
         except Exception as e:

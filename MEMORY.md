@@ -26,6 +26,11 @@
 - **2026-03-21:** Git workflow established, agent workspaces merged (PR #5). QMD cleaned (194→92 docs). LCM disabled. Workspace files trimmed. Backups → `~/.openclaw/backups/`
 - **2026-03-20:** Bot deployed 00:06 UTC. Close/reopen loop fixed (cooldown). Geo-restriction resolved (`mainnet.zklighter.elliot.ai` works from US VPS). Prompt rewritten with research-backed structure
 
+## ⚠️ CRITICAL: Lighter Deposit Rules
+- **NEVER give out the L1 address as a deposit address.** The `l1_address` from the API is just an account identifier, NOT a deposit address.
+- **ONLY way to deposit:** Go to **app.lighter.xyz**, connect wallet, deposit through their bridge UI.
+- Sending USDC directly to the L1 address = funds lost forever. This cost John $100 on 2026-03-23. Never again.
+
 ## Environment
 - VPS: 4 vCPU, 8GB RAM, 80GB disk. OpenClaw at `/root/.openclaw`, Gateway port 5705
 - GitHub: `ariuka1211/openclaw-mongoz`, SSH key `~/.ssh/id_ed25519`
@@ -79,4 +84,9 @@
 - [decision] (trading) Implemented quota-aware exponential backoff for trading bot: 60s → 120s → 300s (capped) when volume quota exhausted. VolumeQuotaError exception raised by API methods and caught at all order callers. — trading bot development, branch feature/quota-cooldown
 - [decision] (trading) Added quota prioritization: when quota < 50 remaining, new opens are blocked to preserve quota for critical SL orders. TP execution also restricted in emergency mode. — trading bot development, branch feature/quota-prioritization
 - [fact] (trading) Prediction market contrarian signal explored: Minara Polymarket workflow that fades 85%+ odds skews is theoretically sound per prediction market literature, but current implementation is vibes-based LLM reasoning not quantitative. Needs backtesting of skew thresholds and liquidity factors. — from John
+
+
+## Session Extract — 2026-03-23 [auto]
+
+- [pattern] (system) John wants to review changelogs before updating OpenClaw — prefers deliberate, informed maintenance over blind upgrades. — OpenClaw 2026.3.13→2026.3.22 update review
 

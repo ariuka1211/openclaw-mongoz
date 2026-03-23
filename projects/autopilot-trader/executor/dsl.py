@@ -17,18 +17,19 @@ from datetime import datetime, timezone, timedelta
 
 @dataclass
 class DSLTier:
-    """Each tier activates when ROE reaches trigger_pct, locking in lock_hw_pct of the peak."""
+    """Each tier activates when ROE reaches trigger_pct, locking in a floor from the peak."""
     trigger_pct: float          # ROE% to activate this tier
-    lock_hw_pct: float          # % of high-water ROE to lock (40-85)
-    consecutive_breaches: int   # breaches needed before ratcheting to this tier's floor
+    lock_hw_pct: float          # % of high-water ROE to lock (40-85), used when trailing_buffer_roe is None
+    trailing_buffer_roe: float | None = None  # Fixed ROE buffer from HW (floor = HW - buffer). Takes priority over lock_hw_pct.
+    consecutive_breaches: int = 3  # breaches needed before ratcheting to this tier's floor
 
 
 # Default tiers — conservative, then progressively tighter
 DEFAULT_TIERS = [
-    DSLTier(trigger_pct=7,  lock_hw_pct=40, consecutive_breaches=3),
-    DSLTier(trigger_pct=12, lock_hw_pct=55, consecutive_breaches=2),
-    DSLTier(trigger_pct=15, lock_hw_pct=75, consecutive_breaches=2),
-    DSLTier(trigger_pct=20, lock_hw_pct=85, consecutive_breaches=1),
+    DSLTier(trigger_pct=7,  lock_hw_pct=40, trailing_buffer_roe=5, consecutive_breaches=3),
+    DSLTier(trigger_pct=12, lock_hw_pct=55, trailing_buffer_roe=4, consecutive_breaches=2),
+    DSLTier(trigger_pct=15, lock_hw_pct=75, trailing_buffer_roe=3, consecutive_breaches=2),
+    DSLTier(trigger_pct=20, lock_hw_pct=85, trailing_buffer_roe=2, consecutive_breaches=1),
 ]
 
 
@@ -111,7 +112,12 @@ def evaluate_dsl(state: DSLState, price: float, cfg: DSLConfig) -> str | None:
 
     # ── Calculate what the floor SHOULD be at current tier + HW ──
     if state.current_tier and state.high_water_roe > 0:
-        lock_floor_roe = state.high_water_roe * state.current_tier.lock_hw_pct / 100
+        if state.current_tier.trailing_buffer_roe is not None:
+            # Fixed buffer: floor = HW - buffer (consistent cushion)
+            lock_floor_roe = state.high_water_roe - state.current_tier.trailing_buffer_roe
+        else:
+            # Percentage: floor = HW * lock_pct / 100 (backwards compat)
+            lock_floor_roe = state.high_water_roe * state.current_tier.lock_hw_pct / 100
     elif state.current_tier:
         # Just activated, hasn't seen HW yet — floor at trigger
         lock_floor_roe = state.current_tier.trigger_pct * state.current_tier.lock_hw_pct / 100

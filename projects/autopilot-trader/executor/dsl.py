@@ -36,8 +36,9 @@ DEFAULT_TIERS = [
 @dataclass
 class DSLConfig:
     tiers: list[DSLTier] = field(default_factory=lambda: list(DEFAULT_TIERS))
-    stagnation_roe_pct: float = 8.0   # ROE% threshold for stagnation check
-    stagnation_minutes: int = 60      # exit if no new high for this long
+    stagnation_roe_pct: float = 8.0   # ROE% threshold for stagnation check (legacy compat)
+    stagnation_min_roe_pct: float = 5.0  # Minimum ROE to trigger stagnation exit (avoid exiting losers)
+    stagnation_minutes: int = 60      # exit if no new high water mark for this long
     hard_sl_pct: float = 2.0          # hard stop loss from entry (ignores DSL)
 
 
@@ -73,8 +74,6 @@ class DSLState:
             self.high_water_roe = roe
             self.high_water_price = price
             self.high_water_time = now
-            self.stagnation_active = False
-            self.stagnation_started = None
 
 
 def evaluate_dsl(state: DSLState, price: float, cfg: DSLConfig) -> str | None:
@@ -142,17 +141,13 @@ def evaluate_dsl(state: DSLState, price: float, cfg: DSLConfig) -> str | None:
         # Back above floor → reset breach counter
         state.breach_count = 0
 
-    # ── Stagnation check: high ROE but no progress ──
-    if roe >= cfg.stagnation_roe_pct:
-        if not state.stagnation_active:
-            state.stagnation_active = True
-            state.stagnation_started = now
-        elif state.stagnation_started:
-            elapsed = now - state.stagnation_started
-            if elapsed >= timedelta(minutes=cfg.stagnation_minutes):
-                return "stagnation"
-    else:
-        state.stagnation_active = False
-        state.stagnation_started = None
+    # ── Stagnation check: high ROE but no new high water mark for too long ──
+    # Tracks "time since last new high" rather than "time continuously above threshold."
+    # This way, brief dips below stagnation_roe_pct don't reset the timer.
+    # Only new highs reset it. Minimum ROE floor avoids exiting losing positions.
+    if roe >= cfg.stagnation_min_roe_pct and state.high_water_time:
+        elapsed = now - state.high_water_time
+        if elapsed >= timedelta(minutes=cfg.stagnation_minutes):
+            return "stagnation"
 
     return None

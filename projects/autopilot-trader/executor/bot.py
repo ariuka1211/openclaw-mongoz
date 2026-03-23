@@ -1424,33 +1424,27 @@ class LighterCopilot:
         if action not in ("open", "close", "close_all"):
             return  # hold or unknown — do nothing
 
-        if action == "close_all":
-            success = await self._execute_ai_close_all(decision)
+        # Execute inside try/except — ACK + result are written AFTER execution
+        # completes (success or failure), NOT if an uncaught exception occurs.
+        try:
+            if action == "close_all":
+                success = await self._execute_ai_close_all(decision)
+            elif action == "open":
+                success = await self._execute_ai_open(decision)
+            elif action == "close":
+                success = await self._execute_ai_close(decision)
+            else:
+                success = True
+
+            # Write result back for the AI trader
             self._write_ai_result(decision, success=success)
             # Write ACK so AI trader knows this decision was consumed
             ack_path = str(path) + ".ack"
-            try:
-                with open(ack_path, "w") as f:
-                    f.write(decision.get("decision_id", ""))
-            except Exception:
-                pass
-            return
-        elif action == "open":
-            success = await self._execute_ai_open(decision)
-        elif action == "close":
-            success = await self._execute_ai_close(decision)
-        else:
-            success = True
-
-        # Write result back for the AI trader
-        self._write_ai_result(decision, success=success)
-        # Write ACK so AI trader knows this decision was consumed
-        ack_path = str(path) + ".ack"
-        try:
             with open(ack_path, "w") as f:
                 f.write(decision.get("decision_id", ""))
-        except Exception:
-            pass
+        except Exception as e:
+            logging.error(f"❌ AI decision execution crashed — NOT writing ACK: {e}", exc_info=True)
+            # Do NOT write result or ACK — the AI trader will re-deliver the decision
 
     async def _execute_ai_open(self, decision: dict) -> bool:
         """Execute an AI-recommended open. Returns True on success."""
@@ -1599,6 +1593,52 @@ class LighterCopilot:
             except Exception as e:
                 logging.warning(f"⚠️ {symbol}: error verifying closure (attempt {attempt + 1}): {e}")
         return False
+
+    async def _verify_position_opened(self, market_id: int, expected_size: float, symbol: str) -> dict | None:
+        """Verify a position exists on the exchange after open_order returns success.
+
+        Retries up to 3 times with 1-second delays (max ~3s total).
+        Returns position dict with actual filled size on success, None on failure.
+
+        Handles:
+        - Exchange rejecting the order after SDK returned success (phantom positions)
+        - Partial fills (actual size < requested size)
+        - EDGE-03: get_positions() returning None on network failure
+        """
+        for attempt in range(1, 4):
+            await asyncio.sleep(1)
+            try:
+                live_positions = await self.api.get_positions()
+                # Handle EDGE-03: get_positions() returns None on failure
+                if live_positions is None:
+                    logging.warning(f"⚠️ {symbol}: get_positions() returned None during open verification (attempt {attempt}/3)")
+                    continue
+                for p in live_positions:
+                    if p["market_id"] == market_id and abs(p.get("size", 0)) > 0.001:
+                        actual_size = p["size"]
+                        # Check for partial fill (allow 10% tolerance for rounding/slippage)
+                        fill_ratio = actual_size / expected_size if expected_size > 0 else 0
+                        if fill_ratio < 0.1:
+                            logging.warning(
+                                f"⚠️ {symbol}: position exists but severely underfilled "
+                                f"(actual={actual_size:.6f}, expected={expected_size:.6f}, fill={fill_ratio:.1%})"
+                            )
+                        elif fill_ratio < 0.9:
+                            logging.info(
+                                f"📊 {symbol}: partial fill detected "
+                                f"(actual={actual_size:.6f}, expected={expected_size:.6f}, fill={fill_ratio:.1%})"
+                            )
+                        else:
+                            logging.info(
+                                f"✅ {symbol}: position verified on exchange "
+                                f"(size={actual_size:.6f}, attempt {attempt})"
+                            )
+                        return p
+                logging.info(f"⏳ {symbol}: position not yet visible on exchange (attempt {attempt}/3)")
+            except Exception as e:
+                logging.warning(f"⚠️ {symbol}: error during open verification (attempt {attempt}/3): {e}")
+        logging.error(f"❌ {symbol}: position NOT found on exchange after 3 verification attempts — order may have been rejected")
+        return None
 
     async def _get_fill_price(self, market_id: int, client_order_index: str | None) -> float | None:
         """Query Lighter API for actual fill price of a closed order."""

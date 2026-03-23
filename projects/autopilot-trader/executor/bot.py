@@ -131,6 +131,9 @@ def safe_read_json(path: Path, retries: int = 2, delay: float = 0.1) -> dict | N
             if attempt < retries:
                 time.sleep(delay)
             else:
+                # Only log non-"file not found" errors (permission, disk full, etc.)
+                if not isinstance(e, FileNotFoundError):
+                    logging.warning(f"Failed to read {path}: {e}")
                 return None
     return None
 
@@ -1257,9 +1260,6 @@ class LighterCopilot:
             return
         self._last_signal_timestamp = data.get("timestamp")
 
-        # Clear old tracked signals on new signal run
-        self._opened_signals.clear()
-
         # Auto-detect balance and scale positions proportionally
         balance = await self._get_balance()
         scanner_equity = data.get("config", {}).get("accountEquity", balance)
@@ -1608,7 +1608,8 @@ class LighterCopilot:
                     account_index=self.cfg.account_index
                 )
             auth = self._auth_manager.get_auth_token()
-            url = f'https://mainnet.zklighter.elliot.ai/api/v1/accountInactiveOrders?account_index={self.cfg.account_index}&limit=20&auth={auth}'
+            base = self.cfg.lighter_url.rstrip('/')
+            url = f'{base}/api/v1/accountInactiveOrders?account_index={self.cfg.account_index}&limit=20&auth={auth}'
             # Reuse or create a session for fill price queries
             if not hasattr(self, '_http_session') or self._http_session.closed:
                 self._http_session = aiohttp.ClientSession()
@@ -2034,7 +2035,13 @@ class LighterCopilot:
         for mid in list(self.tracker.positions.keys()):
             if mid not in live_mids:
                 pos = self.tracker.positions[mid]
-                logging.info(f"Position closed: {pos.symbol}")
+                # Try to get fill price for accurate outcome logging
+                exit_price = self.api.get_mark_price(mid) if self.api else pos.entry_price
+                if not exit_price or exit_price <= 0:
+                    exit_price = pos.entry_price
+                self._log_outcome(pos, exit_price, "exchange_close")
+                logging.info(f"Position closed by exchange: {pos.symbol}")
+                self._recently_closed[mid] = time.monotonic() + 300
                 self.tracker.remove_position(mid)
 
         # Periodic quota status alert (every 20 minutes) — after position sync for accurate counts

@@ -43,6 +43,9 @@ def safe_read_json(path: Path, retries: int = 2, delay: float = 0.1) -> dict | N
             if attempt < retries:
                 time.sleep(delay)
             else:
+                # Log non-"file not found" errors (permission, disk full, etc.)
+                if not isinstance(e, FileNotFoundError):
+                    log.warning(f"Failed to read {path}: {e}")
                 return None
     return None
 
@@ -127,8 +130,7 @@ class AITrader:
         self.MAX_CONSECUTIVE_FAILURES = config.get("max_consecutive_failures", 5)
         self.max_rejection_halt_count = config.get("max_rejection_halt_count", 15)
         self.rejection_halt_window_minutes = config.get("rejection_halt_window_minutes", 30)
-        self._purge_interval_cycles = 720  # ~24 hours at 2-min cycles
-        self._cycles_since_purge = 0
+        self._last_purge_time: float = 0
         self.running = True
         self.emergency_halt = False
         self.consecutive_failures = 0
@@ -196,10 +198,9 @@ class AITrader:
                 log.critical(f"🚨 Kill switch triggered: {kill_triggers}")
                 self.db.log_alert("critical", f"Kill switch: {'; '.join(kill_triggers)}")
 
-            # Periodic DB purge (~daily)
-            self._cycles_since_purge += 1
-            if self._cycles_since_purge >= self._purge_interval_cycles:
-                self._cycles_since_purge = 0
+            # Periodic DB purge (~every 24h)
+            if time.time() - self._last_purge_time > 86400:
+                self._last_purge_time = time.time()
                 try:
                     self.db.purge_old_data(keep_days=7)
                 except Exception as e:
@@ -369,6 +370,11 @@ class AITrader:
 
             log.info(f"📤 Decision written [{decision_id}]: {decision.get('action')} {decision.get('symbol', '')}")
             self.safety.record_order()
+
+            # Record for cooldown-after-loss protection
+            if decision.get("action") in ("close", "close_all"):
+                self.safety.record_loss()
+
             return True
         except Exception as e:
             log.error(f"Failed to write decision: {e}")

@@ -138,6 +138,20 @@ class AITrader:
         """Main daemon loop — runs until shutdown or emergency halt."""
         log.info("🚀 AI Trader starting...")
 
+        # BUG 4: Clean up stale IPC files from previous run
+        cleaned = []
+        for fpath in [self.decision_file, Path(str(self.decision_file) + ".ack"), self.result_file]:
+            if fpath.exists():
+                try:
+                    fpath.unlink()
+                    cleaned.append(fpath.name)
+                except Exception:
+                    pass
+        if cleaned:
+            log.info(f"🧹 IPC startup cleanup: removed {', '.join(cleaned)}")
+        else:
+            log.info("🧹 IPC startup cleanup: no stale files found")
+
         # Register signal handlers for graceful shutdown
         loop = asyncio.get_event_loop()
         for sig in (signal.SIGINT, signal.SIGTERM):
@@ -224,6 +238,15 @@ class AITrader:
             log.info("No signals available, holding")
             return
 
+        # HIGH-2: Check signals freshness — skip cycle if data is stale
+        try:
+            signals_age = time.time() - os.path.getmtime(self.context_builder.signals_file)
+            if signals_age > 600:  # 10 minutes
+                log.warning(f"⚠️ Signals are stale (age={signals_age:.0f}s > 600s) — skipping cycle to avoid trading on frozen data")
+                return
+        except OSError:
+            pass  # Can't stat file, proceed with caution
+
         positions = self.context_builder.read_positions()
 
         # Change detection — only call LLM when signals or positions actually changed
@@ -294,7 +317,20 @@ class AITrader:
                     result = await self._check_bot_result(self._last_sent_decision_id)
                     if result is not None:
                         break
-                if result and result.get("success") is False:
+
+                # BUG 5: Clean up result file after successful match
+                if result is not None and self.result_file.exists():
+                    try:
+                        self.result_file.unlink()
+                        log.debug("🧹 Result file cleaned up after successful read")
+                    except Exception:
+                        pass
+
+                # BUG 7: Fix false success — if no result after polling, mark as not executed
+                if result is None:
+                    log.warning(f"⚠️ Bot did not confirm decision {self._last_sent_decision_id} within 30s timeout — executed=False")
+                    executed = False
+                elif result.get("success") is False:
                     log.warning(f"Bot reported validation failure: {result.get('decision_action')} {result.get('decision_symbol')} -- not retrying")
                     executed = False
                 elif executed and decision.get("action") == "open":
@@ -481,8 +517,31 @@ class AITrader:
             except Exception:
                 pass
             atomic_write(self.decision_file, close_all)
-            log.info("📤 close_all decision written to bot")
-            self.emergency_halt = True
+            log.info("📤 close_all decision written to bot — polling for confirmation...")
+
+            # BUG 1: Poll for bot confirmation before setting emergency_halt
+            close_decision_id = close_all["decision_id"]
+            confirmed = False
+            for i in range(30):  # 30 * 2s = 60s max
+                await asyncio.sleep(2)
+                if self.result_file.exists():
+                    result = safe_read_json(self.result_file)
+                    if result and result.get("processed_decision_id") == close_decision_id:
+                        if result.get("success"):
+                            confirmed = True
+                            log.info("✅ Bot confirmed close_all execution")
+                            # Clean up result file
+                            try:
+                                self.result_file.unlink()
+                            except Exception:
+                                pass
+                        else:
+                            log.warning("⚠️ Bot reported close_all failed")
+                        break
+            if confirmed:
+                self.emergency_halt = True
+            else:
+                log.critical("🚨 close_all NOT confirmed by bot within 60s — NOT setting emergency_halt, will retry next cycle")
         except Exception as e:
             log.error(f"Failed to write close_all decision: {e}")
             # Don't set emergency_halt — will retry next cycle

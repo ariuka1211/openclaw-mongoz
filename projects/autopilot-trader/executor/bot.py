@@ -6,6 +6,7 @@ trailing take profit + stop loss orders.
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -1078,6 +1079,8 @@ class LighterCopilot:
         self.api: LighterAPI | None = None
         self._signals_file = cfg.signals_file
         self._last_signal_timestamp: str | None = None
+        # MED-6: Content hash for signal dedup (not just timestamp)
+        self._last_signal_hash: str | None = None
         self._opened_signals: set[int] = set()
         self._min_score = 60  # Only open positions for signals >= this score
         self._signal_processed_this_tick: bool = False
@@ -1269,9 +1272,15 @@ class LighterCopilot:
             logging.warning(f"Failed to read signals file: {signals_path}")
             return
 
-        # Only process new signal files
-        if data.get("timestamp") == self._last_signal_timestamp:
+        # MED-6: Content-based dedup — hash opportunities (timestamp+symbol+score) so
+        # same-second signals with different content are not silently dropped
+        opp_hash = hashlib.sha256(json.dumps(
+            data.get("opportunities", []),
+            sort_keys=True, default=str
+        ).encode()).hexdigest()[:16]
+        if opp_hash == self._last_signal_hash:
             return
+        self._last_signal_hash = opp_hash
         self._last_signal_timestamp = data.get("timestamp")
         self._signal_processed_this_tick = True
 
@@ -1461,7 +1470,13 @@ class LighterCopilot:
 
         decision = safe_read_json(path)
         if decision is None:
-            return
+            # MED-5: File exists but read returned None (atomic write in progress).
+            # Retry once after 0.5s to avoid dropping decisions on first tick post-restart.
+            if path.exists():
+                await asyncio.sleep(0.5)
+                decision = safe_read_json(path)
+            if decision is None:
+                return
 
         # Only process new decisions
         ts = decision.get("timestamp", "")
@@ -1481,6 +1496,29 @@ class LighterCopilot:
         if action not in ("open", "close", "close_all"):
             return  # hold or unknown — do nothing
 
+        # BUG 2: Check prev_decision_id for gap detection
+        prev_id = decision.get("prev_decision_id")
+        if prev_id:
+            ack_path = str(path) + ".ack"
+            try:
+                acked_id = Path(ack_path).read_text().strip() if Path(ack_path).exists() else ""
+            except Exception:
+                acked_id = ""
+            if acked_id and prev_id != acked_id:
+                logging.warning(
+                    f"⚠️ AI decision prev_decision_id={prev_id} doesn't match last ACKed={acked_id} "
+                    f"— potential decision gap, processing anyway"
+                )
+
+        # BUG 3: Check if we already processed this decision (duplicate execution guard)
+        decision_id = decision.get("decision_id", "")
+        result_path = Path(self._ai_result_file)
+        if result_path.exists() and decision_id:
+            existing_result = safe_read_json(result_path)
+            if existing_result and existing_result.get("processed_decision_id") == decision_id:
+                logging.info(f"⏩ Decision {decision_id} already processed (result file exists), skipping execution")
+                return
+
         # Execute inside try/except — ACK + result are written AFTER execution
         # completes (success or failure), NOT if an uncaught exception occurs.
         try:
@@ -1493,12 +1531,15 @@ class LighterCopilot:
             else:
                 success = True
 
-            # Write result back for the AI trader
-            self._write_ai_result(decision, success=success)
-            # Write ACK so AI trader knows this decision was consumed
+            # HIGH-3: Write ACK BEFORE result — ACK = "I consumed this decision."
+            # If bot crashes between ACK and result write, AI trader won't re-send.
+            # Result is supplementary (positions context). ACK is essential.
             ack_path = str(path) + ".ack"
             with open(ack_path, "w") as f:
                 f.write(decision.get("decision_id", ""))
+            self._write_ai_result(decision, success=success)
+            # BUG 3: Save state immediately after ACK so _last_ai_decision_ts persists before ACK
+            self._save_state()
         except Exception as e:
             logging.error(f"❌ AI decision execution crashed — NOT writing ACK: {e}", exc_info=True)
             # Do NOT write result or ACK — the AI trader will re-deliver the decision
@@ -2092,6 +2133,45 @@ class LighterCopilot:
         except Exception as e:
             logging.warning(f"Failed to write AI result: {e}")
 
+    def _refresh_position_context(self):
+        """MED-4: Write updated positions to result file between AI decisions.
+
+        Preserves the last processed_decision_id so AI trader can still correlate,
+        but updates positions to reflect DSL/SL/TP closes that happened since
+        the last AI decision was processed.
+        """
+        try:
+            existing = safe_read_json(Path(self._ai_result_file))
+            last_decision_id = existing.get("processed_decision_id") if existing else None
+
+            positions = []
+            for mid, pos in self.tracker.positions.items():
+                current_price = self.api.get_mark_price(mid) if self.api else None
+                positions.append({
+                    "market_id": mid,
+                    "symbol": pos.symbol,
+                    "side": pos.side,
+                    "entry_price": pos.entry_price,
+                    "current_price": current_price if current_price and current_price > 0 else pos.entry_price,
+                    "size": pos.size,
+                    "position_size_usd": pos.size * pos.entry_price,
+                })
+            result = {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "processed_decision_id": last_decision_id,  # Keep last AI decision ID for correlation
+                "processed_timestamp": existing.get("processed_timestamp") if existing else datetime.now(timezone.utc).isoformat(),
+                "decision_action": existing.get("decision_action") if existing else "refresh",
+                "decision_symbol": existing.get("decision_symbol") if existing else None,
+                "success": existing.get("success", True) if existing else True,
+                "positions": positions,
+            }
+            tmp = str(self._ai_result_file) + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump(result, f, indent=2)
+            os.replace(tmp, str(self._ai_result_file))
+        except Exception as e:
+            logging.debug(f"Failed to refresh position context: {e}")
+
     def _prune_caches(self):
         """Remove expired entries from in-memory caches to prevent unbounded growth."""
         now = time.monotonic()
@@ -2129,6 +2209,14 @@ class LighterCopilot:
         orphaned_mids = [m for m in self._no_price_ticks if m not in self.tracker.positions]
         for m in orphaned_mids:
             del self._no_price_ticks[m]
+        # MED-7: Remove bot_managed_market_ids where market is no longer tracked
+        # and not in recently closed (manual closes remove from tracker but didn't clean this set)
+        stale_managed = [m for m in self.bot_managed_market_ids
+                         if m not in self.tracker.positions and m not in self._recently_closed]
+        for m in stale_managed:
+            self.bot_managed_market_ids.discard(m)
+        if stale_managed:
+            logging.debug(f"🧹 Pruned {len(stale_managed)} stale bot_managed_market_ids")
 
     def _is_volume_quota_cooldown(self) -> bool:
         """Check if bot is in volume quota cooldown."""
@@ -2349,6 +2437,11 @@ class LighterCopilot:
 
         # 1.4. Reconcile saved DSL state with detected positions (first tick after restart)
         await self._reconcile_positions(live_positions)
+
+        # MED-4: Refresh position context in result file so AI trader sees current positions
+        # even between its own decisions (DSL/SL/TP closes update tracker but not result file)
+        if self._ai_mode and self.tracker.positions:
+            self._refresh_position_context()
 
         # 1.5. Process signals — AI mode or rule-based
         # NOTE: Moved AFTER position sync/confirmation so tracker is populated
@@ -2672,6 +2765,7 @@ class LighterCopilot:
         state = {
             "last_ai_decision_ts": self._last_ai_decision_ts,
             "last_signal_timestamp": self._last_signal_timestamp,
+            "last_signal_hash": self._last_signal_hash,
             # Convert monotonic deadlines to remaining seconds for portability
             "recently_closed": {str(mid): max(0, t - now) for mid, t in self._recently_closed.items()},
             "ai_close_cooldown": {s: max(0, t - now) for s, t in self._ai_close_cooldown.items()},
@@ -2721,6 +2815,7 @@ class LighterCopilot:
 
             self._last_ai_decision_ts = state.get("last_ai_decision_ts")
             self._last_signal_timestamp = state.get("last_signal_timestamp")
+            self._last_signal_hash = state.get("last_signal_hash")
 
             # Convert remaining seconds back to monotonic deadlines
             for mid_str, remaining in state.get("recently_closed", {}).items():

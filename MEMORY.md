@@ -2,7 +2,8 @@
 
 ## Active Projects
 - **Trading Bot** — Lighter DEX, Python executor + TS scanner/AI. Runs via `lighter-scanner.service`. Bot: `projects/autopilot-trader/executor/bot.py`, Scanner: `projects/autopilot-trader/signals/scripts/opportunity-scanner.ts`, AI: `projects/autopilot-trader/signals/ai-trader/ai_trader.py`. Services: lighter-scanner, lighter-bot, ai-trader. Logs: `projects/autopilot-trader/executor/bot.log`, `projects/autopilot-trader/signals/scanner.log`. **2026-03-23 audit:** 9 bugs fixed (safety crash, reflection env var, confidence scale, ignored stop_loss_pct, pnl_pct/roe_pct mix, parse errors, race conditions). File bus hardened (safe_read_json, decision_id tracking, atomic writes). DB auto-purge added.
-- **Trade Learning Loop** — SQLite journal → reflection (every 3 days) → `strategy_memory.md`. Signal analyzer → `state/signal_weights_suggested.json` (human review only)
+- **Token Tracking** — Added to ai-trader: tiktoken estimation, per-section breakdown, DB persistence, cost tracking per cycle. Branch `feat/token-tracking` merged to main. **Finding:** minimax/minimax-m2.5 via Kilo gateway has ~13K+ hidden tokens per call (persistent session cache). Our tiktoken estimates are accurate for our prompt; API-reported tokens include gateway overhead. Cached tokens are cheaper but the session grows over time.
+- **Quota Alerts** — Changed interval from 20min to 1 hour in bot.py
 - **Memory System** — layered pipeline: session → daily files → MEMORY.md. 3 cron jobs (extract 2hr, cleanup daily, archive weekly). QMD: 92 docs indexed
 - **Watchdog** — `watchdog-daemon.sh start|stop|status`. Monitors gateway, OpenRouter, sub-agents. Telegram alerts
 ## Rules (red lines)

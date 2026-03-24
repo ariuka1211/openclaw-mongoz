@@ -79,3 +79,12 @@
 - [fact] (trading) Dead debug code removed: _analyze_quota_response, _test_quota_response and all call sites. _get_fill_price reuses aiohttp session.
 - [fact] (trading) parse_decision_json rewritten with brace-depth tracking (was fragile rfind('}')). _pending_sync.clear() moved from per-position loop to after position loop in _tick.
 
+
+## Session Extract — 2026-03-23 [auto]
+
+- [fact] (trading) Full codebase audit of ai-trader + executor bot + integration layer found 43 issues total (4 critical, 11 high, 15 medium, 13 low) across three parallel audit passes. Critical and high executor/ai-trader fixes merged; integration layer issues and ai-trader medium/low remain pending. — distilled audit results
+- [pattern] (system) Auditors can produce false positives — verify before fixing. Example: `shared/ipc_utils.py` reported missing but actually exists at correct path. Confirm the issue is real before spawning fix work. — distilled audit results
+- [open] (trading) Integration layer has 11 unfixed issues: `executed=True` set without bot confirmation, no signals staleness detection, bot crash gap between result write and ACK. 3 high, 4 medium, 4 low. — distilled audit results
+- [open] (trading) AI-trader medium/low issues pending (7 medium, 4 low) — subagent spawned but completion not yet confirmed. — distilled audit results
+- [fact] (trading) No cancel API exists in the codebase for stale orders — skipped the fix for cancel-before-new-SL and added a TODO instead. — distilled audit results
+

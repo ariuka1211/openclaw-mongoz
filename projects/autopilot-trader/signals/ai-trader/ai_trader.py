@@ -21,7 +21,7 @@ from llm_client import LLMClient
 from safety import SafetyLayer
 
 # Add shared/ to path for IPC utilities
-_shared_dir = Path(__file__).resolve().parent.parent / "shared"
+_shared_dir = Path(__file__).resolve().parent.parent.parent / "shared"
 if str(_shared_dir) not in sys.path:
     sys.path.insert(0, str(_shared_dir))
 from ipc_utils import atomic_write, safe_read_json

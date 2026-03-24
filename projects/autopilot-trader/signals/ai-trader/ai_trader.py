@@ -235,10 +235,28 @@ class AITrader:
         log.info(f"--- Cycle {cycle_id} starting ---")
 
         # 1. Gather context
+        # MED-22: Stat mtime BEFORE reading to guard against scanner overwriting mid-read.
+        # If file changes between stat and read, retry once to ensure consistency.
+        _signals_mtime_before = None
+        try:
+            _signals_mtime_before = os.path.getmtime(self.context_builder.signals_file)
+        except OSError:
+            pass  # File doesn't exist yet, read_signals() will handle it
+
         signals, signals_config = self.context_builder.read_signals()
         if not signals:
             log.info("No signals available, holding")
             return
+
+        # Verify signals weren't overwritten between mtime check and read
+        if _signals_mtime_before is not None:
+            try:
+                _signals_mtime_after = os.path.getmtime(self.context_builder.signals_file)
+                if _signals_mtime_after != _signals_mtime_before:
+                    log.info("Signals file changed during read, retrying once...")
+                    signals, signals_config = self.context_builder.read_signals()
+            except OSError:
+                pass
 
         # HIGH-2: Check signals freshness — skip cycle if data is stale
         try:

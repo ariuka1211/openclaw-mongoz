@@ -184,6 +184,8 @@ class ContextBuilder:
             data = safe_read_json(self.result_file)
             if data and data.get("processed_decision_id"):
                 # Bot has processed a decision — positions are fresh
+                # MED-26: Canonical position size field is 'position_size_usd' (written by bot's _write_ai_result).
+                # Both 'position_size_usd' and 'size_usd' are set by the bot for compatibility.
                 return data.get("positions", [])
 
         # HIGH-9: Result file missing/empty — reconstruct from DB.
@@ -262,6 +264,7 @@ class ContextBuilder:
                 roe = self._calc_roe(p)
                 pos_summary.append(
                     f"- {p.get('symbol', '?')} {p.get('side', '?').upper()} "
+                    # MED-26: Canonical field is 'position_size_usd' (written by bot's _write_ai_result)
                     f"${p.get('position_size_usd', p.get('size_usd', 0)):.0f} "
                     f"@ {p.get('entry_price', 0):.4f} "
                     f"(ROE: {roe:+.1f}%)"

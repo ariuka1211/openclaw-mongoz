@@ -177,7 +177,7 @@ class AITrader:
                 self.db.log_alert("error", f"Cycle failed: {e}")
 
                 if self.consecutive_failures >= self.MAX_CONSECUTIVE_FAILURES:
-                    self._emergency_halt(f"{self.MAX_CONSECUTIVE_FAILURES}+ consecutive failures")
+                    await self._emergency_halt(f"{self.MAX_CONSECUTIVE_FAILURES}+ consecutive failures")
                     log.critical(f"🚨 Emergency halt — {self.MAX_CONSECUTIVE_FAILURES}+ consecutive failures")
                     self.db.log_alert("critical", f"Emergency halt — {self.MAX_CONSECUTIVE_FAILURES}+ consecutive failures")
 
@@ -194,7 +194,7 @@ class AITrader:
                 equity=equity,
             )
             if kill_triggers:
-                self._emergency_halt(f"Kill switch: {'; '.join(kill_triggers)}")
+                await self._emergency_halt(f"Kill switch: {'; '.join(kill_triggers)}")
                 log.critical(f"🚨 Kill switch triggered: {kill_triggers}")
                 self.db.log_alert("critical", f"Kill switch: {'; '.join(kill_triggers)}")
 
@@ -480,7 +480,7 @@ class AITrader:
         log.info("Shutdown requested...")
         self.running = False
 
-    def _emergency_halt(self, reason: str):
+    async def _emergency_halt(self, reason: str):
         """Write close_all decision, then set emergency_halt flag."""
         if self.emergency_halt:
             log.debug(f"Emergency halt already triggered, ignoring: {reason}")

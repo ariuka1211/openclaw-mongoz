@@ -163,7 +163,7 @@ for agent_def in "${AGENTS[@]}"; do
   # ── Step 2: LLM Distill ──
   DISTILL_PROMPT=$(PROMPT_SUMMARIES="$TRANSCRIPTS" load_prompt "distill.txt")
 
-  DISTILLED=$(echo "$DISTILL_PROMPT" | retry_llm "Distill conversation transcripts into clean topic bullets." "xiaomi/mimo-v2-pro" 4096) || DISTILLED="$TRANSCRIPTS"
+  DISTILLED=$(echo "$DISTILL_PROMPT" | retry_llm "Distill conversation transcripts into clean topic bullets." "minimax/minimax-m2.5" 4096) || DISTILLED="$TRANSCRIPTS"
 
   DBULLETS=$(echo "$DISTILLED" | grep -c '^[*-]' || echo "?")
   log "[$AGENT_NAME] Distilled ${#NEW_FILES[@]} transcripts → $DBULLETS topic bullets"
@@ -173,7 +173,7 @@ for agent_def in "${AGENTS[@]}"; do
 
   EXTRACT_PROMPT=$(PROMPT_CURRENT="$CURRENT" PROMPT_DISTILLED="$DISTILLED" load_prompt "extract.txt")
 
-  RESP=$(echo "$EXTRACT_PROMPT" | retry_llm "Extract memory items as JSON. Respond only with valid JSON, no explanations." "xiaomi/mimo-v2-pro" 8192) || true
+  RESP=$(echo "$EXTRACT_PROMPT" | retry_llm "Extract memory items as JSON. Respond only with valid JSON, no explanations." "minimax/minimax-m2.5" 8192) || true
 
   if ! echo "$RESP" | python3 -c "import json,sys; d=json.load(sys.stdin); assert 'items' in d" 2>/dev/null; then
     log "[$AGENT_NAME] Bad LLM response: $(echo "$RESP" | head -c 300)"

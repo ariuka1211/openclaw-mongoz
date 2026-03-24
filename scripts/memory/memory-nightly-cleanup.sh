@@ -29,7 +29,7 @@ bash "$OBS" "info" "memory-nightly-cleanup" "Nightly cleanup started"
 # ── Helper: LLM call with retry ──
 MAX_RETRIES=3
 call_llm() {
-  local sys_prompt="$1" model="${2:-xiaomi/mimo-v2-pro}" max_tokens="${3:-4096}"
+  local sys_prompt="$1" model="${2:-minimax/minimax-m2.5}" max_tokens="${3:-4096}"
   local attempt=1 result=""
   while (( attempt <= MAX_RETRIES )); do
     if result=$(bash "$W/scripts/memory/memory-llm.sh" "$sys_prompt" "$model" "$max_tokens" 2>/dev/null); then

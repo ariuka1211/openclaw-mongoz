@@ -7,7 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "/root/.openclaw/workspace/.env" 2>/dev/null || true
 
 API_KEY="${KILOCODE_API_KEY:-}"
-MODEL="${2:-xiaomi/mimo-v2-pro}"
+MODEL="${2:-minimax/minimax-m2.5}"
 MAX_TOKENS="${3:-4096}"
 
 [ -z "$API_KEY" ] && echo '{"error": "KILOCODE_API_KEY not set"}' >&2 && exit 1

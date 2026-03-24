@@ -87,3 +87,10 @@
 
 - [fact] (system) Nightly cleanup cron job references `scripts/memory-nightly-cleanup.sh` but the actual script is at `scripts/memory/memory-nightly-cleanup.sh`. Path mismatch will cause cron to silently fail. — from session extract
 
+
+## Session Extract — 2026-03-24 [auto]
+
+- [fact] (trading) Lighter API's volume_quota_remaining field in RespSendTx always returns None on mainnet, making all quota guard code (skip_open, cooldown, pacing) dead — they check 'is not None' before activating. — distilled topics
+- [open] (trading) Integration layer has 11 unfixed issues post-audit (3 high, 4 medium, 4 low): executed=True without bot confirmation, no signals staleness detection, bot crash gap between result write and ACK. AI-trader medium/low also pending. — distilled audit results
+- [decision] (system) Nightly cleanup cron job path mismatch: crontab references scripts/memory-nightly-cleanup.sh but script lives at scripts/memory/memory-nightly-cleanup.sh. Needs correction to prevent silent failure. — distilled topics
+

@@ -497,13 +497,19 @@ class AITrader:
         self.running = False
 
     async def _emergency_halt(self, reason: str):
-        """Write close_all decision, then set emergency_halt flag."""
+        """Write close_all decision, then set emergency_halt flag.
+
+        HIGH-8 fix: Result file is kept as the source of truth. On retry,
+        positions are re-read from the result file (bot updates it after
+        each close), so we only send close_all for positions still shown as open.
+        """
         if self.emergency_halt:
             log.debug(f"Emergency halt already triggered, ignoring: {reason}")
             return
         log.critical(f"🚨 Emergency halt: {reason}")
         try:
             # Read current positions from result file for the close_all
+            # HIGH-8: On retry, result file will have updated positions (bot removes closed ones)
             current_positions = []
             if self.result_file.exists():
                 result_data = safe_read_json(self.result_file)
@@ -533,27 +539,35 @@ class AITrader:
             except Exception:
                 pass
             atomic_write(self.decision_file, close_all)
-            log.info("📤 close_all decision written to bot — polling for confirmation...")
+            log.info(f"📤 close_all decision written to bot ({len(current_positions)} positions) — polling for confirmation...")
 
-            # BUG 1: Poll for bot confirmation before setting emergency_halt
-            close_decision_id = close_all["decision_id"]
+            # Poll for bot confirmation, with retries using latest reported positions
             confirmed = False
-            for i in range(30):  # 30 * 2s = 60s max
+            for attempt in range(30):  # 30 * 2s = 60s max
                 await asyncio.sleep(2)
                 if self.result_file.exists():
                     result = safe_read_json(self.result_file)
-                    if result and result.get("processed_decision_id") == close_decision_id:
+                    if result and result.get("processed_decision_id") == close_all["decision_id"]:
                         if result.get("success"):
                             confirmed = True
                             log.info("✅ Bot confirmed close_all execution")
-                            # Clean up result file
-                            try:
-                                self.result_file.unlink()
-                            except Exception:
-                                pass
+                            # HIGH-8: Do NOT delete result file — keep as source of truth
                         else:
                             log.warning("⚠️ Bot reported close_all failed")
                         break
+                # HIGH-8: Re-read positions from result file on each retry.
+                # Bot updates it after closing each position, so we only
+                # resend close_all for positions that are still shown as open.
+                if (attempt + 1) % 3 == 0 and self.result_file.exists():
+                    updated_result = safe_read_json(self.result_file)
+                    if updated_result:
+                        remaining = updated_result.get("positions", [])
+                        if remaining and remaining != current_positions:
+                            log.info(f"HIGH-8: Retrying close_all with {len(remaining)} remaining positions (was {len(current_positions)})")
+                            current_positions = remaining
+                            close_all["decision_id"] = str(uuid.uuid4())[:8]
+                            close_all["positions"] = current_positions
+                            atomic_write(self.decision_file, close_all)
             if confirmed:
                 self.emergency_halt = True
             else:

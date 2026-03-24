@@ -179,12 +179,49 @@ class ContextBuilder:
             return opportunities
 
     def read_positions(self) -> list[dict]:
-        """Read current positions from bot's result file. Only trusts data after bot ACK."""
+        """Read current positions from bot's result file, falling back to DB if missing."""
         if self.result_file.exists():
             data = safe_read_json(self.result_file)
             if data and data.get("processed_decision_id"):
                 # Bot has processed a decision — positions are fresh
                 return data.get("positions", [])
+
+        # HIGH-9: Result file missing/empty — reconstruct from DB.
+        # Find the most recent outcome per symbol. Open positions are those
+        # whose last entry has no exit (exit_price is NULL) or was an "open" event.
+        try:
+            cursor = self.db.conn.cursor()
+            cursor.execute('''
+                SELECT o.symbol, o.direction, o.entry_price, o.size_usd, o.timestamp
+                FROM outcomes o
+                INNER JOIN (
+                    SELECT symbol, MAX(id) as max_id
+                    FROM outcomes
+                    GROUP BY symbol
+                ) latest ON o.id = latest.max_id
+                WHERE o.exit_price IS NULL
+                   OR o.exit_reason IN ('opened', 'new_position')
+                ORDER BY o.timestamp DESC
+            ''')
+            rows = cursor.fetchall()
+            if rows:
+                positions = []
+                for row in rows:
+                    positions.append({
+                        "symbol": row[0],
+                        "side": row[1] if row[1] else "long",
+                        "entry_price": row[2] or 0,
+                        "size_usd": row[3] or 0,
+                        "size": row[3] or 0,
+                        "position_size_usd": row[3] or 0,
+                        "current_price": row[2] or 0,  # No live price from DB
+                        "source": "db_fallback",
+                    })
+                log.info(f"HIGH-9: Reconstructed {len(positions)} open positions from DB (result file unavailable)")
+                return positions
+        except Exception as e:
+            log.warning(f"Failed to read positions from DB fallback: {e}")
+
         return []
 
     def read_strategy_memory(self) -> str:

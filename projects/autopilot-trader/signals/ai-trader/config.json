@@ -12,7 +12,7 @@
 
   "llm": {
     "primary_model": "xiaomi/mimo-v2-pro",
-    "fallback_model": "xiaomi/mimo-v2-pro",
+    "fallback_model": "openrouter/deepseek/deepseek-chat",
     "reflection_model": "xiaomi/mimo-v2-pro",
     "api_base": "https://api.kilo.ai/api/gateway",
     "timeout_seconds": 60,

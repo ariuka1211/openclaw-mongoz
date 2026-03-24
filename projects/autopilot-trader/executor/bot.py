@@ -340,6 +340,12 @@ class PositionTracker:
             ]
 
     def compute_tp_price(self, pos: TrackedPosition) -> float | None:
+        """Calculate trailing take-profit price based on high-water mark.
+        
+        Returns None if:
+        - For longs: high-water mark hasn't exceeded trigger level yet
+        - For shorts: high-water mark hasn't dropped below trigger level yet (at entry, returns None)
+        """
         if pos.side == "long":
             trigger = pos.entry_price * (1 + self.cfg.trailing_tp_trigger_pct / 100)
             if pos.high_water_mark < trigger:
@@ -1940,7 +1946,7 @@ class LighterCopilot:
             # MED-18: Cancel stale SL order before placing new one
             if pos.active_sl_order_id:
                 logging.info(f"🗑️ {pos.symbol}: cancelling stale SL order {pos.active_sl_order_id} before AI close")
-                await self._cancel_order(pos.active_sl_order_id, mid_to_close)
+                await self.api._cancel_order(mid_to_close, int(pos.active_sl_order_id))
                 pos.active_sl_order_id = None
             sl_success, sl_coi = await self.api.execute_sl(mid_to_close, pos.size, current_price, is_long)
             if sl_success and sl_coi:
@@ -2047,7 +2053,7 @@ class LighterCopilot:
                 # MED-18: Cancel stale SL order before placing new one
                 if pos.active_sl_order_id:
                     logging.info(f"🗑️ {pos.symbol}: cancelling stale SL order {pos.active_sl_order_id} before close_all")
-                    await self._cancel_order(pos.active_sl_order_id, mid)
+                    await self.api._cancel_order(mid, int(pos.active_sl_order_id))
                     pos.active_sl_order_id = None
                 sl_success, sl_coi = await self.api.execute_sl(mid, pos.size, current_price, is_long)
                 if sl_success and sl_coi:
@@ -2756,7 +2762,7 @@ class LighterCopilot:
                 # MED-18: Cancel stale SL order before placing new one
                 if pos.active_sl_order_id:
                     logging.info(f"🗑️ {pos.symbol}: cancelling stale SL order {pos.active_sl_order_id} before DSL close")
-                    await self._cancel_order(pos.active_sl_order_id, mid)
+                    await self.api._cancel_order(mid, int(pos.active_sl_order_id))
                     pos.active_sl_order_id = None
                 sl_success, sl_coi = await self.api.execute_sl(mid, pos.size, price, is_long)
                 if sl_success and sl_coi:

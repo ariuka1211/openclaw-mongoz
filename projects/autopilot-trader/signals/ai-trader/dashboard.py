@@ -39,6 +39,12 @@ def set_equity(equity: float):
     _equity = equity
 
 
+def set_cycle_time(ts: float | None = None):
+    """Called by the AI trader each cycle to update last_cycle timestamp."""
+    global _last_cycle_time
+    _last_cycle_time = ts or datetime.now(timezone.utc).timestamp()
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index():
     html_path = Path(__file__).parent / "static" / "index.html"

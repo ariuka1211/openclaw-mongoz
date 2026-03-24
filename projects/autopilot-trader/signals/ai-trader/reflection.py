@@ -110,8 +110,8 @@ class ReflectionAgent:
         db = DecisionDB(self.db_path)
         outcomes = db.get_recent_outcomes(limit=20)
 
-        if len(outcomes) < 3:
-            log.info(f"Only {len(outcomes)} outcomes, need at least 3. Skipping reflection.")
+        if len(outcomes) < 10:
+            log.info(f"Only {len(outcomes)} outcomes, need at least 10 for statistical significance. Skipping reflection.")
             db.close()
             return
 

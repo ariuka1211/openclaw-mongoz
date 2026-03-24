@@ -356,11 +356,12 @@ class DecisionDB:
             )
             outcomes_deleted = cur.rowcount
             self._conn.commit()
-            # Vacuum to reclaim space
-            self._conn.execute("VACUUM")
             total = decisions_deleted + alerts_deleted + stale_alerts + outcomes_deleted
             if total > 0:
                 log.info(f"Purged: {decisions_deleted} decisions, {alerts_deleted + stale_alerts} alerts, {outcomes_deleted} outcomes")
+        # WAL checkpoint + vacuum outside lock to avoid blocking
+        self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        self._conn.execute("VACUUM")
 
     def get_recently_traded_symbols(self, hours: int = 2) -> dict[str, str]:
         """Get symbols and their most recent trade direction within the time window.

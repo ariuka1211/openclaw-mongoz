@@ -18,6 +18,7 @@ from pathlib import Path
 from context_builder import ContextBuilder
 from db import DecisionDB
 from llm_client import LLMClient
+import dashboard
 from safety import SafetyLayer
 
 # Add shared/ to path for IPC utilities
@@ -384,6 +385,9 @@ class AITrader:
         )
 
         log.info(f"--- Cycle {cycle_id} done (latency={latency_ms}ms, executed={executed}) ---")
+        
+        # LOW: Update dashboard cycle timestamp
+        dashboard.set_cycle_time()
 
     async def _check_bot_result(self, decision_id: str) -> dict | None:
         """Check bot result file for correlation with sent decision.

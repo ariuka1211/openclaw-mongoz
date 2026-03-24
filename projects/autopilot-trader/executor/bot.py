@@ -315,6 +315,7 @@ class TrackedPosition:
     # CRITICAL-2: Unverified position tracking — set when open_order succeeds but verification fails
     unverified_at: float | None = None      # time.time() when marked unverified
     unverified_ticks: int = 0               # consecutive ticks in unverified state
+    active_sl_order_id: str | None = None   # MED-18: cancel API tracking
 
 
 class PositionTracker:

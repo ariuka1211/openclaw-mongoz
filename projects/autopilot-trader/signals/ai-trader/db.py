@@ -8,7 +8,7 @@ import logging
 import sqlite3
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 log = logging.getLogger("ai-trader.db")
@@ -375,6 +375,149 @@ class DecisionDB:
         # WAL checkpoint + vacuum outside lock to avoid blocking
         self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         self._conn.execute("VACUUM")
+
+    def get_direction_stats(self, limit: int = 20) -> dict:
+        """Last N outcomes grouped by direction with win rate and avg PnL."""
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT direction,
+                          COUNT(*) as total,
+                          SUM(CASE WHEN pnl_usd > 0 THEN 1 ELSE 0 END) as wins,
+                          COALESCE(AVG(pnl_usd), 0) as avg_pnl
+                   FROM (SELECT * FROM outcomes ORDER BY id DESC LIMIT ?)
+                   GROUP BY direction""",
+                (limit,),
+            ).fetchall()
+        result = {}
+        for r in rows:
+            direction = r[0] or "unknown"
+            result[direction] = {
+                "total": r[1],
+                "wins": r[2],
+                "avg_pnl": round(r[3], 4),
+            }
+        return result
+
+    def get_hold_time_stats(self, limit: int = 20) -> list[dict]:
+        """Last N outcomes bucketed by hold time: <30min, 30-120min, >120min."""
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT
+                       CASE WHEN hold_time_seconds < 1800 THEN '<30min'
+                            WHEN hold_time_seconds < 7200 THEN '30-120min'
+                            ELSE '>120min' END as bracket,
+                       COUNT(*) as total,
+                       SUM(CASE WHEN pnl_usd > 0 THEN 1 ELSE 0 END) as wins,
+                       COALESCE(AVG(pnl_usd), 0) as avg_pnl
+                   FROM (SELECT * FROM outcomes ORDER BY id DESC LIMIT ?)
+                   GROUP BY bracket
+                   ORDER BY MIN(hold_time_seconds)""",
+                (limit,),
+            ).fetchall()
+        return [
+            {"bracket": r[0], "total": r[1], "wins": r[2], "avg_pnl": round(r[3], 4)}
+            for r in rows
+        ]
+
+    def get_streak(self, limit: int = 5) -> dict:
+        """Last N outcomes, returns consecutive win/loss streak from most recent."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT pnl_usd FROM outcomes ORDER BY id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        if not rows:
+            return {"type": "none", "count": 0}
+        streak_type = "win" if rows[0][0] and rows[0][0] > 0 else "loss"
+        count = 0
+        for r in rows:
+            is_win = r[0] and r[0] > 0
+            if (streak_type == "win" and is_win) or (streak_type == "loss" and not is_win):
+                count += 1
+            else:
+                break
+        return {"type": streak_type, "count": count}
+
+    def get_hold_regret_data(self, hours: int = 6) -> list[dict]:
+        """Hold decisions from last N hours — check if top signals were later traded profitably.
+
+        Uses a single bulk query instead of N×3 per-hold queries for performance.
+        Only returns recent 20 holds to keep it fast.
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT timestamp, signals_snapshot
+                   FROM decisions
+                   WHERE action = 'hold' AND signals_snapshot IS NOT NULL AND signals_snapshot != ''
+                   AND timestamp > datetime('now', ?)
+                   ORDER BY id DESC
+                   LIMIT 20""",
+                (f"-{hours} hours",),
+            ).fetchall()
+
+        # Parse all hold decisions, collect symbols and time windows
+        holds = []
+        all_symbols = set()
+        for ts, sig_json in rows:
+            try:
+                signals_list = json.loads(sig_json) if sig_json else []
+            except (json.JSONDecodeError, TypeError):
+                continue
+            top3 = sorted(signals_list, key=lambda s: s.get("compositeScore", 0), reverse=True)[:3]
+            top_symbols = [s.get("symbol", "?") for s in top3 if s.get("symbol")]
+            if not top_symbols:
+                continue
+            holds.append({"timestamp": ts, "top_symbols": top_symbols})
+            all_symbols.update(top_symbols)
+
+        if not holds:
+            return []
+
+        # Single bulk query: all outcomes for these symbols in the last 10 hours
+        with self._lock:
+            placeholders = ",".join("?" * len(all_symbols))
+            outcome_rows = self._conn.execute(
+                f"""SELECT symbol, pnl_usd, timestamp FROM outcomes
+                    WHERE symbol IN ({placeholders})
+                    AND timestamp > datetime('now', ?)
+                    AND pnl_usd IS NOT NULL
+                    ORDER BY timestamp""",
+                (*all_symbols, f"-{hours + 4} hours"),
+            ).fetchall()
+
+        # Build lookup: symbol -> list of (timestamp, pnl)
+        symbol_outcomes = {}
+        for sym, pnl, ots in outcome_rows:
+            symbol_outcomes.setdefault(sym, []).append((ots, pnl or 0))
+
+        # Match holds to outcomes
+        results = []
+        for hold in holds:
+            ts = hold["timestamp"]
+            traded_after = []
+            missed_pnl = {}
+            try:
+                hold_dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+            except (ValueError, TypeError):
+                continue
+            for sym in hold["top_symbols"]:
+                for ots, pnl in symbol_outcomes.get(sym, []):
+                    try:
+                        out_dt = datetime.fromisoformat(ots.replace("Z", "+00:00"))
+                        if hold_dt < out_dt < hold_dt + timedelta(hours=4):
+                            traded_after.append(sym)
+                            if pnl > 0:
+                                missed_pnl[sym] = round(pnl, 4)
+                            break
+                    except (ValueError, TypeError):
+                        continue
+            results.append({
+                "timestamp": ts[:16],
+                "top_signals": hold["top_symbols"],
+                "traded_after": traded_after,
+                "missed_pnl": missed_pnl,
+            })
+        return results
 
     def get_recently_traded_symbols(self, hours: int = 2) -> dict[str, str]:
         """Get symbols and their most recent trade direction within the time window.

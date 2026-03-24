@@ -1660,8 +1660,8 @@ class LighterCopilot:
             logging.info(f"AI open: already in {symbol}, skipping")
             return False
 
-        # Cap at 3 concurrent positions
-        if len(self.tracker.positions) >= 3:
+        # Cap at 8 concurrent positions
+        if len(self.tracker.positions) >= 8:
             logging.info(f"AI open: max positions reached, skipping {symbol}")
             return False
 

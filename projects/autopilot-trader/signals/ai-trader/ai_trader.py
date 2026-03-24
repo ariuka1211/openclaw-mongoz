@@ -307,13 +307,11 @@ class AITrader:
             if ts and (self._last_processed_outcome_ts is None or ts > self._last_processed_outcome_ts):
                 self._last_processed_outcome_ts = ts
 
-        memory = self.context_builder.read_strategy_memory()
-
         equity = signals_config.get("accountEquity", 1000)
 
         # 2. Build prompt
         context = self.context_builder.build_prompt(
-            signals, positions, history, outcomes, memory, signals_config
+            signals, positions, history, outcomes, signals_config
         )
         user_prompt = self.decision_template.replace("{context}", context)
 

@@ -1,5 +1,6 @@
 """
-Context builder — assembles compressed prompt from signals, positions, history, outcomes, memory.
+Context builder — assembles compressed prompt from signals, positions, history, outcomes.
+Live reflection system: performance stats, pattern rules with decay, hold regret.
 """
 
 import json
@@ -13,6 +14,12 @@ from pathlib import Path
 from db import DecisionDB
 
 log = logging.getLogger("ai-trader.context")
+
+# Add shared/ to path for IPC utilities
+_shared_dir = Path(__file__).resolve().parent.parent.parent / "shared"
+if str(_shared_dir) not in sys.path:
+    sys.path.insert(0, str(_shared_dir))
+from ipc_utils import safe_read_json
 
 # ── Token estimation ────────────────────────────────────────────────
 
@@ -34,12 +41,6 @@ except ImportError:
 
 
 MAX_PROMPT_TOKENS = 16000
-
-# Add shared/ to path for IPC utilities
-_shared_dir = Path(__file__).resolve().parent.parent.parent / "shared"
-if str(_shared_dir) not in sys.path:
-    sys.path.insert(0, str(_shared_dir))
-from ipc_utils import safe_read_json
 
 
 # ── Prompt injection sanitizer ──────────────────────────────────────
@@ -109,10 +110,12 @@ class ContextBuilder:
             self.signals_file = Path(config_dir) / config["signals_file"]
             self.memory_file = Path(config_dir) / config.get("strategy_memory_file", "state/strategy_memory.md")
             self.result_file = Path(config_dir) / config.get("result_file", "../ai-result.json")
+            self.patterns_file = Path(config_dir) / config.get("patterns_file", "state/patterns.json")
         else:
             self.signals_file = Path(config["signals_file"])
             self.memory_file = Path(config.get("strategy_memory_file", "state/strategy_memory.md"))
             self.result_file = Path(config.get("result_file", "../ai-result.json"))
+            self.patterns_file = Path(config.get("patterns_file", "state/patterns.json"))
 
     def read_signals(self) -> tuple[list[dict], dict]:
         """Read signals.json. Returns (top_opportunities_list, config_dict).
@@ -249,6 +252,146 @@ class ContextBuilder:
         except OSError:
             return ""
 
+    # ── Pattern rules with decay ──────────────────────────────────────
+
+    def _load_patterns(self) -> dict:
+        """Load patterns.json. Returns dict with 'patterns' list."""
+        if not self.patterns_file.exists():
+            return {"patterns": []}
+        try:
+            data = json.loads(self.patterns_file.read_text())
+            if isinstance(data, dict) and "patterns" in data:
+                return data
+            return {"patterns": []}
+        except (json.JSONDecodeError, OSError):
+            return {"patterns": []}
+
+    def _save_patterns(self, data: dict):
+        """Write patterns.json atomically."""
+        self.patterns_file.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.patterns_file.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data, indent=2))
+        tmp.rename(self.patterns_file)
+
+    def read_patterns(self) -> list[dict]:
+        """Returns active patterns with confidence >= 0.4."""
+        data = self._load_patterns()
+        return [p for p in data.get("patterns", []) if p.get("confidence", 0) >= 0.4]
+
+    def decay_patterns(self, decay: float = 0.02):
+        """Subtract decay from each pattern confidence, drop below 0.3, write back."""
+        if not self.patterns_file.exists():
+            return
+        try:
+            data = self._load_patterns()
+            original_count = len(data.get("patterns", []))
+            updated = []
+            for p in data.get("patterns", []):
+                new_conf = p.get("confidence", 0) - decay
+                if new_conf >= 0.3:
+                    p["confidence"] = round(new_conf, 2)
+                    updated.append(p)
+            data["patterns"] = updated
+            self._save_patterns(data)
+            dropped = original_count - len(updated)
+            if dropped > 0:
+                log.info(f"Pattern decay: dropped {dropped} weak patterns, {len(updated)} remain")
+        except Exception as e:
+            log.warning(f"Pattern decay failed: {e}")
+
+    def reinforce_pattern(self, rule_text: str, boost: float = 0.1):
+        """Bump confidence of existing pattern or add new one at 0.5."""
+        data = self._load_patterns()
+        for p in data.get("patterns", []):
+            if p.get("rule", "").lower() == rule_text.lower():
+                p["confidence"] = min(1.0, round(p.get("confidence", 0) + boost, 2))
+                self._save_patterns(data)
+                return
+        # New pattern
+        data["patterns"].append({"rule": rule_text, "confidence": 0.5})
+        self._save_patterns(data)
+
+    def build_patterns_section(self) -> str:
+        """Format active patterns (confidence >= 0.4) for prompt."""
+        patterns = self.read_patterns()
+        if not patterns:
+            return ""
+        lines = ["## Learned Patterns"]
+        for p in sorted(patterns, key=lambda x: x.get("confidence", 0), reverse=True):
+            lines.append(f"- {p['rule']} (confidence: {p.get('confidence', 0):.1f})")
+        return "\n".join(lines)
+
+    # ── Live stats section ────────────────────────────────────────────
+
+    def build_live_stats_section(self) -> str:
+        """Build performance window section from last 20 outcomes."""
+        dir_stats = self.db.get_direction_stats(limit=20)
+        hold_stats = self.db.get_hold_time_stats(limit=20)
+        streak = self.db.get_streak(limit=5)
+
+        if not dir_stats and not hold_stats:
+            return ""
+
+        lines = ["## Performance Window (last 20)"]
+        for direction in ["long", "short"]:
+            d = dir_stats.get(direction)
+            if d and d["total"] > 0:
+                win_pct = int(d["wins"] / d["total"] * 100)
+                sign = "+" if d["avg_pnl"] >= 0 else ""
+                lines.append(
+                    f"- {direction.capitalize()}s: {win_pct}% win rate "
+                    f"({d['wins']}/{d['total']}) avg=${sign}{d['avg_pnl']:.2f}"
+                )
+
+        if hold_stats:
+            hold_parts = []
+            for h in hold_stats:
+                if h["total"] > 0:
+                    wp = int(h["wins"] / h["total"] * 100)
+                    hold_parts.append(f"{h['bracket']} {wp}% win")
+            if hold_parts:
+                lines.append(f"- Hold time: {' | '.join(hold_parts)}")
+
+        if streak["count"] > 0:
+            lines.append(f"- Streak: {streak['count']} {streak['type']}s")
+
+        return "\n".join(lines)
+
+    # ── Hold regret section ───────────────────────────────────────────
+
+    def build_hold_regret_section(self) -> str:
+        """Build hold regret section from last 6h of hold decisions."""
+        try:
+            regret_data = self.db.get_hold_regret_data(hours=6)
+        except Exception as e:
+            log.warning(f"Hold regret query failed: {e}")
+            return ""
+
+        if not regret_data:
+            return ""
+
+        lines = ["## Recent Holds (last 6h)"]
+        for entry in regret_data[:5]:  # Show at most 5
+            ts_short = entry["timestamp"][11:16] if len(entry["timestamp"]) > 16 else entry["timestamp"]
+            top = entry["top_signals"]
+            traded = entry["traded_after"]
+            missed = entry["missed_pnl"]
+
+            if missed:
+                missed_parts = []
+                for sym, pnl in missed.items():
+                    sign = "+" if pnl >= 0 else ""
+                    missed_parts.append(f"{sym} was later traded for ${sign}{pnl:.2f} (missed)")
+                lines.append(f"- {ts_short} held — {', '.join(missed_parts)}")
+            elif traded:
+                lines.append(f"- {ts_short} held — top signals {', '.join(top[:3])} — traded but not profitable")
+            else:
+                lines.append(f"- {ts_short} held — top signals {', '.join(top[:3])} — none traded after")
+
+        return "\n".join(lines)
+
+    # ──────────────────────────────────────────────────────────────────
+
     def read_recent_decisions(self, limit: int = 20) -> list[dict]:
         return self.db.get_recent_decisions(limit)
 
@@ -261,12 +404,15 @@ class ContextBuilder:
         positions: list[dict],
         history: list[dict],
         outcomes: list[dict],
-        memory: str,
         signals_config: dict,
     ) -> str:
         """Assemble the LLM user prompt from compressed context.
+        Live reflection: performance stats, pattern rules, hold regret.
         Tracks per-section token estimates and enforces MAX_PROMPT_TOKENS.
         """
+        # Decay pattern confidences at the start of each cycle
+        self.decay_patterns()
+
         sections = []
         section_tokens = {}
 
@@ -334,15 +480,22 @@ class ContextBuilder:
         else:
             section_tokens["outcomes"] = 0
 
-        # 4. Strategy memory — size guard: truncate further if total would exceed MAX_PROMPT_TOKENS
-        memory_section = ""
-        if memory:
-            memory_section = f"## Learned Patterns\n{memory[:10000]}"
-            section_tokens["memory"] = estimate_tokens(memory_section)
-        else:
-            section_tokens["memory"] = 0
+        # 4. Performance Window (live stats from last 20 outcomes)
+        stats_section = self.build_live_stats_section()
+        section_tokens["stats"] = estimate_tokens(stats_section) if stats_section else 0
+        sections.append(stats_section)
 
-        # 5. Account state with win rate and timing
+        # 5. Learned Patterns (from pattern rules with decay)
+        patterns_section = self.build_patterns_section()
+        section_tokens["patterns"] = estimate_tokens(patterns_section) if patterns_section else 0
+        sections.append(patterns_section)
+
+        # 6. Recent Holds (hold regret from last 6h)
+        regret_section = self.build_hold_regret_section()
+        section_tokens["regret"] = estimate_tokens(regret_section) if regret_section else 0
+        sections.append(regret_section)
+
+        # 7. Account state with win rate and timing
         equity = signals_config.get("accountEquity", 1000)
 
         # Win rate from DB performance stats
@@ -377,7 +530,7 @@ class ContextBuilder:
         account_section = (
             f"## Account\n"
             f"- Equity: ${equity:.2f}\n"
-            f"- Open positions: {len(positions)}/3 max\n"
+            f"- Open positions: {len(positions)}/8 max\n"
             f"- Daily realized PnL: ${self.db.get_daily_pnl():+.2f}\n"
             f"- Win rate: {win_rate:.0f}% ({wins}/{total_trades})\n"
             f"- Avg win: ${avg_win:+.2f} | Avg loss: ${avg_loss:+.2f}\n"
@@ -387,7 +540,7 @@ class ContextBuilder:
         section_tokens["account"] = estimate_tokens(account_section)
         sections.append(account_section)
 
-        # 6. Recent decisions (last 5, for context)
+        # 8. Recent decisions (last 5, for context)
         if history:
             dec_lines = []
             for h in history[:5]:
@@ -404,22 +557,23 @@ class ContextBuilder:
         else:
             section_tokens["decisions"] = 0
 
-        # Size guard: if total estimated tokens exceed MAX_PROMPT_TOKENS, truncate memory
+        # Size guard: if total exceeds MAX_PROMPT_TOKENS, truncate new sections first
         total_est = sum(section_tokens.values())
-        if total_est > MAX_PROMPT_TOKENS and memory_section:
-            # Calculate how much budget memory gets after other sections
-            other_tokens = total_est - section_tokens["memory"]
-            budget = MAX_PROMPT_TOKENS - other_tokens - 200  # 200 char safety margin
-            if budget > 500:
-                # Truncate memory section to fit
-                truncated = memory[:budget]
-                memory_section = f"## Learned Patterns\n{truncated}"
-                section_tokens["memory"] = estimate_tokens(memory_section)
-                sections[3] = memory_section  # memory is always index 3
-                total_est = sum(section_tokens.values())
+        new_section_keys = ["stats", "patterns", "regret"]
+
+        if total_est > MAX_PROMPT_TOKENS:
+            # First, try emptying new sections (index 3, 4, 5)
+            for idx_offset, key in enumerate([3, 4, 5]):
+                if section_tokens[new_section_keys[idx_offset]] > 0:
+                    sections[key] = ""
+                    section_tokens[new_section_keys[idx_offset]] = 0
+                    total_est = sum(section_tokens.values())
+                    if total_est <= MAX_PROMPT_TOKENS:
+                        break
+            if total_est > MAX_PROMPT_TOKENS:
                 log.warning(
                     f"⚠️ Prompt token estimate {total_est} exceeds MAX_PROMPT_TOKENS={MAX_PROMPT_TOKENS} "
-                    f"— truncated strategy memory to ~{budget} chars"
+                    f"— new reflection sections cleared"
                 )
 
         # Log token breakdown
@@ -428,12 +582,14 @@ class ContextBuilder:
             f"(signals={section_tokens.get('signals', 0)}, "
             f"positions={section_tokens.get('positions', 0)}, "
             f"outcomes={section_tokens.get('outcomes', 0)}, "
-            f"memory={section_tokens.get('memory', 0)}, "
+            f"stats={section_tokens.get('stats', 0)}, "
+            f"patterns={section_tokens.get('patterns', 0)}, "
+            f"regret={section_tokens.get('regret', 0)}, "
             f"account={section_tokens.get('account', 0)}, "
             f"decisions={section_tokens.get('decisions', 0)})"
         )
 
-        return "\n\n".join(sections)
+        return "\n\n".join(s for s in sections if s)
 
     @staticmethod
     def _calc_roe(position: dict) -> float:

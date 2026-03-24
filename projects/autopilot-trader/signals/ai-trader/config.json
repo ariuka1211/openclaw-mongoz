@@ -20,7 +20,7 @@
   },
 
   "safety": {
-    "max_positions": 3,
+    "max_positions": 8,
     "max_leverage": 20.0,
     "max_size_pct_equity": 5.0,
     "max_daily_drawdown_pct": 10.0,

@@ -156,6 +156,7 @@ class SafetyLayer:
 
         # Rule 4: Max 15% total exposure
         current_exposure = sum(
+            # MED-26: Canonical field is 'position_size_usd' (written by bot's _write_ai_result)
             abs(p.get("position_size_usd", p.get("size_usd", 0))) for p in positions
         )
         new_exposure = equity * size_pct / 100

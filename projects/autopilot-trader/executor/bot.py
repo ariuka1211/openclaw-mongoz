@@ -1998,6 +1998,7 @@ class LighterCopilot:
         # CRITICAL-4: Log outcome ONCE with actual fill price after verification
         self._log_outcome(pos, exit_price, "ai_close")
         self._recently_closed[mid_to_close] = time.monotonic() + 300  # 5 min phantom guard
+        pos.active_sl_order_id = None  # MED-18
         self.bot_managed_market_ids.discard(mid_to_close)
         self.tracker.remove_position(mid_to_close)
 
@@ -2072,6 +2073,7 @@ class LighterCopilot:
                     else ((pos.entry_price - exit_price) / pos.entry_price * 100)
                 logging.info(f"Emergency closed: {pos.side} {pos.symbol} ROE={roe:+.1f}%")
                 self._recently_closed[mid] = time.monotonic() + 300
+                pos.active_sl_order_id = None  # MED-18
                 self.bot_managed_market_ids.discard(mid)
                 self.tracker.remove_position(mid)
                 await self.alerts.send(
@@ -2091,11 +2093,22 @@ class LighterCopilot:
         # Try from signals file
         signals_path = Path(self._signals_file)
         if signals_path.exists():
-            data = safe_read_json(signals_path)
-            if data:
-                for opp in data.get("opportunities", []):
-                    if opp.get("symbol") == symbol:
-                        return opp.get("marketId")
+            # MED-23: Check staleness before using signals for market ID resolution.
+            # Stale signals may have wrong market IDs (scanner could have reassigned IDs).
+            try:
+                signals_age = time.time() - signals_path.stat().st_mtime
+                if signals_age > 600:  # 10 minutes
+                    logging.warning(f"⚠️ _resolve_market_id: signals.json stale (age={signals_age:.0f}s), skipping signal-based resolution for {symbol}")
+                    signals_path = None  # Skip to position tracker fallback
+            except OSError:
+                pass
+
+            if signals_path and signals_path.exists():
+                data = safe_read_json(signals_path)
+                if data:
+                    for opp in data.get("opportunities", []):
+                        if opp.get("symbol") == symbol:
+                            return opp.get("marketId")
 
         # Try from position tracker (already-open positions)
         for mid, pos in self.tracker.positions.items():
@@ -2509,6 +2522,7 @@ class LighterCopilot:
                     self._log_outcome(pos, exit_price, "exchange_close")
                     logging.info(f"Position closed by exchange: {pos.symbol}")
                     self._recently_closed[mid] = time.monotonic() + 300
+                    pos.active_sl_order_id = None  # MED-18
                     self.bot_managed_market_ids.discard(mid)
                     self.tracker.remove_position(mid)
 

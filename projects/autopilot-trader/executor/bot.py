@@ -1436,6 +1436,7 @@ class LighterCopilot:
                         if pos:
                             pos.unverified_at = time.time()
                             pos.unverified_ticks = 1
+                        self._save_state()
                         self._opened_signals.add(mid)
                         await self.alerts.send(
                             f"⚠️ *POSITION UNVERIFIED*\n"
@@ -1454,6 +1455,9 @@ class LighterCopilot:
                     pos = self.tracker.positions.get(mid)
                     if pos and pos.dsl_state and verified_pos.get("leverage"):
                         pos.dsl_state.leverage = verified_pos["leverage"]
+
+                    # Persist state immediately after opening to prevent crash data loss
+                    self._save_state()
 
                     # BUG-06: Verify we can actually fetch price for this position after open
                     price_ok = False
@@ -1706,6 +1710,7 @@ class LighterCopilot:
                 if pos:
                     pos.unverified_at = time.time()
                     pos.unverified_ticks = 1
+                self._save_state()
                 await self.alerts.send(
                     f"⚠️ *POSITION UNVERIFIED*\n"
                     f"{direction.upper()} {symbol}\n"
@@ -1723,6 +1728,9 @@ class LighterCopilot:
             pos = self.tracker.positions.get(market_id)
             if pos and pos.dsl_state and verified_pos.get("leverage"):
                 pos.dsl_state.leverage = verified_pos["leverage"]
+
+            # Persist state immediately after opening to prevent crash data loss
+            self._save_state()
 
             # BUG-06: Verify we can actually fetch price for this position after open
             # If price is unavailable, the position becomes "orphaned" — DSL can't compute ROE

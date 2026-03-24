@@ -340,6 +340,12 @@ class PositionTracker:
             ]
 
     def compute_tp_price(self, pos: TrackedPosition) -> float | None:
+        """Calculate trailing take-profit price based on high-water mark.
+        
+        Returns None if:
+        - For longs: high-water mark hasn't exceeded trigger level yet
+        - For shorts: high-water mark hasn't dropped below trigger level yet (at entry, returns None)
+        """
         if pos.side == "long":
             trigger = pos.entry_price * (1 + self.cfg.trailing_tp_trigger_pct / 100)
             if pos.high_water_mark < trigger:

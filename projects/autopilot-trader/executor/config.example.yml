@@ -9,7 +9,7 @@ api_key_index: 3
 api_key_private: "${LIGHTER_API_PRIVATE_KEY}"
 
 # Webshare proxy (for geo-restricted servers)
-proxy_url: "http://${LIGHTER_PROXY_USER}:${LIGHTER_PROXY_PASS}@${LIGHTER_PROXY_HOST}:${LIGHTER_PROXY_PORT}/"
+proxy_url: "socks5://${LIGHTER_PROXY_USER}:${LIGHTER_PROXY_PASS}@${LIGHTER_PROXY_HOST}:${LIGHTER_PROXY_PORT}/"
 
 # Trailing take profit
 trailing_tp_trigger_pct: 0.0    # 0 = trailing SL starts immediately from peak

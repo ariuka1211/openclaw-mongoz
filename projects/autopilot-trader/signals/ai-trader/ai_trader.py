@@ -319,11 +319,14 @@ class AITrader:
 
         # 3. Call LLM
         t0 = time.time()
-        raw_response = await self.llm.call(
+        result = await self.llm.call(
             system_prompt=self.system_prompt,
             user_prompt=user_prompt,
         )
         latency_ms = int((time.time() - t0) * 1000)
+        raw_response = str(result)
+        tokens_in = result.tokens_in
+        tokens_out = result.tokens_out
 
         # 4. Parse
         decision = parse_decision_json(raw_response)
@@ -382,9 +385,17 @@ class AITrader:
             positions_snapshot=positions,
             signals_snapshot=signals[:10],  # Top 10 only to save space
             latency_ms=latency_ms,
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
         )
 
-        log.info(f"--- Cycle {cycle_id} done (latency={latency_ms}ms, executed={executed}) ---")
+        # Log token usage and estimated cost
+        from llm_client import LLMStats
+        cost = (
+            tokens_in * LLMStats.COST_PER_1M_INPUT / 1_000_000
+            + tokens_out * LLMStats.COST_PER_1M_OUTPUT / 1_000_000
+        )
+        log.info(f"--- Cycle {cycle_id} done (latency={latency_ms}ms, tokens={tokens_in}→{tokens_out}, cost=${cost:.4f}, executed={executed}) ---")
         
         # LOW: Update dashboard cycle timestamp
         dashboard.set_cycle_time()

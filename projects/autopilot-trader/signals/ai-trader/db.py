@@ -46,6 +46,8 @@ class DecisionDB:
                 safety_reasons TEXT,
                 executed INTEGER NOT NULL DEFAULT 0,
                 latency_ms INTEGER,
+                tokens_in INTEGER DEFAULT 0,
+                tokens_out INTEGER DEFAULT 0,
                 positions_snapshot TEXT,
                 signals_snapshot TEXT
             );
@@ -86,6 +88,12 @@ class DecisionDB:
             columns = {row[1] for row in self._conn.execute("PRAGMA table_info(outcomes)").fetchall()}
             if "roe_pct" not in columns:
                 self._conn.execute("ALTER TABLE outcomes ADD COLUMN roe_pct REAL")
+            # Migration: add token columns if missing
+            decision_columns = {row[1] for row in self._conn.execute("PRAGMA table_info(decisions)").fetchall()}
+            if "tokens_in" not in decision_columns:
+                self._conn.execute("ALTER TABLE decisions ADD COLUMN tokens_in INTEGER DEFAULT 0")
+            if "tokens_out" not in decision_columns:
+                self._conn.execute("ALTER TABLE decisions ADD COLUMN tokens_out INTEGER DEFAULT 0")
             self._conn.commit()
 
     def log_decision(
@@ -98,6 +106,8 @@ class DecisionDB:
         positions_snapshot: list[dict] | None = None,
         signals_snapshot: list[dict] | None = None,
         latency_ms: int = 0,
+        tokens_in: int = 0,
+        tokens_out: int = 0,
     ):
         now = datetime.now(timezone.utc).isoformat()
         with self._lock:
@@ -105,8 +115,9 @@ class DecisionDB:
                 """INSERT INTO decisions
                    (timestamp, cycle_id, action, symbol, direction, reasoning, confidence,
                     safety_approved, safety_reasons, executed, latency_ms,
+                    tokens_in, tokens_out,
                     positions_snapshot, signals_snapshot)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     now,
                     cycle_id,
@@ -119,6 +130,8 @@ class DecisionDB:
                     json.dumps(safety_reasons),
                     int(executed),
                     latency_ms,
+                    tokens_in,
+                    tokens_out,
                     json.dumps(positions_snapshot or []),
                     json.dumps(signals_snapshot or []),
                 ),

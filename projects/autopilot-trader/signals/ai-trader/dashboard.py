@@ -24,13 +24,15 @@ _start_time: float = 0
 _last_cycle_time: float = 0
 _model_name: str = ""
 _equity: float = 0  # HIGH-12: Set by bot via set_equity() — no more hardcoded 1000
+_llm_stats_ref = None  # Reference to LLMStats instance for token/cost display
 
 
-def init_dashboard(db: DecisionDB, model_name: str = ""):
-    global _db, _start_time, _last_cycle_time, _model_name
+def init_dashboard(db: DecisionDB, model_name: str = "", llm_stats=None):
+    global _db, _start_time, _last_cycle_time, _model_name, _llm_stats_ref
     _db = db
     _start_time = datetime.now(timezone.utc).timestamp()
     _model_name = model_name
+    _llm_stats_ref = llm_stats
 
 
 def set_equity(equity: float):
@@ -66,12 +68,19 @@ async def api_status():
                 equity = data.get("equity", 0)
         except Exception:
             pass
+
+    # LLM token/cost stats
+    llm_stats = {}
+    if _llm_stats_ref:
+        llm_stats = _llm_stats_ref.to_dict()
+
     return {
         "alive": True,
         "uptime_seconds": int(datetime.now(timezone.utc).timestamp() - _start_time),
         "last_cycle": _last_cycle_time,
         "model": _model_name,
         "equity": equity,
+        "llm": llm_stats,
         **stats,
     }
 

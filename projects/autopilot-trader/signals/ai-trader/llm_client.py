@@ -15,6 +15,17 @@ log = logging.getLogger("ai-trader.llm")
 
 
 @dataclass
+class CallResult:
+    """Result from a single LLM call, including token usage."""
+    content: str
+    tokens_in: int = 0
+    tokens_out: int = 0
+
+    def __str__(self) -> str:
+        return self.content
+
+
+@dataclass
 class LLMStats:
     total_calls: int = 0
     total_tokens_in: int = 0
@@ -83,8 +94,8 @@ class LLMClient:
         model: str | None = None,
         temperature: float = 0.3,
         max_tokens: int = 1024,
-    ) -> str:
-        """Call LLM with retry + fallback. Returns raw text response."""
+    ) -> CallResult:
+        """Call LLM with retry + fallback. Returns CallResult with content + token counts."""
         model = model or self.primary_model
         last_error = None
 
@@ -125,7 +136,7 @@ class LLMClient:
 
     async def _call_once(
         self, model: str, system_prompt: str, user_prompt: str, temperature: float, max_tokens: int
-    ) -> str:
+    ) -> CallResult:
         """Single LLM API call."""
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -176,7 +187,7 @@ class LLMClient:
         self.stats.record(tokens_in, tokens_out, latency_ms)
         log.info(f"LLM {model}: {tokens_in}→{tokens_out} tokens, {latency_ms}ms")
 
-        return content
+        return CallResult(content=content, tokens_in=tokens_in, tokens_out=tokens_out)
 
     async def call_with_model(
         self,
@@ -185,7 +196,7 @@ class LLMClient:
         user_prompt: str,
         temperature: float = 0.3,
         max_tokens: int = 1024,
-    ) -> str:
+    ) -> CallResult:
         """Call a specific model (used for reflection with cheaper model)."""
         return await self.call(
             system_prompt, user_prompt, model=model, temperature=temperature, max_tokens=max_tokens

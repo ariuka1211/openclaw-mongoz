@@ -312,6 +312,9 @@ class TrackedPosition:
     dsl_state: DSLState | None = None       # DSL state (when dsl_enabled)
     sl_pct: float | None = None             # per-position stop loss % (from AI), None = use config default
     opened_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    # CRITICAL-2: Unverified position tracking — set when open_order succeeds but verification fails
+    unverified_at: float | None = None      # time.time() when marked unverified
+    unverified_ticks: int = 0               # consecutive ticks in unverified state
 
 
 class PositionTracker:
@@ -1382,10 +1385,20 @@ class LighterCopilot:
                     expected_size = size_usd / current_price
                     verified_pos = await self._verify_position_opened(mid, expected_size, symbol)
                     if verified_pos is None:
-                        logging.error(f"❌ Signal open: {symbol} order rejected by exchange (phantom position prevented)")
-                        # Clean up — position wasn't actually opened
-                        self._pending_sync.discard(mid)
-                        self.bot_managed_market_ids.discard(mid)
+                        # CRITICAL-2: Don't discard — add as unverified so we can re-verify on next ticks
+                        logging.error(f"❌ Signal open: {symbol} verification failed — tracking as unverified (will re-verify)")
+                        self.tracker.add_position(mid, symbol, direction, current_price, expected_size, leverage=min(self.cfg.default_leverage, 10))
+                        pos = self.tracker.positions.get(mid)
+                        if pos:
+                            pos.unverified_at = time.time()
+                            pos.unverified_ticks = 1
+                        self._opened_signals.add(mid)
+                        await self.alerts.send(
+                            f"⚠️ *POSITION UNVERIFIED*\n"
+                            f"{direction.upper()} {symbol}\n"
+                            f"Order submitted but verification failed.\n"
+                            f"Will re-verify on next ticks."
+                        )
                         continue  # Skip to next signal
 
                     self._opened_signals.add(mid)
@@ -1627,11 +1640,23 @@ class LighterCopilot:
             expected_size = size_usd / current_price
             verified_pos = await self._verify_position_opened(market_id, expected_size, symbol)
             if verified_pos is None:
-                logging.error(f"❌ AI open: {symbol} order rejected by exchange (phantom position prevented)")
-                # Clean up — position wasn't actually opened
-                self._pending_sync.discard(market_id)
-                self.bot_managed_market_ids.discard(market_id)
-                return False
+                # CRITICAL-2: Don't discard — add as unverified so we can re-verify on next ticks
+                # Position may be on exchange but API is slow to reflect it
+                logging.error(f"❌ AI open: {symbol} verification failed — tracking as unverified (will re-verify)")
+                ai_sl_pct = decision.get("stop_loss_pct")
+                ai_leverage = min(float(decision.get("leverage", self.cfg.default_leverage)), 10)
+                self.tracker.add_position(market_id, symbol, direction, current_price, expected_size, leverage=ai_leverage, sl_pct=ai_sl_pct)
+                pos = self.tracker.positions.get(market_id)
+                if pos:
+                    pos.unverified_at = time.time()
+                    pos.unverified_ticks = 1
+                await self.alerts.send(
+                    f"⚠️ *POSITION UNVERIFIED*\n"
+                    f"{direction.upper()} {symbol}\n"
+                    f"Order submitted but verification failed.\n"
+                    f"Will re-verify on next ticks."
+                )
+                return True  # Order was submitted, we're tracking it as unverified
             # Use actual filled size from exchange (handles partial fills)
             actual_size = verified_pos["size"]
             ai_sl_pct = decision.get("stop_loss_pct")
@@ -1880,9 +1905,7 @@ class LighterCopilot:
             logging.warning(f"⚠️ Failed to submit close order for {pos.side} {symbol} (attempt {attempts}, retry in {retry_delay}s)")
             return False
 
-        # Order submitted — log outcome NOW with estimated price to prevent data loss on crash
-        self._log_outcome(pos, current_price, "ai_close", estimated=True)
-
+        # CRITICAL-4: Don't log outcome yet — log ONCE after verification
         # Now verify it actually filled by polling the API
         position_closed = await self._verify_position_closed(mid_to_close, symbol)
 
@@ -1895,6 +1918,8 @@ class LighterCopilot:
             if attempts >= self._max_close_attempts:
                 # Escalate: set cooldown and alert
                 self._close_attempt_cooldown[symbol] = time.monotonic() + self._close_cooldown_seconds
+                # CRITICAL-4: Log with estimated price as fallback after all retries exhausted
+                self._log_outcome(pos, current_price, "ai_close", estimated=True)
                 roe = ((current_price - pos.entry_price) / pos.entry_price * 100) if is_long \
                     else ((pos.entry_price - current_price) / pos.entry_price * 100)
                 await self.alerts.send(
@@ -1913,8 +1938,8 @@ class LighterCopilot:
 
         fill_price = await self._get_fill_price(mid_to_close, sl_coi)
         exit_price = fill_price if fill_price else current_price
-        # Update the outcome with actual fill price (was logged as estimated before verification)
-        self._update_outcome(pos, exit_price, "ai_close")
+        # CRITICAL-4: Log outcome ONCE with actual fill price after verification
+        self._log_outcome(pos, exit_price, "ai_close")
         self._recently_closed[mid_to_close] = time.monotonic() + 300  # 5 min phantom guard
         self.bot_managed_market_ids.discard(mid_to_close)
         self.tracker.remove_position(mid_to_close)
@@ -2014,10 +2039,9 @@ class LighterCopilot:
                      estimated: bool = False):
         """Log a closed trade outcome to the AI trader journal DB.
 
-        When estimated=True, marks the outcome as provisional (best available price
-        at close submission time). After verification, call _update_outcome() to
-        correct with actual fill price. This ensures we never lose outcome data if
-        the bot crashes during verification.
+        Called ONCE per close — either with actual fill price after verification
+        succeeds, or with estimated=True as fallback after max verification retries.
+        This ensures only one outcome row per close (no double-writing).
 
         PnL math (no double-counting of leverage):
           pnl_pct  = raw price movement % (not leveraged)
@@ -2342,6 +2366,18 @@ class LighterCopilot:
                 mid = pos["market_id"]
                 if mid in self._pending_sync:
                     continue
+                # CRITICAL-2: Adopt unverified positions that now appear in live_positions
+                existing = self.tracker.positions.get(mid)
+                if existing and existing.unverified_at is not None:
+                    logging.info(f"✅ {pos['symbol']}: unverified position confirmed on exchange — adopting")
+                    # Update with actual exchange data
+                    existing.unverified_at = None
+                    existing.unverified_ticks = 0
+                    existing.entry_price = pos["entry_price"]
+                    existing.size = pos["size"]
+                    if pos.get("leverage") and existing.dsl_state:
+                        existing.dsl_state.leverage = pos["leverage"]
+                    continue
                 if mid in self.tracker.positions:
                     continue  # already tracked
                 if pos["entry_price"] <= 0:
@@ -2384,10 +2420,14 @@ class LighterCopilot:
                     f"Size: {pos['size']}"
                 )
 
-            # Detect closed positions
+            # Detect closed positions (skip unverified — handled separately below)
             for mid in list(self.tracker.positions.keys()):
                 if mid not in live_mids:
                     pos = self.tracker.positions[mid]
+                    # CRITICAL-2: Don't remove unverified positions on first absence —
+                    # they may just not be visible to the API yet. Give them 3 ticks.
+                    if pos.unverified_at is not None:
+                        continue
                     # Try to get fill price for accurate outcome logging
                     exit_price = self.api.get_mark_price(mid) if self.api else pos.entry_price
                     if not exit_price or exit_price <= 0:
@@ -2395,6 +2435,28 @@ class LighterCopilot:
                     self._log_outcome(pos, exit_price, "exchange_close")
                     logging.info(f"Position closed by exchange: {pos.symbol}")
                     self._recently_closed[mid] = time.monotonic() + 300
+                    self.bot_managed_market_ids.discard(mid)
+                    self.tracker.remove_position(mid)
+
+            # CRITICAL-2: Handle unverified positions not in live_mids
+            # Increment tick count; alert and remove after 3 consecutive absent ticks
+            for mid in list(self.tracker.positions.keys()):
+                pos = self.tracker.positions[mid]
+                if pos.unverified_at is None:
+                    continue
+                if mid in live_mids:
+                    # Position appeared — will be adopted in detection loop above on next tick
+                    continue
+                pos.unverified_ticks += 1
+                logging.warning(f"⚠️ {pos.symbol}: unverified position not in live positions (tick {pos.unverified_ticks}/3)")
+                if pos.unverified_ticks >= 3:
+                    logging.error(f"❌ {pos.symbol}: unverified position absent for 3 ticks — removing (order likely rejected)")
+                    await self.alerts.send(
+                        f"❌ *UNVERIFIED POSITION REMOVED*\n"
+                        f"{pos.side.upper()} {pos.symbol}\n"
+                        f"Absent from exchange for 3 consecutive ticks.\n"
+                        f"Order was likely rejected. Position removed from tracker."
+                    )
                     self.bot_managed_market_ids.discard(mid)
                     self.tracker.remove_position(mid)
 
@@ -2479,6 +2541,10 @@ class LighterCopilot:
 
     async def _process_position_tick(self, mid: int, pos: TrackedPosition):
         """Process a single position's tick — fetch price, evaluate triggers, execute if needed."""
+        # CRITICAL-2: Skip DSL/SL evaluation for unverified positions
+        if pos.unverified_at is not None:
+            logging.debug(f"⏭️ {pos.symbol}: skipping tick (unverified, tick {pos.unverified_ticks})")
+            return
         price = await self.api.get_price_with_mark_fallback(mid)
         if not price:
             # BUG-06: Orphaned position detection — don't skip silently
@@ -2594,9 +2660,7 @@ class LighterCopilot:
                 logging.warning(f"⚠️ DSL close: {pos.symbol} volume quota exhausted (attempt {attempts}, retry in {retry_delay}s)")
                 return  # Don't remove from tracker, will retry after cooldown
             if sl_success:
-                # Log outcome NOW with estimated price to prevent data loss on crash
-                self._log_outcome(pos, price, f"dsl_{action}", estimated=True)
-
+                # CRITICAL-4: Don't log outcome yet — log ONCE after verification
                 position_closed = await self._verify_position_closed(mid, pos.symbol)
                 if not position_closed:
                     # Increment DSL close attempt counter
@@ -2607,6 +2671,8 @@ class LighterCopilot:
                     if attempts >= self._max_close_attempts:
                         # Escalate: set cooldown and alert
                         self._dsl_close_attempt_cooldown[pos.symbol] = time.monotonic() + self._close_cooldown_seconds
+                        # CRITICAL-4: Log with estimated price as fallback after all retries exhausted
+                        self._log_outcome(pos, price, f"dsl_{action}", estimated=True)
                         await self.alerts.send(
                             f"🚨 *DSL CLOSE FAILED ×{attempts}*\n"
                             f"{pos.side.upper()} {pos.symbol}\n"
@@ -2643,8 +2709,8 @@ class LighterCopilot:
                 return  # Don't remove from tracker, will retry after cooldown
             fill_price = await self._get_fill_price(mid, sl_coi)
             exit_price = fill_price if fill_price else price
-            # Update the outcome with actual fill price (was logged as estimated before verification)
-            self._update_outcome(pos, exit_price, f"dsl_{action}")
+            # CRITICAL-4: Log outcome ONCE with actual fill price after verification
+            self._log_outcome(pos, exit_price, f"dsl_{action}")
             self._recently_closed[mid] = time.monotonic() + 300  # 5 min phantom guard
             self.bot_managed_market_ids.discard(mid)
             self.tracker.remove_position(mid)
@@ -2705,17 +2771,15 @@ class LighterCopilot:
                 logging.warning(f"⚠️ SL: {pos.symbol} volume quota exhausted (attempt {attempts}, retry in {retry_delay}s)")
                 return  # Don't remove from tracker, will retry after cooldown
             if sl_success:
-                # Log outcome NOW with estimated price to prevent data loss on crash
-                self._log_outcome(pos, price, action, estimated=True)
-
+                # CRITICAL-4: Don't log outcome yet — log ONCE after verification
                 position_closed = await self._verify_position_closed(mid, pos.symbol)
                 if not position_closed:
                     logging.warning(f"⚠️ {pos.symbol}: SL submitted but position still open — keeping in tracker")
                     return  # Don't remove from tracker, will retry next tick
                 fill_price = await self._get_fill_price(mid, sl_coi)
                 price = fill_price if fill_price else price
-                # Update the outcome with actual fill price (was logged as estimated before verification)
-                self._update_outcome(pos, price, action)
+                # CRITICAL-4: Log outcome ONCE with actual fill price after verification
+                self._log_outcome(pos, price, action)
             else:
                 # SL order failed (rate-limited or rejected) — track attempts with graduated delay
                 # Note: _close_attempts is shared between AI close and legacy SL paths.
@@ -2788,6 +2852,8 @@ class LighterCopilot:
                     "high_water_mark": pos.high_water_mark,
                     "trailing_active": pos.trailing_active,
                     "trailing_sl_level": pos.trailing_sl_level,
+                    "unverified_at": pos.unverified_at,
+                    "unverified_ticks": pos.unverified_ticks,
                     "dsl": self._serialize_dsl_state(pos.dsl_state) if pos.dsl_state else None,
                 }
                 for mid, pos in self.tracker.positions.items()
@@ -2976,6 +3042,11 @@ class LighterCopilot:
                 # Restore AI-specified stop loss % (Fix #10)
                 if saved_pos.get("sl_pct") is not None:
                     pos.sl_pct = saved_pos["sl_pct"]
+                # CRITICAL-2: Restore unverified state (reset ticks to 1 on restart)
+                if saved_pos.get("unverified_at") is not None:
+                    pos.unverified_at = time.time()
+                    pos.unverified_ticks = 1  # Reset count on restart
+                    logging.info(f"🔄 Restored unverified state for {pos.symbol} (tick 1/3)")
             elif mid not in live_mids:
                 logging.info(f"🗑️ Saved position {saved_pos.get('symbol', mid)} no longer on exchange — dropped")
 

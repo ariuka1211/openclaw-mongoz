@@ -3135,9 +3135,21 @@ class LighterCopilot:
                 logging.warning("⚠️ Reconciliation skipped: failed to fetch positions from exchange")
                 return
 
+            # Safety: if exchange returns empty but we have positions in state,
+            # don't remove them — likely proxy/connection not ready yet on first call.
+            # Only reconcile removals when exchange actually returns data.
+            state_mids = set(self.bot_managed_market_ids)
+            if not live_positions and state_mids:
+                logging.warning(
+                    f"⚠️ Reconciliation: exchange returned 0 positions but state has "
+                    f"{len(state_mids)} — skipping removal (proxy may not be ready)"
+                )
+                # Still try to save any adopted positions, just don't remove
+                # Since there are no exchange positions, there's nothing to adopt either
+                return
+
             # Build market ID sets
             exchange_mids = {p["market_id"] for p in live_positions}
-            state_mids = set(self.bot_managed_market_ids)
 
             # Track changes for summary
             adopted = 0

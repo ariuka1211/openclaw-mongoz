@@ -23,6 +23,7 @@ _db: DecisionDB | None = None
 _start_time: float = 0
 _last_cycle_time: float = 0
 _model_name: str = ""
+_equity: float = 0  # HIGH-12: Set by bot via set_equity() — no more hardcoded 1000
 
 
 def init_dashboard(db: DecisionDB, model_name: str = ""):
@@ -30,6 +31,12 @@ def init_dashboard(db: DecisionDB, model_name: str = ""):
     _db = db
     _start_time = datetime.now(timezone.utc).timestamp()
     _model_name = model_name
+
+
+def set_equity(equity: float):
+    """Called by the bot to update actual equity for dashboard metrics."""
+    global _equity
+    _equity = equity
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -43,12 +50,22 @@ async def index():
 @app.get("/api/status")
 async def api_status():
     stats = _db.get_performance_stats() if _db else {}
+    # HIGH-12: Read equity from shared state file if not set via setter
+    equity = _equity
+    if equity <= 0:
+        try:
+            equity_file = Path(__file__).parent / "state" / "equity.json"
+            if equity_file.exists():
+                data = json.loads(equity_file.read_text())
+                equity = data.get("equity", 0)
+        except Exception:
+            pass
     return {
         "alive": True,
         "uptime_seconds": int(datetime.now(timezone.utc).timestamp() - _start_time),
         "last_cycle": _last_cycle_time,
         "model": _model_name,
-        "equity": 1000,  # Will be updated from signals
+        "equity": equity,
         **stats,
     }
 

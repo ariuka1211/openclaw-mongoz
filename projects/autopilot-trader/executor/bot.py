@@ -1134,6 +1134,8 @@ class LighterCopilot:
         self._idle_tick_count: int = 0
         self._idle_threshold: int = 2   # consecutive ticks before extending interval
         self._idle_sleep_interval: int = 60  # seconds between polls when idle (vs normal)
+        # HIGH-10: Result dirty flag — prevent refresh from overwriting fresh AI results
+        self._result_dirty: bool = False
 
 
     async def start(self):
@@ -1296,6 +1298,9 @@ class LighterCopilot:
         scale = balance / scanner_equity
         if abs(scale - 1.0) > 0.01:
             logging.info(f"📐 Scaling positions: balance=${balance:.2f} / scanner_equity=${scanner_equity:.2f} = {scale:.4f}×")
+
+        # HIGH-12: Write equity to shared state file for dashboard
+        self._write_equity_file(balance)
 
         for opp in data.get("opportunities", []):
             mid = opp["marketId"]
@@ -1497,6 +1502,18 @@ class LighterCopilot:
             return
         self._last_ai_decision_ts = ts
         self._signal_processed_this_tick = True
+
+        # HIGH-7: Reject stale AI decisions (>10 minutes old)
+        try:
+            decision_time = datetime.fromisoformat(ts.replace("Z", "+00:00")) if ts else None
+        except (ValueError, AttributeError):
+            decision_time = None
+        if decision_time:
+            age_seconds = (datetime.now(timezone.utc) - decision_time).total_seconds()
+            if age_seconds > 600:
+                logging.warning(f"⚠️ AI decision rejected: stale (age={age_seconds:.0f}s, max=600s)")
+                self._write_ai_result(decision, success=False)
+                return
 
         # Validate decision
         validation_error = self._validate_ai_decision(decision)
@@ -1999,8 +2016,13 @@ class LighterCopilot:
             position_closed = await self._verify_position_closed(mid, pos.symbol)
 
             if position_closed:
-                roe = ((current_price - pos.entry_price) / pos.entry_price * 100) if is_long \
-                    else ((pos.entry_price - current_price) / pos.entry_price * 100)
+                # Get actual fill price for accurate outcome logging
+                fill_price = await self._get_fill_price(mid, sl_coi)
+                exit_price = fill_price if fill_price else current_price
+                # HIGH-6: Log outcome to DB for close_all positions
+                self._log_outcome(pos, exit_price, "ai_close_all")
+                roe = ((exit_price - pos.entry_price) / pos.entry_price * 100) if is_long \
+                    else ((pos.entry_price - exit_price) / pos.entry_price * 100)
                 logging.info(f"Emergency closed: {pos.side} {pos.symbol} ROE={roe:+.1f}%")
                 self._recently_closed[mid] = time.monotonic() + 300
                 self.bot_managed_market_ids.discard(mid)
@@ -2154,6 +2176,8 @@ class LighterCopilot:
             with open(tmp, "w") as f:
                 json.dump(result, f, indent=2)
             os.replace(tmp, str(self._ai_result_file))
+            # HIGH-10: Mark result as fresh — refresh should not overwrite until next tick
+            self._result_dirty = True
         except Exception as e:
             logging.warning(f"Failed to write AI result: {e}")
 
@@ -2164,6 +2188,11 @@ class LighterCopilot:
         but updates positions to reflect DSL/SL/TP closes that happened since
         the last AI decision was processed.
         """
+        # HIGH-10: Skip if a fresh AI result was just written — don't overwrite
+        # the AI trader's result before it has a chance to read it.
+        if self._result_dirty:
+            logging.debug("Refresh skipped: result is dirty (fresh AI result not yet consumed)")
+            return
         try:
             existing = safe_read_json(Path(self._ai_result_file))
             last_decision_id = existing.get("processed_decision_id") if existing else None
@@ -2300,11 +2329,9 @@ class LighterCopilot:
 
     async def _tick(self):
         """One cycle: sync positions, update prices, check triggers."""
-        # Fix #16: Clear pending sync at START so exceptions don't block position detection
-        # This is correct: _pending_sync only tracks positions opened in THIS tick's execution
-        # phase. Positions from previous ticks are already in tracker.positions and will be
-        # skipped by sync. New opens in this tick add to _pending_sync AFTER sync runs.
-        self._pending_sync.clear()
+        # HIGH-13: _pending_sync.clear() moved to AFTER position verification section
+        # (see section 1.4 below) to prevent race where previous tick's verification
+        # is still sleeping when sync re-detects the position as "new".
 
         # ── Kill switch check ──
         kill_switch_now = self._kill_switch_path.exists()
@@ -2497,11 +2524,20 @@ class LighterCopilot:
                 f"Cooldown: {'active' if in_cooldown else 'none'}"
             )
 
-        # 1.4. Reconcile saved DSL state with detected positions (first tick after restart)
+        # 1.4. HIGH-13: Clear pending sync AFTER position verification section completes.
+        # This prevents the race where previous tick's verification is still sleeping
+        # and sync re-detects the position as "new", giving it a fresh DSLState instead
+        # of the AI-configured one.
+        self._pending_sync.clear()
+
+        # Reconcile saved DSL state with detected positions (first tick after restart)
         await self._reconcile_positions(live_positions)
 
         # MED-4: Refresh position context in result file so AI trader sees current positions
         # even between its own decisions (DSL/SL/TP closes update tracker but not result file)
+        # HIGH-10: Clear dirty flag — AI trader has had a full tick to read the result
+        if self._ai_mode:
+            self._result_dirty = False
         if self._ai_mode and self.tracker.positions:
             self._refresh_position_context()
 
@@ -2822,6 +2858,19 @@ class LighterCopilot:
             "stagnation_active": dsl.stagnation_active,
             "stagnation_started": dsl.stagnation_started.isoformat() if dsl.stagnation_started else None,
         }
+
+    def _write_equity_file(self, equity: float):
+        """HIGH-12: Write equity to shared state file for dashboard to read."""
+        try:
+            # Write to ai-trader's state directory (sibling of executor)
+            equity_path = Path(self._ai_trader_dir) / "state" / "equity.json"
+            equity_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = str(equity_path) + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump({"equity": equity, "timestamp": datetime.now(timezone.utc).isoformat()}, f)
+            os.replace(tmp, str(equity_path))
+        except Exception as e:
+            logging.debug(f"Failed to write equity file: {e}")
 
     def _save_state(self):
         """Persist critical ephemeral state to disk for crash/restart recovery."""

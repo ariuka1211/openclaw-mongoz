@@ -76,3 +76,4 @@ projects/autopilot-trader/signals/ai-result.json
 # Secrets
 auth-profiles.json
 models.json
+*.ack

@@ -149,7 +149,7 @@ class CoinalyzeClient:
             for call in self._call_log:
                 dropped += call["cost"]
                 if dropped >= needed_drops:
-                    wait = 61 - (now - call["time"])
+                    wait = max(0, 61 - (now - call["time"]))
                     break
                     
             if wait > 0:
@@ -681,11 +681,11 @@ class OpportunityScanner:
         for sym in coins:
             h1 = ohlcv_1h.get(sym, {}).get("history", [])
             h4 = ohlcv_4h.get(sym, {}).get("history", [])
-            if not h1:
+            if len(h1) < 2:
                 continue
 
             price = h1[-1]["c"]
-            price_chg = ((h1[-1]["c"] - h1[-1]["o"]) / h1[-1]["o"] * 100) if h1[-1]["o"] > 0 else 0
+            price_chg = ((h1[-1]["c"] - h1[-2]["c"]) / h1[-2]["c"] * 100) if h1[-2]["c"] > 0 else 0
 
             vol_score, vol_det = self.score_volume(h1)
             # OI score without liq/LS for now (just OI direction)

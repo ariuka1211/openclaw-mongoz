@@ -44,105 +44,45 @@ Examples of bad patterns (avoid these):
 
 def _gather_quantitative_stats(db) -> str:
     """Run statistical analyses on outcomes and return formatted summary."""
+    stats = db.get_confidence_bracket_stats()
     lines = []
 
-    # 1. Win rate by direction
-    rows = db.conn.execute("""
-        SELECT direction,
-               COUNT(*) as total,
-               SUM(CASE WHEN pnl_usd > 0 THEN 1 ELSE 0 END) as wins,
-               COALESCE(AVG(pnl_usd), 0) as avg_pnl,
-               COALESCE(SUM(pnl_usd), 0) as total_pnl
-        FROM outcomes
-        GROUP BY direction
-    """).fetchall()
-    if rows:
+    if stats["direction_stats"]:
         lines.append("### Win Rate by Direction")
-        for r in rows:
-            dir_name, total, wins, avg_pnl, total_pnl = r
+        for r in stats["direction_stats"]:
+            total = r["total"]
+            wins = r["wins"]
             wr = (wins / total * 100) if total > 0 else 0
-            lines.append(f"- {dir_name or 'unknown'}: {wr:.0f}% ({wins}/{total}), avg=${avg_pnl:+.2f}, total=${total_pnl:+.2f}")
+            lines.append(f"- {r['direction'] or 'unknown'}: {wr:.0f}% ({wins}/{total}), avg=${r['avg_pnl']:+.2f}, total=${r['total_pnl']:+.2f}")
 
-    # 2. Win rate by hold time bracket
-    rows = db.conn.execute("""
-        SELECT
-            CASE
-                WHEN hold_time_seconds < 1800 THEN '<30min'
-                WHEN hold_time_seconds < 7200 THEN '30min-2h'
-                ELSE '2h+'
-            END as bracket,
-            COUNT(*) as total,
-            SUM(CASE WHEN pnl_usd > 0 THEN 1 ELSE 0 END) as wins,
-            COALESCE(AVG(pnl_usd), 0) as avg_pnl
-        FROM outcomes
-        GROUP BY bracket
-        ORDER BY MIN(hold_time_seconds)
-    """).fetchall()
-    if rows:
+    if stats["hold_time_stats"]:
         lines.append("\n### Win Rate by Hold Time")
-        for r in rows:
-            bracket, total, wins, avg_pnl = r
+        for r in stats["hold_time_stats"]:
+            total = r["total"]
+            wins = r["wins"]
             wr = (wins / total * 100) if total > 0 else 0
-            lines.append(f"- {bracket}: {wr:.0f}% ({wins}/{total}), avg=${avg_pnl:+.2f}")
+            lines.append(f"- {r['bracket']}: {wr:.0f}% ({wins}/{total}), avg=${r['avg_pnl']:+.2f}")
 
-    # 3. Win rate by entry confidence
-    # Join: pick the CLOSEST decision before each outcome (not just any within 5 min)
-    rows = db.conn.execute("""
-        SELECT
-            CASE
-                WHEN d.confidence >= 0.7 THEN 'high (≥0.7)'
-                WHEN d.confidence >= 0.4 THEN 'medium (0.4-0.7)'
-                ELSE 'low (<0.4)'
-            END as conf_bracket,
-            COUNT(*) as total,
-            SUM(CASE WHEN o.pnl_usd > 0 THEN 1 ELSE 0 END) as wins,
-            COALESCE(AVG(o.pnl_usd), 0) as avg_pnl
-        FROM outcomes o
-        LEFT JOIN decisions d ON d.id = (
-            SELECT d2.id FROM decisions d2
-            WHERE d2.symbol = o.symbol
-              AND d2.timestamp <= o.timestamp
-              AND d2.action = 'open'
-              AND d2.executed = 1
-            ORDER BY d2.timestamp DESC
-            LIMIT 1
-        )
-        WHERE d.confidence IS NOT NULL
-        GROUP BY conf_bracket
-    """).fetchall()
-    if rows:
+    if stats["confidence_stats"]:
         lines.append("\n### Win Rate by Entry Confidence")
-        for r in rows:
-            bracket, total, wins, avg_pnl = r
+        for r in stats["confidence_stats"]:
+            total = r["total"]
+            wins = r["wins"]
             wr = (wins / total * 100) if total > 0 else 0
-            lines.append(f"- {bracket}: {wr:.0f}% ({wins}/{total}), avg=${avg_pnl:+.2f}")
+            lines.append(f"- {r['bracket']}: {wr:.0f}% ({wins}/{total}), avg=${r['avg_pnl']:+.2f}")
 
-    # 4. Biggest loss patterns — exit reasons that dominate losses
-    rows = db.conn.execute("""
-        SELECT exit_reason,
-               COUNT(*) as total_losses,
-               COALESCE(SUM(pnl_usd), 0) as total_loss_usd,
-               COALESCE(AVG(pnl_usd), 0) as avg_loss
-        FROM outcomes
-        WHERE pnl_usd <= 0
-        GROUP BY exit_reason
-        ORDER BY total_loss_usd ASC
-        LIMIT 5
-    """).fetchall()
-    if rows:
+    if stats["loss_patterns"]:
         lines.append("\n### Biggest Loss Patterns (by exit reason)")
-        for r in rows:
-            reason, count, total_loss, avg_loss = r
-            lines.append(f"- {reason}: {count} losses, total=${total_loss:+.2f}, avg=${avg_loss:+.2f}")
+        for r in stats["loss_patterns"]:
+            lines.append(f"- {r['exit_reason']}: {r['count']} losses, total=${r['total_loss']:+.2f}, avg=${r['avg_loss']:+.2f}")
 
-    # 5. Overall stats summary
-    stats = db.get_performance_stats()
+    ov = stats["overall_stats"]
     lines.append(
         f"\n### Overall Stats\n"
-        f"- Win rate: {stats['win_rate']:.0f}% ({stats['wins']}/{stats['total_trades']})\n"
-        f"- Avg win: ${stats['avg_win']:+.2f} | Avg loss: ${stats['avg_loss']:+.2f}\n"
-        f"- Total PnL: ${stats['total_pnl']:+.2f}\n"
-        f"- Best single: ${stats['avg_win']:+.2f} | Worst single: ${stats['max_drawdown']:+.2f}"
+        f"- Win rate: {ov['win_rate']:.0f}% ({ov['wins']}/{ov['total_trades']})\n"
+        f"- Avg win: ${ov['avg_win']:+.2f} | Avg loss: ${ov['avg_loss']:+.2f}\n"
+        f"- Total PnL: ${ov['total_pnl']:+.2f}\n"
+        f"- Best single: ${ov['avg_win']:+.2f} | Worst single: ${ov['max_drawdown']:+.2f}"
     )
 
     return "\n".join(lines) if lines else ""

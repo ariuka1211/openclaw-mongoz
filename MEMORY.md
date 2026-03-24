@@ -1,14 +1,12 @@
 # MEMORY.md
 
 ## Active Projects
-- **Trading Bot** — Lighter DEX, Python executor + TS scanner/AI. Services: lighter-scanner, lighter-bot, ai-trader. Full architecture: `PROJECTS/autopilot-trader.md`
-- **Token Tracking** — Added to ai-trader: tiktoken estimation, per-section breakdown, DB persistence. Branch `feat/token-tracking` merged to main. Kilo gateway has ~13K+ hidden tokens per call.
-- **Memory System** — layered pipeline: session → daily files → MEMORY.md. 3 cron jobs (extract 2hr, cleanup daily, archive weekly)
+- **Trading Bot** — Lighter DEX, Python executor + TS scanner/AI. Services: lighter-scanner, lighter-bot, ai-trader. Full architecture: `projects/autopilot-trader/docs/`
+- **Token Tracking** — Added to ai-trader: tiktoken estimation, per-section breakdown, DB persistence. Kilo gateway has ~13K+ hidden tokens per call.
 - **Watchdog** — `watchdog-daemon.sh start|stop|status`. Monitors gateway, OpenRouter, sub-agents
 
 ## Open Items
 - Integration layer: 11 unfixed issues (3 high, 4 medium, 4 low) — executed=True without bot confirmation, signals staleness detection, bot crash gap
-- Nightly cleanup cron: path mismatch — crontab references `scripts/memory-nightly-cleanup.sh` but script is at `scripts/memory/memory-nightly-cleanup.sh`
 - Lighter volume_quota_remaining always returns None on mainnet — quota guard code is dead
 
 ## Rules (red lines)
@@ -25,6 +23,3 @@
 - VPS: 4 vCPU, 8GB RAM, 80GB disk. OpenClaw at `/root/.openclaw`, Gateway port 5705
 - GitHub: `ariuka1211/openclaw-mongoz`
 - Telegram: @Openclawtestingbot
-
-## Silent Replies
-When you have nothing to say, respond with ONLY: NO_REPLY

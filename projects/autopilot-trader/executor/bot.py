@@ -1098,6 +1098,7 @@ class LighterCopilot:
         self._api_lag_warnings: dict[str, float] = {}  # symbol → last warning timestamp
         self._pending_sync: set[int] = set()  # market_ids opened this tick — skip in sync to avoid race conditions
         self._recently_closed: dict[int, float] = {}  # market_id → monotonic() expire time (bot-closed positions)
+        self._verifying_close: set[int] = set()  # MED-25: market_ids being verified as closed — skip DSL/SL
         # Close attempt tracking — prevent infinite close loops
         self._close_attempts: dict[str, int] = {}  # symbol → consecutive close attempts
         self._close_attempt_cooldown: dict[str, float] = {}  # symbol → monotonic() deadline (skip LLM during this)
@@ -1768,26 +1769,31 @@ class LighterCopilot:
     async def _verify_position_closed(self, market_id: int, symbol: str) -> bool:
         """Poll the Lighter API to verify a position is actually closed after a close order.
         Uses progressively longer delays to account for exchange processing time.
+        MED-25: Adds market_id to _verifying_close to skip DSL/SL evaluation during verification.
         """
-        delays = [5, 10, 15, 20]  # progressive delays: 5s, 10s, 15s, 20s = 50s total
-        for attempt, delay in enumerate(delays):
-            await asyncio.sleep(delay)
-            try:
-                live_positions = await self.api.get_positions()
-                still_open = any(p["market_id"] == market_id and abs(p.get("size", 0)) > 0.001 for p in live_positions)
-                if not still_open:
-                    logging.info(f"✅ {symbol}: position closure verified (attempt {attempt + 1}, after {delay}s)")
-                    return True
-                # Also check if there are any active orders (the close order might still be pending)
-                active_orders = await self._check_active_orders(market_id)
-                sl_orders = [o for o in active_orders]  # all active orders are close-related (both long close and short close)
-                logging.info(
-                    f"⏳ {symbol}: position still open (attempt {attempt + 1}/{len(delays)}), "
-                    f"active_orders={len(active_orders)}, sl_orders={len(sl_orders)}"
-                )
-            except Exception as e:
-                logging.warning(f"⚠️ {symbol}: error verifying closure (attempt {attempt + 1}): {e}")
-        return False
+        self._verifying_close.add(market_id)
+        try:
+            delays = [3, 5, 7, 10]  # MED-25: reduced from [5,10,15,20] — 25s total instead of 50s
+            for attempt, delay in enumerate(delays):
+                await asyncio.sleep(delay)
+                try:
+                    live_positions = await self.api.get_positions()
+                    still_open = any(p["market_id"] == market_id and abs(p.get("size", 0)) > 0.001 for p in live_positions)
+                    if not still_open:
+                        logging.info(f"✅ {symbol}: position closure verified (attempt {attempt + 1}, after {delay}s)")
+                        return True
+                    # Also check if there are any active orders (the close order might still be pending)
+                    active_orders = await self._check_active_orders(market_id)
+                    sl_orders = [o for o in active_orders]  # all active orders are close-related (both long close and short close)
+                    logging.info(
+                        f"⏳ {symbol}: position still open (attempt {attempt + 1}/{len(delays)}), "
+                        f"active_orders={len(active_orders)}, sl_orders={len(sl_orders)}"
+                    )
+                except Exception as e:
+                    logging.warning(f"⚠️ {symbol}: error verifying closure (attempt {attempt + 1}): {e}")
+            return False
+        finally:
+            self._verifying_close.discard(market_id)
 
     async def _verify_position_opened(self, market_id: int, expected_size: float, symbol: str) -> dict | None:
         """Verify a position exists on the exchange after open_order returns success.
@@ -2498,6 +2504,7 @@ class LighterCopilot:
                         f"Absent from exchange for 3 consecutive ticks.\n"
                         f"Order was likely rejected. Position removed from tracker."
                     )
+                    pos.active_sl_order_id = None  # MED-18
                     self.bot_managed_market_ids.discard(mid)
                     self.tracker.remove_position(mid)
 
@@ -2594,6 +2601,10 @@ class LighterCopilot:
         # CRITICAL-2: Skip DSL/SL evaluation for unverified positions
         if pos.unverified_at is not None:
             logging.debug(f"⏭️ {pos.symbol}: skipping tick (unverified, tick {pos.unverified_ticks})")
+            return
+        # MED-25: Skip DSL/SL evaluation for positions being verified as closed
+        if mid in self._verifying_close:
+            logging.debug(f"⏭️ {pos.symbol}: skipping tick (verification in progress)")
             return
         price = await self.api.get_price_with_mark_fallback(mid)
         if not price:
@@ -2762,6 +2773,7 @@ class LighterCopilot:
             # CRITICAL-4: Log outcome ONCE with actual fill price after verification
             self._log_outcome(pos, exit_price, f"dsl_{action}")
             self._recently_closed[mid] = time.monotonic() + 300  # 5 min phantom guard
+            pos.active_sl_order_id = None  # MED-18
             self.bot_managed_market_ids.discard(mid)
             self.tracker.remove_position(mid)
             # Post-close completion alert
@@ -2854,6 +2866,7 @@ class LighterCopilot:
                     )
                 return  # Don't remove from tracker, will retry after cooldown
         self._recently_closed[mid] = time.monotonic() + 300  # 5 min phantom guard
+        pos.active_sl_order_id = None  # MED-18
         self.bot_managed_market_ids.discard(mid)
         self.tracker.remove_position(mid)
 
@@ -2917,6 +2930,7 @@ class LighterCopilot:
                     "trailing_sl_level": pos.trailing_sl_level,
                     "unverified_at": pos.unverified_at,
                     "unverified_ticks": pos.unverified_ticks,
+                    "active_sl_order_id": pos.active_sl_order_id,  # MED-18
                     "dsl": self._serialize_dsl_state(pos.dsl_state) if pos.dsl_state else None,
                 }
                 for mid, pos in self.tracker.positions.items()
@@ -3039,6 +3053,13 @@ class LighterCopilot:
                     if t.trigger_pct == saved_tier_trigger:
                         tier = t
                         break
+                # MED-24: Default to first tier on mismatch instead of None
+                if tier is None and self.tracker.dsl_cfg.tiers:
+                    tier = self.tracker.dsl_cfg.tiers[0]
+                    logging.warning(
+                        f"⚠️ Saved tier trigger {saved_tier_trigger}% not found in current config, "
+                        f"defaulting to first tier ({tier.trigger_pct}%)"
+                    )
 
             saved_hw_time = dsl_data.get("high_water_time")
             hw_time = datetime.fromisoformat(saved_hw_time) if saved_hw_time else None
@@ -3110,6 +3131,9 @@ class LighterCopilot:
                     pos.unverified_at = time.time()
                     pos.unverified_ticks = 1  # Reset count on restart
                     logging.info(f"🔄 Restored unverified state for {pos.symbol} (tick 1/3)")
+                # MED-18: Restore active SL order ID for cancellation
+                if saved_pos.get("active_sl_order_id"):
+                    pos.active_sl_order_id = saved_pos["active_sl_order_id"]
             elif mid not in live_mids:
                 logging.info(f"🗑️ Saved position {saved_pos.get('symbol', mid)} no longer on exchange — dropped")
 

@@ -362,6 +362,112 @@ class DecisionDB:
             if total > 0:
                 log.info(f"Purged: {decisions_deleted} decisions, {alerts_deleted + stale_alerts} alerts, {outcomes_deleted} outcomes")
 
+    def get_recently_traded_symbols(self, hours: int = 2) -> dict[str, str]:
+        """Get symbols and their most recent trade direction within the time window.
+
+        Returns a dict mapping symbol -> direction for the latest outcome per symbol
+        within the given number of hours.
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT o.symbol, o.direction "
+                "FROM outcomes o "
+                "INNER JOIN ("
+                "  SELECT symbol, MAX(timestamp) as max_ts "
+                "  FROM outcomes "
+                "  WHERE timestamp > datetime('now', ?) "
+                "  GROUP BY symbol"
+                ") latest ON o.symbol = latest.symbol AND o.timestamp = latest.max_ts",
+                (f"-{hours} hours",),
+            ).fetchall()
+        return {row[0]: row[1] for row in rows}
+
+    def get_confidence_bracket_stats(self, hours: int = 72) -> dict:
+        """Get statistical breakdowns for reflection analysis.
+
+        Returns dict with keys: direction_stats, hold_time_stats,
+        confidence_stats, loss_patterns, overall_stats.
+        """
+        with self._lock:
+            direction_rows = self._conn.execute(
+                "SELECT direction, COUNT(*) as total, "
+                "SUM(CASE WHEN pnl_usd > 0 THEN 1 ELSE 0 END) as wins, "
+                "COALESCE(AVG(pnl_usd), 0) as avg_pnl, "
+                "COALESCE(SUM(pnl_usd), 0) as total_pnl "
+                "FROM outcomes GROUP BY direction"
+            ).fetchall()
+
+            hold_time_rows = self._conn.execute(
+                "SELECT "
+                "CASE WHEN hold_time_seconds < 1800 THEN '<30min' "
+                "WHEN hold_time_seconds < 7200 THEN '30min-2h' "
+                "ELSE '2h+' END as bracket, "
+                "COUNT(*) as total, "
+                "SUM(CASE WHEN pnl_usd > 0 THEN 1 ELSE 0 END) as wins, "
+                "COALESCE(AVG(pnl_usd), 0) as avg_pnl "
+                "FROM outcomes GROUP BY bracket ORDER BY MIN(hold_time_seconds)"
+            ).fetchall()
+
+            confidence_rows = self._conn.execute(
+                "SELECT "
+                "CASE WHEN d.confidence >= 0.7 THEN 'high' "
+                "WHEN d.confidence >= 0.4 THEN 'medium' "
+                "ELSE 'low' END as conf_bracket, "
+                "COUNT(*) as total, "
+                "SUM(CASE WHEN o.pnl_usd > 0 THEN 1 ELSE 0 END) as wins, "
+                "COALESCE(AVG(o.pnl_usd), 0) as avg_pnl "
+                "FROM outcomes o "
+                "LEFT JOIN decisions d ON d.id = ("
+                "  SELECT d2.id FROM decisions d2 "
+                "  WHERE d2.symbol = o.symbol "
+                "  AND d2.timestamp <= o.timestamp "
+                "  AND d2.timestamp > datetime(o.timestamp, '-4 hours') "
+                "  AND d2.action = 'open' "
+                "  AND d2.executed = 1 "
+                "  ORDER BY d2.timestamp DESC LIMIT 1"
+                ") WHERE d.confidence IS NOT NULL GROUP BY conf_bracket"
+            ).fetchall()
+
+            loss_rows = self._conn.execute(
+                "SELECT exit_reason, COUNT(*) as total_losses, "
+                "COALESCE(SUM(pnl_usd), 0) as total_loss_usd, "
+                "COALESCE(AVG(pnl_usd), 0) as avg_loss "
+                "FROM outcomes WHERE pnl_usd <= 0 "
+                "GROUP BY exit_reason ORDER BY total_loss_usd ASC LIMIT 5"
+            ).fetchall()
+
+            total = self._conn.execute("SELECT COUNT(*) FROM outcomes").fetchone()[0]
+            wins = self._conn.execute("SELECT COUNT(*) FROM outcomes WHERE pnl_usd > 0").fetchone()[0]
+            avg_win = self._conn.execute("SELECT COALESCE(AVG(pnl_usd), 0) FROM outcomes WHERE pnl_usd > 0").fetchone()[0]
+            avg_loss = self._conn.execute("SELECT COALESCE(AVG(pnl_usd), 0) FROM outcomes WHERE pnl_usd <= 0").fetchone()[0]
+            total_pnl = self._conn.execute("SELECT COALESCE(SUM(pnl_usd), 0) FROM outcomes").fetchone()[0]
+            max_dd = self._conn.execute("SELECT COALESCE(MIN(pnl_usd), 0) FROM outcomes").fetchone()[0]
+
+        return {
+            "direction_stats": [
+                {"direction": r[0], "total": r[1], "wins": r[2], "avg_pnl": r[3], "total_pnl": r[4]}
+                for r in direction_rows
+            ],
+            "hold_time_stats": [
+                {"bracket": r[0], "total": r[1], "wins": r[2], "avg_pnl": r[3]}
+                for r in hold_time_rows
+            ],
+            "confidence_stats": [
+                {"bracket": r[0], "total": r[1], "wins": r[2], "avg_pnl": r[3]}
+                for r in confidence_rows
+            ],
+            "loss_patterns": [
+                {"exit_reason": r[0], "count": r[1], "total_loss": r[2], "avg_loss": r[3]}
+                for r in loss_rows
+            ],
+            "overall_stats": {
+                "win_rate": (wins / total * 100) if total > 0 else 0,
+                "wins": wins, "total_trades": total,
+                "avg_win": avg_win, "avg_loss": avg_loss,
+                "total_pnl": total_pnl, "max_drawdown": max_dd,
+            },
+        }
+
     def close(self):
         with self._lock:
             self._conn.close()

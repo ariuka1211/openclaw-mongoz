@@ -1052,6 +1052,39 @@ class LighterAPI:
             logging.error(f"Failed to execute SL: {e}")
             return False, None
 
+    async def _cancel_order(self, order_index: str) -> bool:
+        """Cancel an active order by its order_index.
+
+        Returns True if cancellation succeeded, False otherwise.
+        Uses the order_api.cancel_order endpoint.
+        """
+        try:
+            await self._ensure_client()
+            auth = None
+            try:
+                await self._ensure_signer()
+                if self._signer is not None:
+                    from auth_helper import LighterAuthManager
+                    auth_mgr = LighterAuthManager(
+                        signer=self._signer,
+                        account_index=self.cfg.account_index
+                    )
+                    auth = auth_mgr.get_auth_token()
+            except Exception:
+                pass
+
+            await self._order_api.cancel_order(
+                account_index=self.cfg.account_index,
+                order_index=int(order_index),
+                auth=auth,
+                _request_timeout=30,
+            )
+            logging.info(f"✅ Cancelled order {order_index}")
+            return True
+        except Exception as e:
+            logging.warning(f"⚠️ Failed to cancel order {order_index}: {e}")
+            return False
+
     async def close(self):
         """Close all aiohttp sessions."""
         errors = []
@@ -1901,7 +1934,14 @@ class LighterCopilot:
             return False
 
         try:
+            # MED-18: Cancel stale SL order before placing new one
+            if pos.active_sl_order_id:
+                logging.info(f"🗑️ {pos.symbol}: cancelling stale SL order {pos.active_sl_order_id} before AI close")
+                await self.api._cancel_order(pos.active_sl_order_id)
+                pos.active_sl_order_id = None
             sl_success, sl_coi = await self.api.execute_sl(mid_to_close, pos.size, current_price, is_long)
+            if sl_success and sl_coi:
+                pos.active_sl_order_id = sl_coi
         except VolumeQuotaError:
             self._start_volume_quota_cooldown()
             # Track attempts with graduated delay
@@ -2000,7 +2040,14 @@ class LighterCopilot:
                 continue
 
             try:
+                # MED-18: Cancel stale SL order before placing new one
+                if pos.active_sl_order_id:
+                    logging.info(f"🗑️ {pos.symbol}: cancelling stale SL order {pos.active_sl_order_id} before close_all")
+                    await self.api._cancel_order(pos.active_sl_order_id)
+                    pos.active_sl_order_id = None
                 sl_success, sl_coi = await self.api.execute_sl(mid, pos.size, current_price, is_long)
+                if sl_success and sl_coi:
+                    pos.active_sl_order_id = sl_coi
             except VolumeQuotaError:
                 self._start_volume_quota_cooldown()
                 logging.warning(f"⚠️ AI close_all: volume quota exhausted for {pos.symbol} — cooldown started")
@@ -2684,7 +2731,14 @@ class LighterCopilot:
                 return  # Don't remove from tracker, but stop retrying
 
             try:
+                # MED-18: Cancel stale SL order before placing new one
+                if pos.active_sl_order_id:
+                    logging.info(f"🗑️ {pos.symbol}: cancelling stale SL order {pos.active_sl_order_id} before DSL close")
+                    await self.api._cancel_order(pos.active_sl_order_id)
+                    pos.active_sl_order_id = None
                 sl_success, sl_coi = await self.api.execute_sl(mid, pos.size, price, is_long)
+                if sl_success and sl_coi:
+                    pos.active_sl_order_id = sl_coi
             except VolumeQuotaError:
                 self._start_volume_quota_cooldown()
                 # Track attempts with graduated delay (same as failed SL)
@@ -2795,7 +2849,14 @@ class LighterCopilot:
             self._log_outcome(pos, price, action)
         else:
             try:
+                # MED-18: Cancel stale SL order before placing new one
+                if pos.active_sl_order_id:
+                    logging.info(f"🗑️ {pos.symbol}: cancelling stale SL order {pos.active_sl_order_id} before legacy SL")
+                    await self.api._cancel_order(pos.active_sl_order_id)
+                    pos.active_sl_order_id = None
                 sl_success, sl_coi = await self.api.execute_sl(mid, pos.size, price, is_long)
+                if sl_success and sl_coi:
+                    pos.active_sl_order_id = sl_coi
             except VolumeQuotaError:
                 self._start_volume_quota_cooldown()
                 # Track attempts with graduated delay

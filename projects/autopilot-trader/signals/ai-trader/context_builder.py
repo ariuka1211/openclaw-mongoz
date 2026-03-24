@@ -141,18 +141,7 @@ class ContextBuilder:
         within the cooldown window.
         """
         try:
-            cursor = self.db.conn.cursor()
-            cursor.execute('''
-                SELECT o.symbol, o.direction
-                FROM outcomes o
-                INNER JOIN (
-                    SELECT symbol, MAX(timestamp) as max_ts
-                    FROM outcomes
-                    WHERE timestamp > datetime('now', '-2 hours')
-                    GROUP BY symbol
-                ) latest ON o.symbol = latest.symbol AND o.timestamp = latest.max_ts
-            ''')
-            recent_outcomes = {row[0]: row[1] for row in cursor.fetchall()}
+            recent_outcomes = self.db.get_recently_traded_symbols(hours=2)
 
             if not recent_outcomes:
                 return opportunities

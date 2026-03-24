@@ -118,61 +118,81 @@ const PerformanceTab = {
   renderConfChart(data) {
     if (!data || data.error) return;
 
+    const scatter = data.scatter || [];
+    if (scatter.length === 0) return;
+
     const ctx = document.getElementById('pf-confidence-chart').getContext('2d');
-    const stats = data.confidence_stats || data;
 
-    // Try to extract bracket data
-    let brackets = [];
-    if (Array.isArray(stats)) {
-      brackets = stats;
-    } else if (stats.brackets) {
-      brackets = stats.brackets;
-    } else {
-      // Build from available data
-      const keys = Object.keys(stats);
-      for (const k of keys) {
-        const s = stats[k];
-        if (s && typeof s === 'object' && s.win_rate !== undefined) {
-          brackets.push({ bracket: k, win_rate: s.win_rate, trades: s.trades });
-        }
-      }
-    }
-
-    if (brackets.length === 0) return;
+    // Build scatter points: x=confidence, y=1 for win, 0 for loss
+    const winPoints = scatter.filter(t => t.win).map(t => ({ x: t.confidence, y: 1, symbol: t.symbol, pnl: t.pnl }));
+    const lossPoints = scatter.filter(t => !t.win).map(t => ({ x: t.confidence, y: 0, symbol: t.symbol, pnl: t.pnl }));
 
     if (this.confChart) this.confChart.destroy();
 
     this.confChart = new Chart(ctx, {
-      type: 'bar',
+      type: 'scatter',
       data: {
-        labels: brackets.map(b => b.bracket || b.label || '—'),
-        datasets: [{
-          label: 'Win Rate %',
-          data: brackets.map(b => b.win_rate ?? 0),
-          backgroundColor: brackets.map(b =>
-            (b.win_rate ?? 0) >= 60 ? '#3fb950' :
-            (b.win_rate ?? 0) >= 40 ? '#d29922' : '#f85149'
-          ),
-          borderRadius: 4,
-        }]
+        datasets: [
+          {
+            label: 'Win',
+            data: winPoints,
+            backgroundColor: '#3fb950',
+            pointRadius: 7,
+            pointHoverRadius: 10,
+          },
+          {
+            label: 'Loss',
+            data: lossPoints,
+            backgroundColor: '#f85149',
+            pointRadius: 7,
+            pointHoverRadius: 10,
+          }
+        ]
       },
       options: {
         responsive: true,
         maintainAspectRatio: false,
-        plugins: { legend: { display: false } },
+        plugins: {
+          legend: {
+            labels: { color: '#8b949e', usePointStyle: true, pointStyle: 'circle' }
+          },
+          tooltip: {
+            callbacks: {
+              label: ctx => {
+                const p = ctx.raw;
+                return `${p.symbol}: ${p.pnl >= 0 ? '+' : ''}$${fmt(p.pnl)}`;
+              }
+            }
+          }
+        },
         scales: {
           x: {
+            min: 0, max: 1,
+            title: { display: true, text: 'AI Confidence', color: '#8b949e' },
             ticks: { color: '#8b949e' },
-            grid: { display: false }
+            grid: { color: '#21262d' }
           },
           y: {
-            min: 0, max: 100,
-            ticks: { color: '#8b949e', callback: v => v + '%' },
+            min: -0.15, max: 1.15,
+            title: { display: true, text: 'Outcome', color: '#8b949e' },
+            ticks: {
+              color: '#8b949e',
+              callback: v => v === 1 ? 'Win' : v === 0 ? 'Loss' : ''
+            },
             grid: { color: '#21262d' }
           }
         }
       }
     });
+
+    // Update bracket summary below chart if element exists
+    const brackets = data.brackets || [];
+    const summaryEl = document.getElementById('pf-conf-summary');
+    if (summaryEl && brackets.length > 0) {
+      summaryEl.innerHTML = brackets.map(b =>
+        `<span class="stat-label">${b.bracket}:</span> <span class="stat-value">${b.win_rate}% (${b.trades})</span>`
+      ).join(' &nbsp;|&nbsp; ');
+    }
   },
 
   renderPerSymbol(data) {

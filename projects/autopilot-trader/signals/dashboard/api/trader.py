@@ -149,19 +149,50 @@ async def get_equity_curve():
 
 @router.get("/api/trader/confidence-stats")
 async def get_confidence_stats():
-    """Confidence bracket calibration via existing db.py method."""
+    """Confidence calibration data: per-trade confidence vs outcome."""
     if not _db:
         return {"error": "db unavailable"}
     try:
-        raw = _db.get_confidence_bracket_stats()
-        # Compute win_rate for each bracket (JS needs it for chart)
-        brackets = raw.get("confidence_stats", [])
-        for b in brackets:
+        conn = _db.conn
+        # Join outcomes with decisions by symbol + nearest prior open decision
+        # (outcomes.cycle_id is often NULL, so we match by symbol + timestamp)
+        trades = conn.execute(
+            """SELECT o.symbol, o.pnl_usd, o.exit_reason, o.timestamp,
+                      (SELECT d.confidence FROM decisions d
+                       WHERE d.symbol = o.symbol
+                         AND d.action = 'open'
+                         AND d.timestamp <= o.timestamp
+                       ORDER BY d.timestamp DESC LIMIT 1) as confidence
+               FROM outcomes o
+               ORDER BY o.id ASC"""
+        ).fetchall()
+        scatter = []
+        for r in trades:
+            conf = r[4]  # confidence from subquery
+            if conf is None:
+                continue
+            pnl = r[1] or 0
+            scatter.append({
+                "confidence": round(conf, 2),
+                "pnl": round(pnl, 6),
+                "win": pnl > 0,
+                "symbol": r[0],
+                "exit_reason": r[2],
+                "timestamp": r[3],
+            })
+
+        # Bracket stats (keep for summary)
+        brackets_raw = _db.get_confidence_bracket_stats()
+        for b in brackets_raw.get("confidence_stats", []):
             total = b.get("total", 0)
             wins = b.get("wins", 0)
             b["win_rate"] = round(wins / total * 100, 1) if total > 0 else 0
             b["trades"] = total
-        return raw
+
+        return {
+            "scatter": scatter,
+            "brackets": brackets_raw.get("confidence_stats", []),
+        }
     except Exception as e:
         log.error(f"get_confidence_stats error: {e}")
         return {"error": str(e)}

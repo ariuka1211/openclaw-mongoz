@@ -15,6 +15,16 @@ log = logging.getLogger("ai-trader.safety")
 
 
 class SafetyLayer:
+    __slots__ = (
+        'max_positions', 'max_leverage', 'max_size_pct_equity',
+        'max_daily_drawdown_pct', 'max_total_exposure_pct',
+        'min_confidence', 'min_scanner_score', 'required_stop_loss',
+        'min_stop_loss_pct', 'max_orders_per_hour', 'cooldown_after_loss_seconds',
+        'max_consecutive_failures', 'max_rejection_halt_count',
+        'rejection_halt_window_minutes', 'failure_decay_minutes',
+        'db', '_order_timestamps', '_last_loss_time', '_last_failure_time',
+    )
+
     def __init__(self, config: dict, db: DecisionDB):
         cfg = config.get("safety", {})
         self.max_positions = cfg.get("max_positions", 3)
@@ -32,9 +42,11 @@ class SafetyLayer:
         # Kill switch thresholds (from config, not hardcoded)
         self.max_consecutive_failures = config.get("max_consecutive_failures", 5)
         self.max_rejection_halt_count = config.get("max_rejection_halt_count", 15)
+        self.rejection_halt_window_minutes = config.get("rejection_halt_window_minutes", 30)
+        self.failure_decay_minutes = config.get("failure_decay_minutes", 10)
 
         self.db = db
-        self._order_timestamps: list[float] = []
+        self._order_timestamps = []
         self._last_loss_time: float | None = None
         self._last_failure_time: float = 0  # Track last LLM/execution failure for time-based decay
 

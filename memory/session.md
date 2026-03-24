@@ -25,8 +25,12 @@
 - Tools: Tavily/DDG/Exa, defuddle, fxtwitter/vxtwitter for X links
 
 ## State
-- All cleanup done
-- AGENTS.md final at ~80 lines
+- All cleanup done, pushed to main (`afa81d7`)
+- AGENTS.md final at ~85 lines
 - MEMORY.md at 25 lines
 - Crontab: just lighter scanner
 - Scripts remaining: git/, monitoring/, search/
+
+## Next Session
+- Clean up memory/*.md files (some are stale topic-specific files from old system)
+- Decide which daily files to keep vs archive

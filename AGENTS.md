@@ -14,10 +14,15 @@
 3. Read `projects/autopilot-trader/docs/autopilot-trader.md` — trading system
 4. Check `memory/` for today's daily file
 
-**End — 🔴 WRAP UP:** John says "wrap up" → do these:
-1. **Overwrite `memory/session.md`** — fresh handoff for next session. State, decisions, open items, next steps. Start from scratch, don't append.
-2. **Append to `memory/YYYY-MM-DD.md`** — daily record. Add what happened today. This file accumulates across sessions.
-3. **Push to main:** `git add -A && git commit -m "wrap up" && git push origin main`
+**End — 🔴 WRAP UP:** John says "wrap up" → reply with a checklist as each step completes:
+```
+⬜ Overwrite memory/session.md
+⬜ Append to memory/YYYY-MM-DD.md
+⬜ Push to main
+```
+1. **Overwrite `memory/session.md`** — fresh handoff for next session. State, decisions, open items, next steps. Start from scratch, don't append. → ✅ session.md updated
+2. **Append to `memory/YYYY-MM-DD.md`** — daily record. Add what happened today. This file accumulates across sessions. → ✅ YYYY-MM-DD.md updated
+3. **Push to main:** `git add -A && git commit -m "wrap up" && git push origin main` → ✅ pushed
 
 **Memory:**
 - `memory/session.md` — handoff (overwritten at each wrap up)

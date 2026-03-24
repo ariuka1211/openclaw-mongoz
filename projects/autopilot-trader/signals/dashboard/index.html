@@ -3,54 +3,127 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Lighter Bot Dashboard</title>
+<title>Autopilot Trader Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <style>
   :root {
     --bg: #0d1117; --surface: #161b22; --border: #30363d;
     --text: #e6edf3; --muted: #8b949e; --green: #3fb950;
-    --red: #f85149; --yellow: #d29922; --blue: #58a6ff;
-    --purple: #bc8cff;
+    --red: #f85149; --yellow: #d29922; --blue: #58a6ff; --purple: #bc8cff;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
-  .header { padding: 16px 24px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg); color: var(--text); min-height: 100vh;
+  }
+
+  /* Header */
+  .header {
+    padding: 16px 24px; border-bottom: 1px solid var(--border);
+    display: flex; justify-content: space-between; align-items: center;
+    flex-wrap: wrap; gap: 8px;
+  }
   .header h1 { font-size: 18px; font-weight: 600; }
   .header h1 span { color: var(--yellow); }
-  .status-bar { display: flex; gap: 16px; align-items: center; font-size: 13px; color: var(--muted); }
-  .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-  .status-dot.on { background: var(--green); box-shadow: 0 0 6px var(--green); }
-  .status-dot.off { background: var(--red); }
-  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px; padding: 16px 24px; }
-  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
-  .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); margin-bottom: 12px; }
-  .stat-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
+  .header-right { display: flex; gap: 16px; align-items: center; font-size: 13px; color: var(--muted); }
+
+  /* Tabs */
+  .tab-bar {
+    display: flex; border-bottom: 1px solid var(--border);
+    background: var(--surface); overflow-x: auto;
+  }
+  .tab-btn {
+    padding: 12px 20px; font-size: 13px; font-weight: 500;
+    color: var(--muted); background: none; border: none; cursor: pointer;
+    border-bottom: 2px solid transparent; white-space: nowrap;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .tab-btn:hover { color: var(--text); }
+  .tab-btn.active { color: var(--text); border-bottom-color: var(--blue); }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+
+  /* Grid */
+  .grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+    gap: 16px; padding: 16px 24px;
+  }
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 16px;
+  }
+  .card h2 {
+    font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px;
+    color: var(--muted); margin-bottom: 12px;
+  }
+  .wide { grid-column: 1 / -1; }
+
+  /* Stats */
+  .stat-row {
+    display: flex; justify-content: space-between; padding: 6px 0;
+    border-bottom: 1px solid var(--border); font-size: 14px;
+  }
   .stat-row:last-child { border-bottom: none; }
   .stat-label { color: var(--muted); }
   .stat-value { font-weight: 600; font-variant-numeric: tabular-nums; }
   .long { color: var(--green); }
   .short { color: var(--red); }
-  .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+
+  /* Tables */
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th {
+    text-align: left; color: var(--muted); font-weight: 500;
+    padding: 6px 8px; border-bottom: 1px solid var(--border);
+    font-size: 11px; text-transform: uppercase;
+  }
+  td {
+    padding: 8px; border-bottom: 1px solid var(--border);
+    font-variant-numeric: tabular-nums;
+  }
+  tr:last-child td { border-bottom: none; }
+  .empty-row { color: var(--muted); text-align: center; padding: 24px !important; }
+  .sub-score { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  /* Badges */
+  .badge {
+    display: inline-block; padding: 2px 8px; border-radius: 12px;
+    font-size: 11px; font-weight: 600;
+  }
   .badge-green { background: rgba(63,185,80,0.15); color: var(--green); }
   .badge-red { background: rgba(248,81,73,0.15); color: var(--red); }
   .badge-yellow { background: rgba(210,153,34,0.15); color: var(--yellow); }
   .badge-blue { background: rgba(88,166,255,0.15); color: var(--blue); }
-  table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th { text-align: left; color: var(--muted); font-weight: 500; padding: 6px 8px; border-bottom: 1px solid var(--border); font-size: 11px; text-transform: uppercase; }
-  td { padding: 8px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
-  tr:last-child td { border-bottom: none; }
-  .activity-list { max-height: 320px; overflow-y: auto; }
-  .activity-item { padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 13px; display: flex; gap: 8px; }
-  .activity-item:last-child { border-bottom: none; }
-  .activity-time { color: var(--muted); min-width: 55px; font-variant-numeric: tabular-nums; }
-  .error-list { max-height: 200px; overflow-y: auto; }
-  .error-item { padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--red); }
+
+  /* Score bars */
   .score-bar { display: flex; align-items: center; gap: 6px; }
-  .score-fill { height: 6px; border-radius: 3px; background: var(--blue); }
+  .score-fill { height: 6px; border-radius: 3px; }
+
+  /* Status dots */
+  .status-dot {
+    width: 8px; height: 8px; border-radius: 50%; display: inline-block;
+  }
+  .status-dot.on { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .status-dot.off { background: var(--red); }
+
+  /* Scrollable lists */
+  .error-list, .scrollable { max-height: 320px; overflow-y: auto; }
+  .error-item {
+    padding: 6px 0; border-bottom: 1px solid var(--border);
+    font-size: 12px; display: flex; gap: 8px; flex-wrap: wrap;
+  }
+  .error-item:last-child { border-bottom: none; }
+  .activity-time { color: var(--muted); min-width: 55px; font-variant-numeric: tabular-nums; }
+
+  /* Chart containers */
+  .chart-container { position: relative; height: 280px; margin-bottom: 16px; }
+
+  /* Footer / refresh indicator */
   .refresh-note { font-size: 11px; color: var(--muted); }
-  .wide { grid-column: 1 / -1; }
+
   @media (max-width: 700px) {
     .grid { grid-template-columns: 1fr; padding: 12px; }
     .header { padding: 12px; }
+    .tab-btn { padding: 10px 14px; font-size: 12px; }
   }
   ::-webkit-scrollbar { width: 6px; }
   ::-webkit-scrollbar-track { background: var(--surface); }
@@ -60,177 +133,283 @@
 <body>
 
 <div class="header">
-  <h1>⚡ <span>Lighter</span> Bot Dashboard</h1>
-  <div class="status-bar">
-    <span id="bot-status"><span class="status-dot off"></span> Loading...</span>
-    <span id="signal-age"></span>
-    <span class="refresh-note" id="last-refresh"></span>
+  <h1>⚡ <span>Autopilot</span> Trader Dashboard</h1>
+  <div class="header-right">
+    <span class="refresh-note" id="header-time"></span>
   </div>
 </div>
 
-<div class="grid">
-  <!-- Account Overview -->
-  <div class="card" id="account-card">
-    <h2>💰 Account Overview</h2>
-    <div class="stat-row"><span class="stat-label">Balance</span><span class="stat-value" id="acct-balance">—</span></div>
-    <div class="stat-row"><span class="stat-label">Equity</span><span class="stat-value" id="acct-equity">—</span></div>
-    <div class="stat-row"><span class="stat-label">Active Positions</span><span class="stat-value" id="acct-positions">—</span></div>
-    <div class="stat-row"><span class="stat-label">Scaling Factor</span><span class="stat-value" id="acct-scaling">—</span></div>
-  </div>
+<div class="tab-bar">
+  <button class="tab-btn active" data-tab="portfolio">📊 Portfolio</button>
+  <button class="tab-btn" data-tab="trader">🤖 AI Trader</button>
+  <button class="tab-btn" data-tab="performance">📈 Performance</button>
+  <button class="tab-btn" data-tab="scanner">📡 Scanner</button>
+  <button class="tab-btn" data-tab="system">🔧 System</button>
+</div>
 
-  <!-- System Status -->
-  <div class="card">
-    <h2>🔧 System Status</h2>
-    <div class="stat-row"><span class="stat-label">Bot Process</span><span class="stat-value" id="sys-bot">—</span></div>
-    <div class="stat-row"><span class="stat-label">Scanner Age</span><span class="stat-value" id="sys-scanner">—</span></div>
-    <div class="stat-row"><span class="stat-label">Opportunities Found</span><span class="stat-value" id="sys-opps">—</span></div>
-    <div class="stat-row"><span class="stat-label">Max Positions</span><span class="stat-value" id="sys-max">—</span></div>
-  </div>
-
-  <!-- Active Positions -->
-  <div class="card wide" id="positions-card">
-    <h2>📊 Active Positions</h2>
-    <div style="overflow-x:auto;">
-      <table>
-        <thead><tr><th>Market</th><th>Dir</th><th>Entry</th><th>Size</th><th>Lev</th><th>Mode</th></tr></thead>
-        <tbody id="positions-body"><tr><td colspan="6" style="color:var(--muted)">Loading...</td></tr></tbody>
-      </table>
+<!-- ==================== TAB 1: PORTFOLIO ==================== -->
+<div class="tab-content active" id="tab-portfolio">
+  <div class="grid">
+    <div class="card">
+      <h2>💰 Equity</h2>
+      <div class="stat-value" id="p-equity" style="font-size:28px;padding:8px 0">—</div>
+    </div>
+    <div class="card">
+      <h2>📂 Active Positions</h2>
+      <div class="stat-value" style="font-size:28px;padding:8px 0">
+        <span id="p-positions-count">—</span> / <span id="p-positions-max">—</span>
+      </div>
+    </div>
+    <div class="card">
+      <h2>💸 Total Exposure</h2>
+      <div class="stat-value" id="p-exposure" style="font-size:28px;padding:8px 0">—</div>
+    </div>
+    <div class="card">
+      <h2>🕐 Last Update</h2>
+      <div class="stat-value" id="p-last-update" style="font-size:14px;padding:8px 0;color:var(--muted)">—</div>
     </div>
   </div>
-
-  <!-- Signal Queue -->
-  <div class="card wide">
-    <h2>📡 Signal Queue (Top 10)</h2>
-    <div style="overflow-x:auto;">
-      <table>
-        <thead><tr><th>#</th><th>Symbol</th><th>Score</th><th>Dir</th><th>Size (USD)</th><th>Lev</th><th>Price</th><th>Funding 8h</th><th>Vol (USD)</th></tr></thead>
-        <tbody id="signals-body"><tr><td colspan="9" style="color:var(--muted)">Loading...</td></tr></tbody>
-      </table>
+  <div class="grid">
+    <div class="card wide">
+      <h2>📋 Positions</h2>
+      <div style="overflow-x:auto;">
+        <table>
+          <thead><tr><th>Symbol</th><th>Side</th><th>Entry</th><th>Current</th><th>PnL</th><th>ROE%</th><th>Lev</th><th>DSL Tier</th><th>Breaches</th></tr></thead>
+          <tbody id="p-positions-body"><tr><td colspan="9" class="empty-row">Loading...</td></tr></tbody>
+        </table>
+      </div>
     </div>
-  </div>
-
-  <!-- Recent Activity -->
-  <div class="card">
-    <h2>📋 Recent Activity</h2>
-    <div class="activity-list" id="activity-list"><div style="color:var(--muted)">Loading...</div></div>
-  </div>
-
-  <!-- Errors -->
-  <div class="card">
-    <h2>🚨 Recent Errors</h2>
-    <div class="error-list" id="error-list"><div style="color:var(--muted)">Loading...</div></div>
   </div>
 </div>
 
+<!-- ==================== TAB 2: AI TRADER ==================== -->
+<div class="tab-content" id="tab-trader">
+  <div class="grid">
+    <div class="card">
+      <h2>⏱ Last Cycle</h2>
+      <div class="stat-value" id="t-last-cycle" style="font-size:24px;padding:8px 0">—</div>
+    </div>
+    <div class="card">
+      <h2>📊 Decisions Today</h2>
+      <div class="stat-value" id="t-decisions-today" style="font-size:24px;padding:8px 0">—</div>
+    </div>
+    <div class="card">
+      <h2>🚫 Safety Rejections</h2>
+      <div class="stat-value" id="t-rejections" style="font-size:24px;padding:8px 0">—</div>
+    </div>
+    <div class="card">
+      <h2>⚡ Avg LLM Latency</h2>
+      <div class="stat-value" id="t-latency" style="font-size:24px;padding:8px 0">—</div>
+    </div>
+  </div>
+  <div class="grid">
+    <div class="card">
+      <h2>🔌 Status</h2>
+      <div id="t-status" style="padding:8px 0">—</div>
+      <div class="stat-label" style="margin-top:4px">Model: <span id="t-model" class="stat-value">—</span></div>
+    </div>
+  </div>
+  <div class="grid">
+    <div class="card wide">
+      <h2>📋 Recent Decisions</h2>
+      <div style="overflow-x:auto;">
+        <table>
+          <thead><tr><th>Time</th><th>Action</th><th>Symbol</th><th>Direction</th><th>Confidence</th><th>Safety</th><th>Executed</th><th>Latency</th></tr></thead>
+          <tbody id="t-decisions-body"><tr><td colspan="8" class="empty-row">Loading...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== TAB 3: PERFORMANCE ==================== -->
+<div class="tab-content" id="tab-performance">
+  <div class="grid">
+    <div class="card wide">
+      <h2>📈 Equity Curve</h2>
+      <div class="chart-container">
+        <canvas id="pf-equity-chart"></canvas>
+      </div>
+    </div>
+  </div>
+  <div class="grid">
+    <div class="card">
+      <h2>🎯 Win Rate</h2>
+      <div class="stat-value" id="pf-winrate" style="font-size:28px;padding:8px 0">—</div>
+      <div class="stat-label" id="pf-trades-count" style="margin-top:2px"></div>
+    </div>
+    <div class="card">
+      <h2>💵 Total PnL</h2>
+      <div class="stat-value" id="pf-total-pnl" style="font-size:28px;padding:8px 0">—</div>
+    </div>
+    <div class="card">
+      <h2>⚖ Avg Win/Loss</h2>
+      <div class="stat-value" id="pf-winloss" style="font-size:28px;padding:8px 0">—</div>
+    </div>
+    <div class="card">
+      <h2>📉 Max Drawdown</h2>
+      <div class="stat-value" id="pf-maxdd" style="font-size:28px;padding:8px 0">—</div>
+    </div>
+  </div>
+  <div class="grid">
+    <div class="card" id="pf-direction-card">
+      <h2>🧭 PnL by Direction</h2>
+      <table>
+        <thead><tr><th>Direction</th><th>Trades</th><th>Total PnL</th><th>Win Rate</th></tr></thead>
+        <tbody id="pf-direction-body"><tr><td colspan="4" class="empty-row">—</td></tr></tbody>
+      </table>
+    </div>
+    <div class="card">
+      <h2>🚪 PnL by Exit Reason</h2>
+      <table>
+        <thead><tr><th>Reason</th><th>Trades</th><th>Total PnL</th><th>Avg PnL</th></tr></thead>
+        <tbody id="pf-exit-body"><tr><td colspan="4" class="empty-row">—</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+  <div class="grid">
+    <div class="card wide">
+      <h2>📊 Per-Symbol Performance</h2>
+      <div style="overflow-x:auto;">
+        <table>
+          <thead><tr><th>Symbol</th><th>Trades</th><th>Total PnL</th><th>Avg PnL</th><th>Avg Hold</th></tr></thead>
+          <tbody id="pf-symbol-body"><tr><td colspan="5" class="empty-row">—</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <div class="grid">
+    <div class="card wide">
+      <h2>🎯 Confidence Calibration</h2>
+      <div class="chart-container">
+        <canvas id="pf-confidence-chart"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== TAB 4: SCANNER ==================== -->
+<div class="tab-content" id="tab-scanner">
+  <div class="grid">
+    <div class="card">
+      <h2>📊 Total Opportunities</h2>
+      <div class="stat-value" id="sc-total" style="font-size:28px;padding:8px 0">—</div>
+    </div>
+    <div class="card">
+      <h2>🕐 Signal Age</h2>
+      <div class="stat-value" id="sc-age" style="font-size:24px;padding:8px 0">—</div>
+    </div>
+    <div class="card">
+      <h2>📈 Avg Composite Score</h2>
+      <div class="stat-value" id="sc-avg-score" style="font-size:28px;padding:8px 0">—</div>
+    </div>
+  </div>
+  <div class="grid">
+    <div class="card wide">
+      <h2>🏆 Top Opportunities</h2>
+      <div style="overflow-x:auto;">
+        <table>
+          <thead><tr><th>#</th><th>Symbol</th><th>Direction</th><th>Score</th><th>Funding</th><th>Volume</th><th>Momentum</th><th>MA</th><th>OB</th></tr></thead>
+          <tbody id="sc-opps-body"><tr><td colspan="9" class="empty-row">Loading...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <div class="grid">
+    <div class="card">
+      <h2>📊 Score Distribution</h2>
+      <div class="chart-container">
+        <canvas id="sc-dist-chart"></canvas>
+      </div>
+      <div id="sc-component-averages" style="font-size:12px;color:var(--muted);margin-top:8px"></div>
+    </div>
+    <div class="card">
+      <h2>💸 Funding Spread</h2>
+      <div style="overflow-x:auto;">
+        <table>
+          <thead><tr><th>Symbol</th><th>Lighter</th><th>CEX Avg</th><th>Spread</th></tr></thead>
+          <tbody id="sc-funding-body"><tr><td colspan="4" class="empty-row">Loading...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== TAB 5: SYSTEM ==================== -->
+<div class="tab-content" id="tab-system">
+  <div class="grid">
+    <div class="card wide">
+      <h2>🔧 Service Status</h2>
+      <table>
+        <thead><tr><th>Service</th><th>Status</th><th>PID</th><th>Last Activity</th><th>Uptime</th></tr></thead>
+        <tbody id="sys-services-body"><tr><td colspan="5" class="empty-row">Loading...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+  <div class="grid">
+    <div class="card wide">
+      <h2>🚨 Recent Errors</h2>
+      <div class="error-list" id="sys-errors-list"><div style="color:var(--muted)">Loading...</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- Load JS modules first -->
+<script src="/js/store.js"></script>
+<script src="/js/providers.js"></script>
+<script src="/js/portfolio.js"></script>
+<script src="/js/trader.js"></script>
+<script src="/js/performance.js"></script>
+<script src="/js/scanner.js"></script>
+<script src="/js/system.js"></script>
+
+<!-- Init after all modules loaded -->
 <script>
-const REFRESH_MS = 10000;
-
-function fmt(n, d=2) {
-  if (n == null) return '—';
-  return Number(n).toLocaleString('en-US', {minimumFractionDigits:d, maximumFractionDigits:d});
+// ====== Shared helpers ======
+function fmt(n, d) {
+  if (n == null || n === '') return '—';
+  const digits = d !== undefined ? d : 2;
+  return Number(n).toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+}
+function priceFmt(p) {
+  if (p == null) return '—';
+  const n = Number(p);
+  return '$' + n.toLocaleString('en-US', { minimumFractionDigits: n < 1 ? 5 : 2, maximumFractionDigits: n < 1 ? 5 : 2 });
+}
+function esc(s) {
+  if (!s) return '';
+  const d = document.createElement('div');
+  d.textContent = String(s);
+  return d.innerHTML;
 }
 
-function dirBadge(d) {
-  return d === 'long' ? '<span class="badge badge-green">LONG</span>' : '<span class="badge badge-red">SHORT</span>';
+// ====== Tab switching ======
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+  });
+});
+
+// ====== Header clock ======
+function updateClock() {
+  document.getElementById('header-time').textContent = new Date().toLocaleTimeString();
 }
+setInterval(updateClock, 1000);
+updateClock();
 
-function scoreHtml(s) {
-  const color = s >= 65 ? 'var(--green)' : s >= 50 ? 'var(--yellow)' : 'var(--muted)';
-  return `<div class="score-bar"><div class="score-fill" style="width:${s}px;background:${color}"></div><span style="font-size:12px">${s}</span></div>`;
-}
+// ====== Init modules ======
+PortfolioTab.render();
+TraderTab.render();
+PerformanceTab.render();
+ScannerTab.render();
+SystemTab.render();
 
-function actIcon(type) {
-  const map = { signal: '📡', opened: '✅', closed: '🏁', dsl: '⚙️', warning: '⚠️' };
-  return map[type] || '•';
-}
-
-async function refresh() {
-  try {
-    const r = await fetch('/api/dashboard');
-    const d = await r.json();
-
-    // Account
-    document.getElementById('acct-balance').textContent = '$' + fmt(d.account.balance);
-    document.getElementById('acct-equity').textContent = '$' + fmt(d.account.equity);
-    document.getElementById('acct-positions').textContent = d.positions.length;
-    const sf = d.account.scaling_factor;
-    document.getElementById('acct-scaling').textContent = sf ? fmt(sf, 4) + '×' : '—';
-
-    // System
-    const running = d.system.bot_running;
-    document.getElementById('sys-bot').innerHTML = running
-      ? '<span class="badge badge-green">RUNNING</span>'
-      : '<span class="badge badge-red">STOPPED</span>';
-    document.getElementById('sys-scanner').textContent = d.system.signal_age || '—';
-    document.getElementById('sys-opps').textContent = d.system.total_opportunities;
-    const cfg = d.system.config;
-    document.getElementById('sys-max').textContent = cfg.maxConcurrentPositions || '—';
-
-    // Header status
-    document.getElementById('bot-status').innerHTML = running
-      ? '<span class="status-dot on"></span> Bot Online'
-      : '<span class="status-dot off"></span> Bot Offline';
-    document.getElementById('signal-age').textContent = d.system.signal_age ? 'Scanner: ' + d.system.signal_age : '';
-
-    // Positions
-    const pb = document.getElementById('positions-body');
-    if (d.positions.length === 0) {
-      pb.innerHTML = '<tr><td colspan="6" style="color:var(--muted)">No active positions</td></tr>';
-    } else {
-      pb.innerHTML = d.positions.map(p => `<tr>
-        <td><strong>${p.symbol}</strong></td>
-        <td>${dirBadge(p.direction)}</td>
-        <td>$${fmt(p.entry_price, p.entry_price < 1 ? 5 : 2)}</td>
-        <td>${fmt(p.size, 2)}</td>
-        <td>${fmt(p.leverage, 1)}×</td>
-        <td><span class="badge badge-blue">${p.mode}</span></td>
-      </tr>`).join('');
-    }
-
-    // Signals
-    const sb = document.getElementById('signals-body');
-    sb.innerHTML = d.signals.map((s, i) => `<tr>
-      <td style="color:var(--muted)">${i+1}</td>
-      <td><strong>${s.symbol}</strong></td>
-      <td>${scoreHtml(s.score)}</td>
-      <td>${dirBadge(s.direction)}</td>
-      <td>$${fmt(s.position_size_usd, 0)}</td>
-      <td>${fmt(s.leverage, 2)}×</td>
-      <td>$${fmt(s.last_price, s.last_price < 1 ? 5 : 2)}</td>
-      <td style="color:${s.funding_spread >= 0 ? 'var(--green)' : 'var(--red)'}">${s.funding_spread >= 0 ? '+' : ''}${fmt(s.funding_spread, 4)}%</td>
-      <td>$${fmt(s.daily_volume, 0)}</td>
-    </tr>`).join('');
-
-    // Activity
-    const al = document.getElementById('activity-list');
-    if (d.activity.length === 0) {
-      al.innerHTML = '<div style="color:var(--muted)">No recent activity</div>';
-    } else {
-      al.innerHTML = d.activity.slice().reverse().map(a => `<div class="activity-item">
-        <span class="activity-time">${a.time}</span>
-        <span>${actIcon(a.type)} ${a.text}</span>
-      </div>`).join('');
-    }
-
-    // Errors
-    const el = document.getElementById('error-list');
-    if (d.errors.length === 0) {
-      el.innerHTML = '<div style="color:var(--muted)">No recent errors ✓</div>';
-    } else {
-      el.innerHTML = d.errors.slice().reverse().map(e => `<div class="error-item">
-        <span class="activity-time">${e.time}</span> ${e.text}
-      </div>`).join('');
-    }
-
-    document.getElementById('last-refresh').textContent = 'Updated: ' + new Date().toLocaleTimeString();
-  } catch(e) {
-    console.error('Refresh failed:', e);
-    document.getElementById('last-refresh').textContent = 'Refresh failed at ' + new Date().toLocaleTimeString();
-  }
-}
-
-refresh();
-setInterval(refresh, REFRESH_MS);
+// ====== Start polling ======
+startAllProviders();
 </script>
+
 </body>
 </html>

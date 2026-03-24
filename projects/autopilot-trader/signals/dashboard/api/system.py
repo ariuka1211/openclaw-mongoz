@@ -1,0 +1,143 @@
+"""System health endpoints — process checks, file freshness, alerts."""
+
+import json
+import logging
+import os
+import subprocess
+from datetime import datetime, timezone
+from pathlib import Path
+
+from fastapi import APIRouter
+
+log = logging.getLogger("dashboard.api.system")
+
+PROJECT_ROOT = Path("/root/.openclaw/workspace/projects/autopilot-trader")
+BOT_STATE_PATH = PROJECT_ROOT / "executor" / "state" / "bot_state.json"
+SIGNALS_PATH = PROJECT_ROOT / "signals" / "signals.json"
+TRADER_DB_PATH = PROJECT_ROOT / "signals" / "ai-trader" / "state" / "trader.db"
+
+import sys
+sys.path.insert(0, str(PROJECT_ROOT / "signals" / "ai-trader"))
+try:
+    from db import DecisionDB
+    _db = DecisionDB(str(TRADER_DB_PATH))
+except Exception:
+    _db = None
+
+router = APIRouter()
+
+_start_time = datetime.now(timezone.utc)
+
+
+def _pgrep(pattern: str) -> tuple[bool, int | None]:
+    """Check if a process is running. Returns (running, pid)."""
+    try:
+        r = subprocess.run(
+            ["pgrep", "-f", pattern],
+            capture_output=True, text=True, timeout=5
+        )
+        if r.returncode == 0:
+            pids = r.stdout.strip().split()
+            return True, int(pids[0]) if pids else None
+        return False, None
+    except Exception:
+        return False, None
+
+
+def _file_mtime(path: Path) -> str | None:
+    """Get file modification time as ISO string, or None if missing."""
+    try:
+        mtime = os.path.getmtime(path)
+        return datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat()
+    except OSError:
+        return None
+
+
+def _time_ago(iso_str: str | None) -> str | None:
+    if not iso_str:
+        return None
+    try:
+        ts = datetime.fromisoformat(iso_str)
+        delta = datetime.now(timezone.utc) - ts
+        seconds = int(delta.total_seconds())
+        if seconds < 60:
+            return f"{seconds}s ago"
+        minutes = seconds // 60
+        return f"{minutes}m ago"
+    except Exception:
+        return iso_str
+
+
+@router.get("/api/system/health")
+async def get_health():
+    bot_running, bot_pid = _pgrep("bot.py")
+    ai_running, ai_pid = _pgrep("ai_trader")
+    scanner_running, scanner_pid = _pgrep("opportunity-scanner")
+
+    bot_state_mtime = _file_mtime(BOT_STATE_PATH)
+    signals_mtime = _file_mtime(SIGNALS_PATH)
+
+    signals_stale = False
+    try:
+        with open(SIGNALS_PATH) as f:
+            data = json.load(f)
+        ts = data.get("timestamp")
+        if ts:
+            sig_ts = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+            age = (datetime.now(timezone.utc) - sig_ts).total_seconds()
+            signals_stale = age > 600
+    except Exception:
+        pass
+
+    ai_last_cycle = None
+    model = None
+    try:
+        with open(PROJECT_ROOT / "signals" / "ai-decision.json") as f:
+            decision = json.load(f)
+        ai_last_cycle = decision.get("timestamp")
+        model = decision.get("model")
+    except Exception:
+        pass
+
+    uptime_seconds = int((datetime.now(timezone.utc) - _start_time).total_seconds())
+
+    return {
+        "services": {
+            "bot": {
+                "running": bot_running,
+                "pid": bot_pid,
+                "last_state_update": bot_state_mtime,
+                "last_state_ago": _time_ago(bot_state_mtime),
+            },
+            "ai_trader": {
+                "running": ai_running,
+                "pid": ai_pid,
+                "last_cycle": ai_last_cycle,
+                "last_cycle_ago": _time_ago(ai_last_cycle),
+                "model": model,
+            },
+            "scanner": {
+                "running": scanner_running,
+                "pid": scanner_pid,
+                "last_scan": signals_mtime,
+                "last_scan_ago": _time_ago(signals_mtime),
+                "stale": signals_stale,
+            },
+        },
+        "dashboard": {
+            "uptime_seconds": uptime_seconds,
+        },
+        "port": 8080,
+    }
+
+
+@router.get("/api/system/errors")
+async def get_errors(limit: int = 20):
+    """Recent alerts from the DB (alias for alerts endpoint)."""
+    if not _db:
+        return []
+    try:
+        return _db.get_recent_alerts(limit=limit)
+    except Exception as e:
+        log.error(f"get_errors error: {e}")
+        return []

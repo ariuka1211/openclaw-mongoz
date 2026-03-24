@@ -102,6 +102,7 @@ def _gather_quantitative_stats(db) -> str:
             SELECT d2.id FROM decisions d2
             WHERE d2.symbol = o.symbol
               AND d2.timestamp <= o.timestamp
+              AND d2.timestamp > datetime(o.timestamp, '-4 hours')
               AND d2.action = 'open'
               AND d2.executed = 1
             ORDER BY d2.timestamp DESC
@@ -216,19 +217,37 @@ class ReflectionAgent:
             # Append new entry
             combined = existing_content.rstrip() + "\n\n" + new_entry if existing_content.strip() else new_entry
 
-            # Prune to keep file manageable (max ~10000 chars / ~500 lines)
+            # Prune to keep file manageable while preserving permanent patterns
             MAX_CHARS = 10000
             if len(combined) > MAX_CHARS:
                 lines = combined.splitlines()
-                # Keep header/metadata, trim from the oldest entries
-                pruned_lines = []
-                char_count = 0
-                for line in reversed(lines):
-                    char_count += len(line) + 1
-                    if char_count > MAX_CHARS:
+
+                # Split into permanent section (top) and dated entries
+                perm_lines = []
+                dated_lines = []
+                in_permanent = True  # Everything before first dated entry is permanent
+                for line in lines:
+                    if in_permanent and line.startswith("## Learned Patterns ("):
+                        in_permanent = False
+                    if in_permanent:
+                        perm_lines.append(line)
+                    else:
+                        dated_lines.append(line)
+
+                # Rebuild: permanent section + newest dated entries (char-limited)
+                perm_text = "\n".join(perm_lines)
+                result_parts = [perm_text] if perm_lines else []
+                char_count = len(perm_text) + 1 if perm_lines else 0
+
+                # Keep newest dated entries (from the end), prune oldest
+                for line in reversed(dated_lines):
+                    new_count = char_count + len(line) + 1
+                    if char_count > 0 and new_count > MAX_CHARS:
                         break
-                    pruned_lines.insert(0, line)
-                combined = "\n".join(pruned_lines)
+                    result_parts.insert(-1 if result_parts else 0, line)
+                    char_count = new_count
+
+                combined = "\n".join(result_parts)
                 log.info(f"Pruned strategy memory to {len(combined)} chars")
 
             # Atomic write to prevent corruption from concurrent reflection agents

@@ -143,11 +143,14 @@ class ContextBuilder:
         try:
             cursor = self.db.conn.cursor()
             cursor.execute('''
-                SELECT symbol, direction
-                FROM outcomes
-                WHERE timestamp > datetime('now', '-2 hours')
-                GROUP BY symbol
-                ORDER BY timestamp DESC
+                SELECT o.symbol, o.direction
+                FROM outcomes o
+                INNER JOIN (
+                    SELECT symbol, MAX(timestamp) as max_ts
+                    FROM outcomes
+                    WHERE timestamp > datetime('now', '-2 hours')
+                    GROUP BY symbol
+                ) latest ON o.symbol = latest.symbol AND o.timestamp = latest.max_ts
             ''')
             recent_outcomes = {row[0]: row[1] for row in cursor.fetchall()}
 

@@ -123,6 +123,8 @@ class AITrader:
         self._last_sent_decision_id = None
         # ACK timeout — if decision not ACKed after this many seconds, treat as stale
         self._ack_timeout_seconds = config.get("ack_timeout_seconds", 300)
+        # Track last processed outcome timestamp for loss detection (CRITICAL-5)
+        self._last_processed_outcome_ts: str | None = None
 
         # Paths
         self.decision_file = Path(_config_dir) / config["decision_file"]
@@ -272,6 +274,20 @@ class AITrader:
         self._last_state_hash = state_hash
         history = self.context_builder.read_recent_decisions(limit=20)
         outcomes = self.context_builder.read_recent_outcomes(limit=10)
+
+        # CRITICAL-5: Check for new losses and record them for cooldown gate
+        for outcome in outcomes:
+            ts = outcome.get("timestamp", "")
+            if ts and self._last_processed_outcome_ts and ts <= self._last_processed_outcome_ts:
+                continue
+            pnl_usd = outcome.get("pnl_usd", 0)
+            if pnl_usd is not None and pnl_usd < 0:
+                log.info(f"📉 Loss detected: {outcome.get('symbol')} pnl=${pnl_usd:+.2f} — recording for cooldown")
+                self.safety.record_loss()
+            # Update tracker to newest outcome timestamp seen
+            if ts and (self._last_processed_outcome_ts is None or ts > self._last_processed_outcome_ts):
+                self._last_processed_outcome_ts = ts
+
         memory = self.context_builder.read_strategy_memory()
 
         equity = signals_config.get("accountEquity", 1000)

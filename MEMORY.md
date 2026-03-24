@@ -88,3 +88,10 @@
 - [open] (trading) AI-trader medium/low issues pending (7 medium, 4 low) — subagent spawned but completion not yet confirmed. — distilled audit results
 - [fact] (trading) No cancel API exists in the codebase for stale orders — skipped the fix for cancel-before-new-SL and added a TODO instead. — distilled audit results
 
+
+## Session Extract — 2026-03-23 [auto]
+
+- [fact] (trading) 39 audit fixes (5 critical, 8 high, 12 medium, 14 low) for trading services were merged and deployed; lighter-bot and ai-trader restarted successfully post-deploy. — distilled topics
+- [lesson] (system) Service files and runtime artifacts can drift from source; verify venv existence, config.yml presence, and systemd env file paths before assuming a clean restart. — distilled topics
+- [pattern] (trading) Transients 'Server disconnected' warnings during initial balance/position fetch are expected when connecting via proxy; auto-retry handles it—not a code issue. — distilled topics
+

@@ -129,8 +129,15 @@ def evaluate_dsl(state: DSLState, price: float, cfg: DSLConfig) -> str | None:
 
         if state.breach_count >= needed:
             # Enough consecutive breaches → ratchet the floor up permanently
+            ratchet_first_time = state.locked_floor_roe is None
             if state.locked_floor_roe is None or lock_floor_roe > state.locked_floor_roe:
                 state.locked_floor_roe = lock_floor_roe
+
+            # MED-15: Activate stagnation timer on first tier lock (first ratchet)
+            if ratchet_first_time and lock_floor_roe > 0:
+                state.stagnation_active = True
+                state.stagnation_started = now
+                state.high_water_time = now  # Reset so stagnation counts from first profit lock
 
             # Check if we've breached even the locked floor
             if state.locked_floor_roe is not None and roe < state.locked_floor_roe:
@@ -140,11 +147,12 @@ def evaluate_dsl(state: DSLState, price: float, cfg: DSLConfig) -> str | None:
         # Back above floor → reset breach counter
         state.breach_count = 0
 
-    # ── Stagnation check: high ROE but no new high water mark for too long ──
+    # ── Stagnation check: only active after first tier lock ──
+    # MED-15: Timer starts from first profit lock, not from position open.
     # Tracks "time since last new high" rather than "time continuously above threshold."
     # This way, brief dips below stagnation_roe_pct don't reset the timer.
     # Only new highs reset it. Minimum ROE floor avoids exiting losing positions.
-    if roe >= cfg.stagnation_roe_pct and state.high_water_time:
+    if state.stagnation_active and roe >= cfg.stagnation_roe_pct and state.high_water_time:
         elapsed = now - state.high_water_time
         if elapsed >= timedelta(minutes=cfg.stagnation_minutes):
             return "stagnation"

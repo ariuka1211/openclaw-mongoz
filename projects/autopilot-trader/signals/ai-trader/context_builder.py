@@ -135,23 +135,40 @@ class ContextBuilder:
             return [], {}
 
     def _filter_traded_symbols(self, opportunities: list[dict]) -> list[dict]:
-        """Remove opportunities for symbols that were recently traded."""
+        """Remove opportunities for symbols that were recently traded.
+
+        Allows re-entry in the opposite direction — only blocks same-direction trades
+        within the cooldown window.
+        """
         try:
             cursor = self.db.conn.cursor()
             cursor.execute('''
-                SELECT DISTINCT symbol
+                SELECT symbol, direction
                 FROM outcomes
                 WHERE timestamp > datetime('now', '-2 hours')
+                GROUP BY symbol
+                ORDER BY timestamp DESC
             ''')
-            traded_symbols = {row[0] for row in cursor.fetchall()}
+            recent_outcomes = {row[0]: row[1] for row in cursor.fetchall()}
 
-            if not traded_symbols:
+            if not recent_outcomes:
                 return opportunities
 
-            filtered = [o for o in opportunities if o.get('symbol') not in traded_symbols]
+            filtered = []
+            for o in opportunities:
+                symbol = o.get('symbol')
+                if symbol not in recent_outcomes:
+                    filtered.append(o)
+                    continue
+                # Same direction — block (cooldown). Opposite direction — allow re-entry
+                outcome_dir = recent_outcomes[symbol]
+                opp_dir = o.get('direction')
+                if opp_dir and outcome_dir and opp_dir != outcome_dir:
+                    filtered.append(o)  # Opposite direction, allow re-entry
+
             removed = len(opportunities) - len(filtered)
             if removed > 0:
-                log.info(f"Filtered out {removed} traded symbols: {traded_symbols}")
+                log.info(f"Filtered out {removed} recently traded symbols (same direction cooldown)")
 
             return filtered
         except Exception as e:

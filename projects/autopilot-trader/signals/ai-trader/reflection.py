@@ -12,8 +12,6 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-import aiohttp
-
 from context_builder import strip_injection_patterns
 
 logging.basicConfig(
@@ -49,7 +47,7 @@ def _gather_quantitative_stats(db) -> str:
     lines = []
 
     # 1. Win rate by direction
-    rows = db._conn.execute("""
+    rows = db.conn.execute("""
         SELECT direction,
                COUNT(*) as total,
                SUM(CASE WHEN pnl_usd > 0 THEN 1 ELSE 0 END) as wins,
@@ -66,7 +64,7 @@ def _gather_quantitative_stats(db) -> str:
             lines.append(f"- {dir_name or 'unknown'}: {wr:.0f}% ({wins}/{total}), avg=${avg_pnl:+.2f}, total=${total_pnl:+.2f}")
 
     # 2. Win rate by hold time bracket
-    rows = db._conn.execute("""
+    rows = db.conn.execute("""
         SELECT
             CASE
                 WHEN hold_time_seconds < 1800 THEN '<30min'
@@ -89,7 +87,7 @@ def _gather_quantitative_stats(db) -> str:
 
     # 3. Win rate by entry confidence
     # Join: pick the CLOSEST decision before each outcome (not just any within 5 min)
-    rows = db._conn.execute("""
+    rows = db.conn.execute("""
         SELECT
             CASE
                 WHEN d.confidence >= 0.7 THEN 'high (≥0.7)'
@@ -120,7 +118,7 @@ def _gather_quantitative_stats(db) -> str:
             lines.append(f"- {bracket}: {wr:.0f}% ({wins}/{total}), avg=${avg_pnl:+.2f}")
 
     # 4. Biggest loss patterns — exit reasons that dominate losses
-    rows = db._conn.execute("""
+    rows = db.conn.execute("""
         SELECT exit_reason,
                COUNT(*) as total_losses,
                COALESCE(SUM(pnl_usd), 0) as total_loss_usd,
@@ -233,7 +231,10 @@ class ReflectionAgent:
                 combined = "\n".join(pruned_lines)
                 log.info(f"Pruned strategy memory to {len(combined)} chars")
 
-            self.memory_path.write_text(combined)
+            # Atomic write to prevent corruption from concurrent reflection agents
+            tmp_path = str(self.memory_path) + ".tmp"
+            Path(tmp_path).write_text(combined)
+            os.replace(tmp_path, str(self.memory_path))
             log.info(f"Strategy memory updated: {self.memory_path}")
 
         except Exception as e:
@@ -242,34 +243,19 @@ class ReflectionAgent:
             db.close()
 
     async def _call_llm(self, prompt: str) -> str:
-        """Call the reflection model."""
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "model": self.model,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": "You are a trading analyst. Extract actionable patterns from trade outcomes. Be concise and specific.",
-                },
-                {"role": "user", "content": prompt},
-            ],
-            "temperature": 0.4,
-            "max_tokens": 512,
-        }
-
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
-            async with session.post(
-                f"{self.api_base}/chat/completions",
-                headers=headers,
-                json=payload,
-            ) as resp:
-                resp.raise_for_status()
-                data = await resp.json()
-
-        return data["choices"][0]["message"]["content"]
+        """Call the reflection model via LLMClient (reuses aiohttp session)."""
+        from llm_client import LLMClient
+        client = LLMClient(self.config["llm"])
+        try:
+            return await client.call_with_model(
+                model=self.model,
+                system_prompt="You are a trading analyst. Extract actionable patterns from trade outcomes. Be concise and specific.",
+                user_prompt=prompt,
+                temperature=0.4,
+                max_tokens=512,
+            )
+        finally:
+            await client.close()
 
 
 async def main():

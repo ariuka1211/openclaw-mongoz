@@ -109,8 +109,8 @@ class AITrader:
 
         self.cycle_interval = config.get("cycle_interval_seconds", 180)
         self.MAX_CONSECUTIVE_FAILURES = config.get("max_consecutive_failures", 5)
-        self.max_rejection_halt_count = config.get("max_rejection_halt_count", 15)
-        self.rejection_halt_window_minutes = config.get("rejection_halt_window_minutes", 30)
+        self.max_rejection_halt_count = config.get("safety", {}).get("max_rejection_halt_count", 15)
+        self.rejection_halt_window_minutes = config.get("safety", {}).get("rejection_halt_window_minutes", 30)
         self._last_purge_time: float = 0
         self.running = True
         self.emergency_halt = False
@@ -297,6 +297,9 @@ class AITrader:
                 if result and result.get("success") is False:
                     log.warning(f"Bot reported validation failure: {result.get('decision_action')} {result.get('decision_symbol')} -- not retrying")
                     executed = False
+                elif executed and decision.get("action") == "open":
+                    # Only count opens toward rate limit after bot confirms success
+                    self.safety.record_order()
 
         # 7. Log to SQLite
         self.db.log_decision(
@@ -430,12 +433,7 @@ class AITrader:
             log.info(f"📤 Decision written [{decision_id}]: {decision.get('action')} {decision.get('symbol', '')}"
                      + (f" (prev={prev_decision_id})" if prev_decision_id else ""))
 
-            # Only count opens toward the hourly rate limit — closes are the relief valve
-            if decision.get("action") == "open":
-                self.safety.record_order()
-
-            # Losses tracked retroactively via DB outcomes (reflection system),
-            # not at decision time — we don't know PnL until the trade closes
+            # Note: record_order() is called in execute_cycle after bot confirms success
 
             return True
         except Exception as e:
@@ -484,9 +482,10 @@ class AITrader:
                 pass
             atomic_write(self.decision_file, close_all)
             log.info("📤 close_all decision written to bot")
+            self.emergency_halt = True
         except Exception as e:
             log.error(f"Failed to write close_all decision: {e}")
-        self.emergency_halt = True
+            # Don't set emergency_halt — will retry next cycle
 
 
 def main():

@@ -52,20 +52,20 @@ class SafetyLayer:
         if not schema_ok:
             reasons.extend(schema_errors)
 
-        # ── Confidence check ──
+        if action == "open":
+            approved, open_reasons = self._validate_open(decision, positions, signals, equity, reasons)
+        elif action == "close":
+            approved, close_reasons = self._validate_close(decision, positions, reasons)
+        elif action == "close_all":
+            approved = len(reasons) == 0
+        else:
+            reasons.append(f"unknown action: {action}")
+            approved = False
+
+        # ── Confidence check (must apply to ALL actions including close_all) ──
         confidence = decision.get("confidence", 0)
         if confidence < self.min_confidence:
             reasons.append(f"confidence {confidence:.2f} < {self.min_confidence}")
-
-        if action == "open":
-            return self._validate_open(decision, positions, signals, equity, reasons)
-        elif action == "close":
-            return self._validate_close(decision, positions, reasons)
-        elif action == "close_all":
-            # close_all is always approved — emergency action, no additional checks
-            return len(reasons) == 0, reasons
-        else:
-            reasons.append(f"unknown action: {action}")
 
         return len(reasons) == 0, reasons
 

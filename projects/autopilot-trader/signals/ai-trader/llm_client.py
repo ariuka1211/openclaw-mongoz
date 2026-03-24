@@ -156,6 +156,10 @@ class LLMClient:
 
         latency_ms = int((time.time() - t0) * 1000)
 
+        # Check for API-level errors before processing choices
+        if "error" in data:
+            raise RuntimeError(f"LLM API error: {data['error']}")
+
         # Validate response structure
         choices = data.get("choices", [])
         if not choices:

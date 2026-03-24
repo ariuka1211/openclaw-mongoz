@@ -253,6 +253,11 @@ class DecisionDB:
         return row[0] if row else 0
 
     def get_daily_pnl(self) -> float:
+        """Get today's realized PnL from closed outcomes.
+
+        Uses UTC midnight boundaries — 'today' is the current UTC calendar day.
+        All outcome timestamps are stored in UTC ISO format.
+        """
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         start_of_day = f"{today}T00:00:00+00:00"
         end_of_day = f"{today}T23:59:59.999999+00:00"

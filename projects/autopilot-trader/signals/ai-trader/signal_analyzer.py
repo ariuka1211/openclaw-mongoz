@@ -49,7 +49,7 @@ def analyze_signals(db_path: str, output_path: str = "state/signal_weights_sugge
     db = DecisionDB(db_path)
 
     # Get all executed decisions with their signal snapshots
-    rows = db._conn.execute("""
+    rows = db.conn.execute("""
         SELECT d.id, d.symbol, d.timestamp, d.signals_snapshot
         FROM decisions d
         WHERE d.executed = 1 AND d.action = 'open'
@@ -71,7 +71,7 @@ def analyze_signals(db_path: str, output_path: str = "state/signal_weights_sugge
         dec_id, symbol, dec_ts, signals_json = row
 
         # Find matching outcome (same symbol, within 24h after decision)
-        outcome = db._conn.execute("""
+        outcome = db.conn.execute("""
             SELECT pnl_usd FROM outcomes
             WHERE symbol = ?
             AND timestamp > ?
@@ -149,7 +149,7 @@ def analyze_signals(db_path: str, output_path: str = "state/signal_weights_sugge
     # Compute suggested weights based on signal effectiveness
     # Apply power curve (1.5) to amplify meaningful deltas over tiny ones
     # This prevents signals with near-zero delta from getting ~20% weight after normalization
-    deltas = {k: max(0.01, r["delta"] ** 1.5) for k, r in results.items()}
+    deltas = {k: max(0.01, abs(r["delta"]) ** 1.5) for k, r in results.items()}
     total_delta = sum(deltas.values())
     suggested_weights = {k: round(deltas[k] / total_delta, 3) for k in SIGNAL_KEYS}
 

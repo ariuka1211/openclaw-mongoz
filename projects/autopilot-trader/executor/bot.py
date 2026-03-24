@@ -1154,7 +1154,7 @@ class LighterCopilot:
         self._volume_quota_max_backoff: int = 300  # 5 minutes max
         self._last_order_time: float = 0  # for pacing orders in 15s free tx window
         self._last_quota_alert_time: float = 0  # periodic quota status alert (20min)
-        self._quota_alert_interval: float = 1200  # 20 minutes in seconds
+        self._quota_alert_interval: float = 3600  # 1 hour in seconds
         self._last_quota_emergency_warn: float = 0  # rate-limit for quota emergency warnings
         # Kill switch — file-based emergency stop
         self._kill_switch_active = False

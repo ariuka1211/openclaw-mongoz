@@ -14,6 +14,27 @@ from db import DecisionDB
 
 log = logging.getLogger("ai-trader.context")
 
+# ── Token estimation ────────────────────────────────────────────────
+
+try:
+    import tiktoken
+
+    _enc = tiktoken.get_encoding("cl100k_base")
+
+    def estimate_tokens(text: str) -> int:
+        """Estimate token count using cl100k_base encoding."""
+        return len(_enc.encode(text))
+
+except ImportError:
+    log.warning("tiktoken not installed — falling back to char//4 token estimation")
+
+    def estimate_tokens(text: str) -> int:
+        """Fallback token estimation: ~4 chars per token."""
+        return len(text) // 4
+
+
+MAX_PROMPT_TOKENS = 16000
+
 # Add shared/ to path for IPC utilities
 _shared_dir = Path(__file__).resolve().parent.parent.parent / "shared"
 if str(_shared_dir) not in sys.path:
@@ -243,8 +264,11 @@ class ContextBuilder:
         memory: str,
         signals_config: dict,
     ) -> str:
-        """Assemble the LLM user prompt from compressed context."""
+        """Assemble the LLM user prompt from compressed context.
+        Tracks per-section token estimates and enforces MAX_PROMPT_TOKENS.
+        """
         sections = []
+        section_tokens = {}
 
         # 1. Current positions (compressed)
         if positions:
@@ -258,9 +282,11 @@ class ContextBuilder:
                     f"@ {p.get('entry_price', 0):.4f} "
                     f"(ROE: {roe:+.1f}%)"
                 )
-            sections.append("## Open Positions\n" + "\n".join(pos_summary))
+            pos_section = "## Open Positions\n" + "\n".join(pos_summary)
         else:
-            sections.append("## Open Positions\nNone open")
+            pos_section = "## Open Positions\nNone open"
+        section_tokens["positions"] = estimate_tokens(pos_section)
+        sections.append(pos_section)
 
         # 2. Market opportunities (top 10 by score) with funding direction
         top_signals = sorted(signals, key=lambda s: s.get("compositeScore", 0), reverse=True)[:10]
@@ -285,9 +311,11 @@ class ContextBuilder:
                     f"funding={funding:+.3f}% ({funding_note}) vol=${vol/1000:.0f}K "
                     f"mom={mom:+.1f}% {safe_emoji}"
                 )
-            sections.append("## Market Opportunities (Top 10)\n" + "\n".join(sig_lines))
+            sig_section = "## Market Opportunities (Top 10)\n" + "\n".join(sig_lines)
         else:
-            sections.append("## Market Opportunities\nNone available")
+            sig_section = "## Market Opportunities\nNone available"
+        section_tokens["signals"] = estimate_tokens(sig_section)
+        sections.append(sig_section)
 
         # 3. Recent outcomes (last 5 closed trades) with running win rate
         if outcomes:
@@ -300,11 +328,19 @@ class ContextBuilder:
                     f"${o.get('pnl_usd', 0):+.2f} (ROE {roe:+.1f}%) "
                     f"held {o.get('hold_time_seconds', 0) // 60}min"
                 )
-            sections.append("## Recent Trade Outcomes\n" + "\n".join(out_lines))
+            out_section = "## Recent Trade Outcomes\n" + "\n".join(out_lines)
+            section_tokens["outcomes"] = estimate_tokens(out_section)
+            sections.append(out_section)
+        else:
+            section_tokens["outcomes"] = 0
 
-        # 4. Strategy memory (learned patterns — from our own file, no injection risk)
+        # 4. Strategy memory — size guard: truncate further if total would exceed MAX_PROMPT_TOKENS
+        memory_section = ""
         if memory:
-            sections.append(f"## Learned Patterns\n{memory[:10000]}")
+            memory_section = f"## Learned Patterns\n{memory[:10000]}"
+            section_tokens["memory"] = estimate_tokens(memory_section)
+        else:
+            section_tokens["memory"] = 0
 
         # 5. Account state with win rate and timing
         equity = signals_config.get("accountEquity", 1000)
@@ -338,7 +374,7 @@ class ContextBuilder:
         else:
             session = "US"
 
-        sections.append(
+        account_section = (
             f"## Account\n"
             f"- Equity: ${equity:.2f}\n"
             f"- Open positions: {len(positions)}/3 max\n"
@@ -348,6 +384,8 @@ class ContextBuilder:
             f"{last_dec_str}\n"
             f"- Session: {session} ({datetime.now(timezone.utc).strftime('%H:%M')} UTC)"
         )
+        section_tokens["account"] = estimate_tokens(account_section)
+        sections.append(account_section)
 
         # 6. Recent decisions (last 5, for context)
         if history:
@@ -360,7 +398,40 @@ class ContextBuilder:
                     f"conf={h.get('confidence', 0):.1f} {status}"
                     + (f" reason: {sanitized_reason}" if sanitized_reason else "")
                 )
-            sections.append("## Recent Decisions\n" + "\n".join(dec_lines))
+            dec_section = "## Recent Decisions\n" + "\n".join(dec_lines)
+            section_tokens["decisions"] = estimate_tokens(dec_section)
+            sections.append(dec_section)
+        else:
+            section_tokens["decisions"] = 0
+
+        # Size guard: if total estimated tokens exceed MAX_PROMPT_TOKENS, truncate memory
+        total_est = sum(section_tokens.values())
+        if total_est > MAX_PROMPT_TOKENS and memory_section:
+            # Calculate how much budget memory gets after other sections
+            other_tokens = total_est - section_tokens["memory"]
+            budget = MAX_PROMPT_TOKENS - other_tokens - 200  # 200 char safety margin
+            if budget > 500:
+                # Truncate memory section to fit
+                truncated = memory[:budget]
+                memory_section = f"## Learned Patterns\n{truncated}"
+                section_tokens["memory"] = estimate_tokens(memory_section)
+                sections[3] = memory_section  # memory is always index 3
+                total_est = sum(section_tokens.values())
+                log.warning(
+                    f"⚠️ Prompt token estimate {total_est} exceeds MAX_PROMPT_TOKENS={MAX_PROMPT_TOKENS} "
+                    f"— truncated strategy memory to ~{budget} chars"
+                )
+
+        # Log token breakdown
+        log.info(
+            f"Token estimate: total={total_est} "
+            f"(signals={section_tokens.get('signals', 0)}, "
+            f"positions={section_tokens.get('positions', 0)}, "
+            f"outcomes={section_tokens.get('outcomes', 0)}, "
+            f"memory={section_tokens.get('memory', 0)}, "
+            f"account={section_tokens.get('account', 0)}, "
+            f"decisions={section_tokens.get('decisions', 0)})"
+        )
 
         return "\n\n".join(sections)
 

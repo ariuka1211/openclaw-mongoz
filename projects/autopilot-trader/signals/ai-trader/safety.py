@@ -36,6 +36,7 @@ class SafetyLayer:
         self.db = db
         self._order_timestamps: list[float] = []
         self._last_loss_time: float | None = None
+        self._last_failure_time: float = 0  # Track last LLM/execution failure for time-based decay
 
     def validate(self, decision: dict, positions: list, signals: list, equity: float = 1000.0) -> tuple[bool, list[str]]:
         """Validate decision against all safety rules. Returns (approved, reasons)."""

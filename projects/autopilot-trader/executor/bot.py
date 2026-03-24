@@ -1252,6 +1252,9 @@ class LighterCopilot:
         # Restore ephemeral state from disk
         self._load_state()
 
+        # Reconcile state with exchange (runs async, catches errors gracefully)
+        await self._reconcile_state_with_exchange()
+
         loop = asyncio.get_event_loop()
         for sig in (signal.SIGINT, signal.SIGTERM):
             loop.add_signal_handler(sig, self._shutdown)
@@ -3108,6 +3111,101 @@ class LighterCopilot:
                     pass
         except Exception as e:
             logging.warning(f"Failed to load bot state: {e}")
+
+    async def _reconcile_state_with_exchange(self):
+        """Reconcile bot state with actual exchange positions on startup.
+
+        Ensures bot_managed_market_ids and tracker.positions match what's on the exchange.
+        Prevents drift from crashes where state was saved but exchange state diverged.
+
+        - Exchange positions not in state → adopted with fresh DSL state
+        - State positions not on exchange → removed
+        - Positions in both → validated and updated if stale
+        """
+        if not self.api:
+            logging.warning("⚠️ Reconciliation skipped: API not initialized")
+            return
+
+        try:
+            # Fetch current positions from exchange
+            live_positions = await self.api.get_positions()
+
+            # Handle API failure gracefully — don't crash startup
+            if live_positions is None:
+                logging.warning("⚠️ Reconciliation skipped: failed to fetch positions from exchange")
+                return
+
+            # Build market ID sets
+            exchange_mids = {p["market_id"] for p in live_positions}
+            state_mids = set(self.bot_managed_market_ids)
+
+            # Track changes for summary
+            adopted = 0
+            removed = 0
+            confirmed = 0
+            updated = 0
+            changed = False
+
+            # Exchange positions NOT in state → adopt them
+            for pos_data in live_positions:
+                mid = pos_data["market_id"]
+                if mid not in state_mids:
+                    # Adopt this position — it exists on exchange but not in our state
+                    self.bot_managed_market_ids.add(mid)
+                    self.tracker.add_position(
+                        mid,
+                        pos_data["symbol"],
+                        pos_data["side"],
+                        pos_data["entry_price"],
+                        pos_data["size"],
+                        leverage=pos_data.get("leverage"),
+                    )
+                    adopted += 1
+                    changed = True
+                    logging.info(
+                        f"📥 Reconciled adopted: {pos_data['side'].upper()} {pos_data['symbol']} "
+                        f"@ ${pos_data['entry_price']:,.2f}"
+                    )
+                else:
+                    # Position exists in both — validate and update if stale
+                    existing = self.tracker.positions.get(mid)
+                    if existing:
+                        # Update size if stale (use exchange as source of truth)
+                        if abs(existing.size - pos_data["size"]) > 0.001:
+                            logging.info(
+                                f"🔄 Reconciled updated size: {pos_data['symbol']} "
+                                f"state={existing.size} → exchange={pos_data['size']}"
+                            )
+                            existing.size = pos_data["size"]
+                            updated += 1
+                            changed = True
+                        else:
+                            confirmed += 1
+
+            # State positions NOT on exchange → remove them
+            for mid in list(state_mids):
+                if mid not in exchange_mids:
+                    # Remove from state
+                    self.bot_managed_market_ids.discard(mid)
+                    self.tracker.positions.pop(mid, None)
+                    removed += 1
+                    changed = True
+                    logging.info(f"🗑️ Reconciled removed: market_id={mid} (no longer on exchange)")
+
+            # Save state if any changes were made
+            if changed:
+                self._save_state()
+                logging.info(
+                    f"🔄 Reconciled: +{adopted} adopted, -{removed} removed, "
+                    f"={confirmed} confirmed, ~{updated} updated"
+                )
+            else:
+                logging.info(f"✅ Reconciled: all {confirmed} positions match exchange")
+
+        except Exception as e:
+            # Never crash startup due to reconciliation failure
+            logging.warning(f"⚠️ Reconciliation failed (non-fatal): {e}")
+            # Continue with normal startup — _tick() will handle position sync
 
     async def _restore_dsl_state(self, dsl_data: dict, pos: TrackedPosition):
         """Restore saved DSL state onto a live TrackedPosition.

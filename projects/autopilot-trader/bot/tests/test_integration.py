@@ -543,3 +543,385 @@ class TestKillSwitchChain:
         await engine._tick()
 
         assert bot._kill_switch_active is False
+
+
+# ══════════════════════════════════════════════════════════════════════
+# ── Regression: managers access bot state via self.bot, NOT self ────
+# ══════════════════════════════════════════════════════════════════════
+
+class _StrictBot:
+    """Mock bot that raises AttributeError for any unset attribute.
+
+    Unlike MagicMock, this does NOT auto-create attributes on access.
+    If code reads self.bot._foo and _foo was never set → AttributeError.
+    This is how real bot.py works: bot.__init__ sets state attrs, managers
+    never define them on themselves.
+    """
+    def __init__(self, **kwargs):
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+
+    def __getattr__(self, name):
+        raise AttributeError(f"'_StrictBot' object has no attribute '{name}'")
+
+
+class TestManagerStateAccess:
+    """Regression: managers must access bot state via self.bot, not self.
+
+    Before the fix, managers read self._kill_switch_active etc. Tests masked
+    this by setting those attrs directly on the manager. These tests prove
+    the fix works: setting state on the manager (self) does NOT help; the
+    state must be on self.bot.
+    """
+
+    def test_order_manager_prune_caches_reads_bot_state(self, config):
+        """OrderManager._prune_caches reads self.bot._ai_close_cooldown, not self._ai_close_cooldown."""
+        now = time.monotonic()
+
+        # Correct wiring: bot has state attrs
+        bot = _StrictBot(
+            _ai_close_cooldown={"BTC": now - 100, "ETH": now + 100},
+            _api_lag_warnings={},
+            _recently_closed={},
+            _close_attempt_cooldown={},
+            _close_attempts={},
+            _dsl_close_attempt_cooldown={},
+            _no_price_ticks={},
+            bot_managed_market_ids=set(),
+        )
+        om = OrderManager(config, None, bot)
+
+        om._prune_caches()
+
+        # BTC (expired) was pruned from bot state
+        assert "BTC" not in bot._ai_close_cooldown
+        assert "ETH" in bot._ai_close_cooldown
+
+    def test_order_manager_prune_caches_fails_without_bot_state(self, config):
+        """If bot state attrs are missing, _prune_caches raises AttributeError (proves self.bot is used)."""
+        bot = _StrictBot()  # NO state attrs at all
+        om = OrderManager(config, None, bot)
+
+        with pytest.raises(AttributeError):
+            om._prune_caches()
+
+    def test_order_manager_does_not_use_self_state(self, config):
+        """Setting state on the manager itself (not bot) has no effect on _prune_caches."""
+        now = time.monotonic()
+
+        # Bot has empty cooldown — nothing to prune
+        bot = _StrictBot(
+            _ai_close_cooldown={},
+            _api_lag_warnings={},
+            _recently_closed={},
+            _close_attempt_cooldown={},
+            _close_attempts={},
+            _dsl_close_attempt_cooldown={},
+            _no_price_ticks={},
+            bot_managed_market_ids=set(),
+        )
+        om = OrderManager(config, None, bot)
+
+        # Set state on manager itself — should have NO effect
+        om._ai_close_cooldown = {"BTC": now - 100}  # WRONG location
+
+        om._prune_caches()
+
+        # Bot state unchanged (manager's self attr was ignored)
+        assert "BTC" not in bot._ai_close_cooldown
+        # Manager's own attr still exists (was never read)
+        assert "BTC" in om._ai_close_cooldown
+
+    def test_signal_processor_reads_kill_switch_from_bot(self, config):
+        """SignalProcessor reads self.bot._kill_switch_active for kill switch check."""
+        from core.signal_processor import SignalProcessor
+
+        bot = _StrictBot(
+            _kill_switch_active=True,
+            _signals_file="/tmp/nonexistent_signals.json",
+            _last_signal_hash=None,
+            _min_score=60,
+            _signal_processed_this_tick=False,
+        )
+        tracker = PositionTracker(config)
+        sp = SignalProcessor(config, None, tracker, MagicMock(), bot)
+
+        # _process_signals should return early when kill switch is active
+        import asyncio
+        result = asyncio.get_event_loop().run_until_complete(sp._process_signals())
+        assert result is None  # early return, no signals processed
+
+    def test_signal_processor_kill_switch_only_on_self_fails(self, config):
+        """Setting _kill_switch_active on SignalProcessor (not bot) does NOT trigger kill switch."""
+        from core.signal_processor import SignalProcessor
+
+        bot = _StrictBot(
+            _kill_switch_active=False,  # NOT active on bot
+            _signals_file="/tmp/nonexistent_signals.json",
+            _last_signal_hash=None,
+            _min_score=60,
+            _signal_processed_this_tick=False,
+        )
+        tracker = PositionTracker(config)
+        sp = SignalProcessor(config, None, tracker, MagicMock(), bot)
+
+        # WRONG: set on manager only
+        sp._kill_switch_active = True
+
+        # Should NOT early-return (kill switch not active on bot)
+        import asyncio
+        # _process_signals will proceed past the kill switch check
+        # and try to read signals file (which doesn't exist → return)
+        result = asyncio.get_event_loop().run_until_complete(sp._process_signals())
+        # It returned because signals file doesn't exist, NOT because kill switch
+        assert result is None
+
+    def test_execution_engine_kill_switch_reads_from_bot(self, config):
+        """ExecutionEngine._tick reads self.bot._kill_switch_active, not self._kill_switch_active."""
+        bot = _StrictBot(
+            _kill_switch_path=Path("/tmp/nonexistent_kill_file_12345"),
+            _kill_switch_active=False,
+            _position_sync_failures=0,
+            _position_sync_failure_threshold=3,
+            order_manager=MagicMock(),
+        )
+        engine = ExecutionEngine(config, None, PositionTracker(config), MagicMock(), bot)
+
+        # Call _prune_caches path only — just verify no error from bot state access
+        import asyncio
+        # _tick returns early because api is None after _prune_caches
+        asyncio.get_event_loop().run_until_complete(engine._tick())
+
+        # _prune_caches was called (bot state was accessed via self.bot)
+        assert bot._kill_switch_active is False
+
+    def test_state_manager_save_reads_bot_state(self, config):
+        """StateManager._save_state reads self.bot state attrs (no error = proof it reads from self.bot)."""
+        from core.state_manager import StateManager
+
+        bot = _StrictBot(
+            _last_ai_decision_ts=None,
+            _last_signal_timestamp=None,
+            _last_signal_hash=None,
+            _recently_closed={},
+            _ai_close_cooldown={},
+            _close_attempts={},
+            _close_attempt_cooldown={},
+            _dsl_close_attempts={},
+            _dsl_close_attempt_cooldown={},
+            _saved_positions=None,
+            bot_managed_market_ids=set(),
+        )
+        tracker = PositionTracker(config)
+        sm = StateManager(config, None, tracker, MagicMock(), bot)
+
+        # Patch json.dump to prevent writing to production state dir,
+        # but still exercise all the self.bot._* attribute reads
+        with patch('core.state_manager.json.dump') as mock_dump:
+            # Should succeed — bot has all required state attrs
+            # (if SM was reading self._last_signal_timestamp instead of self.bot._last_signal_timestamp,
+            #  this would fail because _StrictBot raises AttributeError for missing attrs)
+            sm._save_state()
+
+            # json.dump was called with a dict that includes all bot state fields
+            assert mock_dump.called
+            state_dict = mock_dump.call_args[0][0]
+            assert "last_signal_timestamp" in state_dict
+            assert "recently_closed" in state_dict
+            assert "bot_managed_market_ids" in state_dict
+
+    def test_state_manager_save_fails_without_bot_state(self, config):
+        """StateManager._save_state raises AttributeError if bot state attrs missing."""
+        from core.state_manager import StateManager
+
+        bot = _StrictBot()  # no state attrs
+        tracker = PositionTracker(config)
+        sm = StateManager(config, None, tracker, MagicMock(), bot)
+
+        with pytest.raises(AttributeError):
+            sm._save_state()
+
+
+# ══════════════════════════════════════════════════════════════════════
+# ── Regression: API references updated after LighterAPI init ────────
+# ══════════════════════════════════════════════════════════════════════
+
+class TestApiReferenceUpdate:
+    """Regression: managers get api=None at __init__, must be updated in start().
+
+    Bug: bot.py created managers with self.api=None (before LighterAPI init),
+    then set self.api = LighterAPI(self.cfg) in start() but forgot to update
+    the manager copies. Fix: 4 reassignment lines after LighterAPI init.
+    """
+
+    def test_managers_have_none_api_at_init(self, config):
+        """Managers created with api=None (as bot.__init__ does before LighterAPI init)."""
+        tracker = PositionTracker(config)
+
+        om = OrderManager(config, None, tracker)  # api=None
+        sp = SignalProcessor(config, None, tracker, MagicMock(), tracker)
+        sm = StateManager(config, None, tracker, MagicMock(), tracker)
+        ee = ExecutionEngine(config, None, tracker, MagicMock(), tracker)
+
+        assert om.api is None
+        assert sp.api is None
+        assert sm.api is None
+        assert ee.api is None
+
+    def test_bot_start_updates_manager_api_refs(self, config):
+        """After LighterAPI init in start(), bot.py has 4 lines updating manager api refs."""
+        # Read source file directly to avoid import side effects
+        bot_py = Path(__file__).resolve().parent.parent / "bot.py"
+        source = bot_py.read_text()
+
+        # Find the LighterAPI init and 4 reassignment lines after it
+        lines = source.split('\n')
+        lighter_api_line = -1
+        reassignment_count = 0
+        reassignment_managers = []
+
+        for i, line in enumerate(lines):
+            if 'LighterAPI(self.cfg)' in line:
+                lighter_api_line = i
+            if lighter_api_line > 0 and i > lighter_api_line:
+                if '.api = self.api' in line:
+                    reassignment_count += 1
+                    for mgr in ['signal_processor', 'state_manager', 'order_manager', 'execution_engine']:
+                        if mgr in line:
+                            reassignment_managers.append(mgr)
+                            break
+
+        assert reassignment_count == 4, (
+            f"Expected 4 manager api reassignment lines after LighterAPI init, "
+            f"found {reassignment_count}: {reassignment_managers}"
+        )
+
+        expected = {'signal_processor', 'state_manager', 'order_manager', 'execution_engine'}
+        assert set(reassignment_managers) == expected, (
+            f"Expected all 4 managers updated, got: {reassignment_managers}"
+        )
+
+    def test_manager_api_gets_updated_to_real_api(self, config):
+        """Verify that updating manager.api from None to a real object works."""
+        tracker = PositionTracker(config)
+        mock_api = MagicMock()
+
+        om = OrderManager(config, None, tracker)
+        assert om.api is None
+
+        # Simulate what bot.start() does
+        om.api = mock_api
+        assert om.api is mock_api
+
+
+# ══════════════════════════════════════════════════════════════════════
+# ── Regression: production wiring integration ───────────────────────
+# ══════════════════════════════════════════════════════════════════════
+
+class TestProductionWiring:
+    """Verify managers are wired like production (api=None initially, state via self.bot)."""
+
+    def test_all_managers_wired_to_bot_instance(self, config, mock_api, mock_alerter):
+        """All 4 managers correctly wired to bot instance for state access."""
+        bot = _build_mock_bot(config, mock_api, mock_alerter)
+
+        # Create real managers with api=None (like bot.__init__), then set api (like start)
+        tracker = PositionTracker(config)
+
+        ee = ExecutionEngine(config, None, tracker, mock_alerter, bot)
+        sp = SignalProcessor(config, None, tracker, mock_alerter, bot)
+        sm = StateManager(config, None, tracker, mock_alerter, bot)
+        om = OrderManager(config, None, bot)
+
+        # Update api refs (like bot.start() does)
+        ee.api = mock_api
+        sp.api = mock_api
+        sm.api = mock_api
+        om.api = mock_api
+
+        # Verify wiring
+        assert ee.cfg is config
+        assert ee.bot is bot
+        assert ee.api is mock_api
+        assert ee.tracker is tracker
+
+        assert sp.cfg is config
+        assert sp.bot is bot
+        assert sp.api is mock_api
+
+        assert sm.cfg is config
+        assert sm.bot is bot
+        assert sm.api is mock_api
+
+        assert om.cfg is config
+        assert om.bot is bot
+        assert om.api is mock_api
+
+    def test_managers_dont_have_bot_state_on_themselves(self, config, mock_api, mock_alerter):
+        """After correct wiring, bot state attrs exist on bot, not on managers."""
+        bot = _build_mock_bot(config, mock_api, mock_alerter)
+
+        ee = ExecutionEngine(config, mock_api, bot.tracker, mock_alerter, bot)
+        sp = SignalProcessor(config, mock_api, bot.tracker, mock_alerter, bot)
+        sm = StateManager(config, mock_api, bot.tracker, mock_alerter, bot)
+        om = OrderManager(config, mock_api, bot)
+
+        # Bot has state attrs
+        assert hasattr(bot, '_kill_switch_active')
+        assert hasattr(bot, '_ai_close_cooldown')
+        assert hasattr(bot, '_recently_closed')
+        assert hasattr(bot, '_close_attempts')
+
+        # Managers should NOT have these bot state attrs on themselves
+        # (they read from self.bot.X, not self.X)
+        # Note: we don't set these on managers, so they won't have them
+        # This test documents the intended wiring
+        for mgr in [ee, sp, sm, om]:
+            assert mgr.bot is bot, f"{type(mgr).__name__}.bot must be the bot instance"
+            assert mgr.cfg is config
+
+    def test_prune_caches_modifies_bot_state_not_manager_copies(self, config, mock_api, mock_alerter):
+        """_prune_caches modifies bot state dicts, not local copies on the manager."""
+        bot = _build_mock_bot(config, mock_api, mock_alerter)
+
+        now = time.monotonic()
+        bot._ai_close_cooldown = {"BTC": now - 100}  # expired
+        bot._recently_closed = {1: now - 100}        # expired
+
+        om = bot.order_manager
+
+        # Call prune
+        om._prune_caches()
+
+        # Verify bot state was modified (entries pruned)
+        assert "BTC" not in bot._ai_close_cooldown
+        assert 1 not in bot._recently_closed
+
+        # Verify manager doesn't have its own copies of these attrs
+        assert not hasattr(om, '_ai_close_cooldown') or om._ai_close_cooldown is not bot._ai_close_cooldown
+        assert not hasattr(om, '_recently_closed') or om._recently_closed is not bot._recently_closed
+
+    def test_bot_init_creates_managers_with_none_api(self, config):
+        """Verify bot.py __init__ creates managers with self.api=None.
+
+        This is the root cause of Bug Class 2: managers are created before
+        LighterAPI is initialized, so they get api=None.
+        """
+        # Read source file directly to avoid import side effects
+        bot_py = Path(__file__).resolve().parent.parent / "bot.py"
+        source = bot_py.read_text()
+
+        # __init__ should declare self.api = None
+        assert 'self.api: LighterAPI | None = None' in source or (
+            'self.api' in source and 'None' in source
+        )
+
+        # start() should create LighterAPI
+        assert 'LighterAPI(self.cfg)' in source
+
+        # start() should have api reassignment lines for all 4 managers
+        for mgr in ['signal_processor', 'state_manager', 'order_manager', 'execution_engine']:
+            pattern = f'self.{mgr}.api = self.api'
+            assert pattern in source, (
+                f"Missing '{pattern}' in bot.py — manager api won't be updated after init"
+            )

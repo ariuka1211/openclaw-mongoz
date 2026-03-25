@@ -197,10 +197,10 @@ class StateManager:
             #   so _tick() processes it normally (otherwise the decision is lost)
             if self.bot._last_ai_decision_ts:
                 try:
-                    current_decision = safe_read_json(Path(self._ai_decision_file))
+                    current_decision = safe_read_json(Path(self.bot._ai_decision_file))
                     if current_decision and current_decision.get("timestamp") == self.bot._last_ai_decision_ts:
                         # Same decision bot was processing before crash — ACK to unblock AI trader
-                        ack_path = str(Path(self._ai_decision_file)) + ".ack"
+                        ack_path = str(Path(self.bot._ai_decision_file)) + ".ack"
                         decision_id = current_decision.get("decision_id", "")
                         with open(ack_path, "w") as f:
                             f.write(decision_id)

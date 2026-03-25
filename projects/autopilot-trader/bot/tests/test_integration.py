@@ -209,10 +209,9 @@ class TestSignalMarketIdResolution:
         """_resolve_market_id finds market_id from tracker positions."""
         bot = _build_mock_bot(config, mock_api, mock_alerter)
         bot.tracker.add_position(42, "ETH", "long", 3000.0, 1.0)
+        bot._signals_file = str(tmp_path / "signals.json")
 
         sp = SignalProcessor(config, mock_api, bot.tracker, mock_alerter, bot)
-        # _resolve_market_id accesses self._signals_file — set it on SP
-        sp._signals_file = str(tmp_path / "signals.json")
         # Also inject safe_read_json since it's not imported in signal_processor
         import core.signal_processor as sp_mod
         if not hasattr(sp_mod, 'safe_read_json'):
@@ -230,8 +229,8 @@ class TestSignalMarketIdResolution:
         }))
 
         bot = _build_mock_bot(config, mock_api, mock_alerter)
+        bot._signals_file = str(signals_file)
         sp = SignalProcessor(config, mock_api, bot.tracker, mock_alerter, bot)
-        sp._signals_file = str(signals_file)
 
         # Inject safe_read_json
         import core.signal_processor as sp_mod
@@ -245,8 +244,8 @@ class TestSignalMarketIdResolution:
     def test_resolve_market_id_returns_none_for_unknown(self, config, mock_api, mock_alerter, tmp_path):
         """_resolve_market_id returns None for unknown symbol."""
         bot = _build_mock_bot(config, mock_api, mock_alerter)
+        bot._signals_file = str(tmp_path / "nonexistent.json")
         sp = SignalProcessor(config, mock_api, bot.tracker, mock_alerter, bot)
-        sp._signals_file = str(tmp_path / "nonexistent.json")
 
         result = sp._resolve_market_id("UNKNOWN")
         assert result is None

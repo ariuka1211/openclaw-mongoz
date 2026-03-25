@@ -72,12 +72,13 @@ def _make_engine(config, mock_api, mock_alerter, mock_bot):
     mock_bot.signal_processor = sp
 
     engine = ExecutionEngine(config, mock_api, tracker, mock_alerter, mock_bot)
-    engine._ai_mode = False
-    engine._result_dirty = False
-    engine._last_quota_alert_time = time.time() + 3600
-    engine._quota_alert_interval = 3600
-    engine._ai_close_cooldown = {}
-    engine._api_lag_warnings = {}
+    # These attributes are now on mock_bot (self.bot._attrname in execution_engine)
+    mock_bot._ai_mode = False
+    mock_bot._result_dirty = False
+    mock_bot._last_quota_alert_time = time.time() + 3600
+    mock_bot._quota_alert_interval = 3600
+    mock_bot._ai_close_cooldown = {}
+    mock_bot._api_lag_warnings = {}
     return engine, tracker
 
 
@@ -230,9 +231,9 @@ class TestApiNotInitialized:
         mock_bot.state_manager = MagicMock()
 
         engine = ExecutionEngine(config, None, tracker, mock_alerter, mock_bot)
-        engine._ai_mode = False
-        engine._last_quota_alert_time = time.time()
-        engine._quota_alert_interval = 3600
+        mock_bot._ai_mode = False
+        mock_bot._last_quota_alert_time = time.time()
+        mock_bot._quota_alert_interval = 3600
 
         await engine._tick()
 

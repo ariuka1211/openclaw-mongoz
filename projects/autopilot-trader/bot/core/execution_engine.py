@@ -143,14 +143,14 @@ class ExecutionEngine:
                     continue
 
                 # Check AI close cooldown before re-tracking
-                cooldown_until = self._ai_close_cooldown.get(symbol)
+                cooldown_until = self.bot._ai_close_cooldown.get(symbol)
                 if cooldown_until and time.monotonic() < cooldown_until:
                     remaining = int(cooldown_until - time.monotonic())
                     # Rate limit API lag warnings (once per minute per symbol)
                     now_mono = time.monotonic()
-                    last_warned = self._api_lag_warnings.get(symbol, 0)
+                    last_warned = self.bot._api_lag_warnings.get(symbol, 0)
                     if now_mono - last_warned > 60:
-                        self._api_lag_warnings[symbol] = now_mono
+                        self.bot._api_lag_warnings[symbol] = now_mono
                         logging.warning(f"🧊 DETECTED {symbol} from Lighter API but AI close cooldown active ({remaining}s) - API lag? IGNORING")
                     continue
 
@@ -224,8 +224,8 @@ class ExecutionEngine:
 
         # Periodic quota status alert (every 20 minutes) — after position sync for accurate counts
         now = time.time()
-        if now - self._last_quota_alert_time > self._quota_alert_interval:
-            self._last_quota_alert_time = now
+        if now - self.bot._last_quota_alert_time > self.bot._quota_alert_interval:
+            self.bot._last_quota_alert_time = now
             api_quota = self.api.volume_quota_remaining if self.api else None
             in_cooldown = False
             if api_quota is not None:
@@ -258,15 +258,15 @@ class ExecutionEngine:
         # MED-4: Refresh position context in result file so AI trader sees current positions
         # even between its own decisions (DSL/SL/TP closes update tracker but not result file)
         # HIGH-10: Clear dirty flag — AI trader has had a full tick to read the result
-        if self._ai_mode:
-            self._result_dirty = False
-        if self._ai_mode and self.tracker.positions:
+        if self.bot._ai_mode:
+            self.bot._result_dirty = False
+        if self.bot._ai_mode and self.tracker.positions:
             self.bot.signal_processor._refresh_position_context()
 
         # 1.5. Process signals — AI mode or rule-based
         # NOTE: Moved AFTER position sync/confirmation so tracker is populated
         # before close_all or other AI decisions execute.
-        if self._ai_mode:
+        if self.bot._ai_mode:
             await self.bot.signal_processor._process_ai_decision()
         else:
             await self.bot.signal_processor._process_signals()

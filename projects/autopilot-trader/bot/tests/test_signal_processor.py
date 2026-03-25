@@ -70,24 +70,8 @@ def _make_processor(config, mock_api, mock_bot):
     # Bot sets self.alerts on the processor (separate from self.alerter)
     sp.alerts = alerter
 
-    # These attributes are normally set by bot on the processor or accessed
-    # directly — set them for isolated testing
-    sp._kill_switch_active = False
-    sp._min_score = 60
-    sp._ai_close_cooldown = {}
-    sp._ai_cooldown_seconds = 300
-    sp._close_attempts = {}
-    sp._close_attempt_cooldown = {}
-    sp._max_close_attempts = 3
-    sp._close_cooldown_seconds = 900
-    sp._sl_retry_delays = [15, 60, 300, 900]
-    sp._last_order_time = 0.0
-    sp._pending_sync = set()
-    sp._verifying_close = set()
-    sp._recently_closed = {}
-    sp._signal_processed_this_tick = False
-    sp._result_dirty = False
-    sp._signals_file = config.signals_file
+    # These attributes are on mock_bot (set via conftest.py), not on sp directly
+    # sp now accesses them via self.bot._attrname
     sp._write_equity_file = MagicMock()  # no-op for testing
     sp._should_pace_orders = MagicMock(return_value=False)  # never pace in tests
     sp._should_skip_open_for_quota = MagicMock(return_value=False)  # never skip for quota
@@ -240,6 +224,7 @@ class TestResolveMarketId:
                 {"symbol": "ETH", "marketId": 99},
             ]
         }))
+        mock_bot._signals_file = str(signals_file)
 
         result = sp._resolve_market_id("ETH")
         assert result == 99
@@ -365,7 +350,8 @@ class TestWriteAiResult:
 
         # Redirect result file to tmp_path
         result_file = tmp_path / "ai_result.json"
-        sp._ai_result_file = result_file
+        mock_bot._ai_result_file = result_file
+        mock_bot._result_dirty = False
 
         # Add a position to tracker
         sp.tracker.add_position(1, "BTC", "long", 50000.0, 0.1)
@@ -393,7 +379,7 @@ class TestKillSwitch:
         mock_api = MagicMock()
         mock_bot = MagicMock()
         sp = _make_processor(config, mock_api, mock_bot)
-        sp._kill_switch_active = True
+        mock_bot._kill_switch_active = True
 
         # Write a valid signals file
         signals_file = Path(config.signals_file)
@@ -407,7 +393,7 @@ class TestKillSwitch:
             "config": {"accountEquity": 1000},
         }))
 
-        sp._signals_file = str(signals_file)
+        mock_bot._signals_file = str(signals_file)
         await sp._process_signals()
 
         # Should not have called open_position
@@ -417,7 +403,7 @@ class TestKillSwitch:
         signals_file.unlink(missing_ok=True)
 
     @pytest.mark.asyncio
-    async def test_processes_when_kill_switch_inactive(self, config, no_sleep):
+    async def test_processes_when_kill_switch_inactive(self, config, mock_bot, no_sleep):
         """_process_signals proceeds when kill switch is inactive."""
         mock_api = MagicMock()
         mock_api.get_price = AsyncMock(return_value=50000.0)
@@ -426,15 +412,15 @@ class TestKillSwitch:
         mock_api.get_price_with_mark_fallback = AsyncMock(return_value=50000.0)
         mock_api.volume_quota_remaining = 100
 
-        mock_bot = MagicMock()
         mock_bot._get_balance = AsyncMock(return_value=1000)
         mock_bot._opened_signals = set()
         mock_bot._last_signal_hash = None
         mock_bot.bot_managed_market_ids = set()
         mock_bot._save_state = MagicMock()
+        mock_bot._min_score = 60
 
         sp = _make_processor(config, mock_api, mock_bot)
-        sp._kill_switch_active = False
+        mock_bot._kill_switch_active = False
 
         signals_file = Path(config.signals_file)
         signals_file.parent.mkdir(parents=True, exist_ok=True)
@@ -447,7 +433,7 @@ class TestKillSwitch:
             "config": {"accountEquity": 1000},
         }))
 
-        sp._signals_file = str(signals_file)
+        mock_bot._signals_file = str(signals_file)
         await sp._process_signals()
 
         # Should have attempted to open
@@ -491,7 +477,7 @@ class TestSignalHashDedup:
         ).hexdigest()[:16]
         mock_bot._last_signal_hash = opp_hash
 
-        sp._signals_file = str(signals_file)
+        mock_bot._signals_file = str(signals_file)
         await sp._process_signals()
 
         # get_price should NOT be called (processing was skipped)
@@ -501,7 +487,7 @@ class TestSignalHashDedup:
         signals_file.unlink(missing_ok=True)
 
     @pytest.mark.asyncio
-    async def test_new_hash_processes(self, config, no_sleep):
+    async def test_new_hash_processes(self, config, mock_bot, no_sleep):
         """New signal content (different hash) triggers processing."""
         mock_api = MagicMock()
         mock_api.get_price = AsyncMock(return_value=50000.0)
@@ -510,12 +496,13 @@ class TestSignalHashDedup:
         mock_api.get_price_with_mark_fallback = AsyncMock(return_value=50000.0)
         mock_api.volume_quota_remaining = 100
 
-        mock_bot = MagicMock()
         mock_bot._last_signal_hash = "old_hash_123456"
         mock_bot._get_balance = AsyncMock(return_value=1000)
         mock_bot._opened_signals = set()
         mock_bot.bot_managed_market_ids = set()
         mock_bot._save_state = MagicMock()
+        mock_bot._min_score = 60
+        mock_bot._kill_switch_active = False
 
         sp = _make_processor(config, mock_api, mock_bot)
 
@@ -528,7 +515,7 @@ class TestSignalHashDedup:
             "config": {"accountEquity": 1000},
         }))
 
-        sp._signals_file = str(signals_file)
+        mock_bot._signals_file = str(signals_file)
         await sp._process_signals()
 
         # get_price SHOULD be called (new hash, processing proceeded)
@@ -569,7 +556,7 @@ class TestMinScoreFilter:
             "config": {"accountEquity": 1000},
         }))
 
-        sp._signals_file = str(signals_file)
+        mock_bot._signals_file = str(signals_file)
 
         # Patch open_position to track calls
         mock_api.open_position = AsyncMock(return_value=True)
@@ -616,7 +603,7 @@ class TestMinScoreFilter:
         }))
 
         mock_api.open_position = AsyncMock(return_value=True)
-        sp._signals_file = str(signals_file)
+        mock_bot._signals_file = str(signals_file)
 
         await sp._process_signals()
 

@@ -60,11 +60,11 @@ class SignalProcessor:
 
     async def _process_signals(self):
         """Read signals.json and open positions for new, unopened signals."""
-        if self._kill_switch_active:
+        if self.bot._kill_switch_active:
             logging.warning("🚫 Kill switch active — _process_signals() skipping new opens")
             return
 
-        signals_path = Path(self._signals_file)
+        signals_path = Path(self.bot._signals_file)
         if not signals_path.exists():
             return
 
@@ -83,7 +83,7 @@ class SignalProcessor:
             return
         self.bot._last_signal_hash = opp_hash
         self.bot._last_signal_timestamp = data.get("timestamp")
-        self._signal_processed_this_tick = True
+        self.bot._signal_processed_this_tick = True
 
         # Auto-detect balance and scale positions proportionally
         balance = await self.bot._get_balance()
@@ -105,7 +105,7 @@ class SignalProcessor:
 
             # Filter by minimum score
             score = opp.get("compositeScore", 0)
-            if score < self._min_score:
+            if score < self.bot._min_score:
                 continue
 
             # Only open if safety checks passed
@@ -125,7 +125,7 @@ class SignalProcessor:
                 continue
 
             # Skip if AI recently closed this symbol (cooldown)
-            cooldown_until = self._ai_close_cooldown.get(symbol)
+            cooldown_until = self.bot._ai_close_cooldown.get(symbol)
             if cooldown_until and time.monotonic() < cooldown_until:
                 remaining = int(cooldown_until - time.monotonic())
                 logging.info(f"🧊 {symbol}: AI close cooldown ({remaining}s remaining) - SKIPPING")
@@ -171,7 +171,7 @@ class SignalProcessor:
 
                     # Fix #13: Add to pending_sync and bot_managed BEFORE verification
                     # to prevent race conditions if _tick() sync cycle runs mid-verification
-                    self._pending_sync.add(mid)
+                    self.bot._pending_sync.add(mid)
                     self.bot.bot_managed_market_ids.add(mid)
 
                     # Verify position exists on exchange (BUG-03 fix)
@@ -276,7 +276,7 @@ class SignalProcessor:
 
     async def _process_ai_decision(self):
         """Read AI decision file and execute if valid."""
-        path = Path(self._ai_decision_file)
+        path = Path(self.bot._ai_decision_file)
         if not path.exists():
             return
 
@@ -295,7 +295,7 @@ class SignalProcessor:
         if ts == self.bot._last_ai_decision_ts:
             return
         self.bot._last_ai_decision_ts = ts
-        self._signal_processed_this_tick = True
+        self.bot._signal_processed_this_tick = True
 
         # HIGH-7: Reject stale AI decisions (>10 minutes old)
         try:
@@ -336,7 +336,7 @@ class SignalProcessor:
 
         # BUG 3: Check if we already processed this decision (duplicate execution guard)
         decision_id = decision.get("decision_id", "")
-        result_path = Path(self._ai_result_file)
+        result_path = Path(self.bot._ai_result_file)
         if result_path.exists() and decision_id:
             existing_result = safe_read_json(result_path)
             if existing_result and existing_result.get("processed_decision_id") == decision_id:
@@ -372,7 +372,7 @@ class SignalProcessor:
 
     async def _execute_ai_open(self, decision: dict) -> bool:
         """Execute an AI-recommended open. Returns True on success."""
-        if self._kill_switch_active:
+        if self.bot._kill_switch_active:
             logging.warning(f"🚫 Kill switch active — AI open blocked for {decision.get('symbol', '?')}")
             return False
 
@@ -400,7 +400,7 @@ class SignalProcessor:
             return False
 
         # Check AI close cooldown — prevent reopening recently closed symbols
-        cooldown_until = self._ai_close_cooldown.get(symbol)
+        cooldown_until = self.bot._ai_close_cooldown.get(symbol)
         if cooldown_until and time.monotonic() < cooldown_until:
             remaining = int(cooldown_until - time.monotonic())
             logging.info(f"🧊 AI open: {symbol} in close cooldown ({remaining}s remaining) - SKIPPING")
@@ -438,7 +438,7 @@ class SignalProcessor:
 
             # Fix #13: Add to pending_sync and bot_managed BEFORE verification
             # to prevent race conditions if _tick() sync cycle runs mid-verification
-            self._pending_sync.add(market_id)
+            self.bot._pending_sync.add(market_id)
             self.bot.bot_managed_market_ids.add(market_id)
 
             # Verify position exists on exchange (BUG-03 fix)
@@ -490,7 +490,7 @@ class SignalProcessor:
             if not price_ok:
                 logging.error(f"❌ AI open: {symbol} — no price after 3 attempts, removing orphaned position")
                 self.tracker.remove_position(market_id)
-                self._pending_sync.discard(market_id)
+                self.bot._pending_sync.discard(market_id)
                 await self.alerts.send(
                     f"❌ *AI OPEN FAILED*\n"
                     f"{direction.upper()} {symbol}\n"
@@ -501,8 +501,8 @@ class SignalProcessor:
 
             logging.info(f"📊 Quota remaining: {self.api.volume_quota_remaining}")
             # Reset close attempt tracking for this symbol
-            self._close_attempts.pop(symbol, None)
-            self._close_attempt_cooldown.pop(symbol, None)
+            self.bot._close_attempts.pop(symbol, None)
+            self.bot._close_attempt_cooldown.pop(symbol, None)
             await self.alerts.send(
                 f"🤖 *AI → OPENED*\n"
                 f"{direction.upper()} {symbol}\n"
@@ -563,7 +563,7 @@ class SignalProcessor:
         Uses progressively longer delays to account for exchange processing time.
         MED-25: Adds market_id to _verifying_close to skip DSL/SL evaluation during verification.
         """
-        self._verifying_close.add(market_id)
+        self.bot._verifying_close.add(market_id)
         try:
             delays = [3, 5, 7, 10]  # MED-25: reduced from [5,10,15,20] — 25s total instead of 50s
             for attempt, delay in enumerate(delays):
@@ -585,7 +585,7 @@ class SignalProcessor:
                     logging.warning(f"⚠️ {symbol}: error verifying closure (attempt {attempt + 1}): {e}")
             return False
         finally:
-            self._verifying_close.discard(market_id)
+            self.bot._verifying_close.discard(market_id)
 
 
 
@@ -679,7 +679,7 @@ class SignalProcessor:
             return False
 
         # Check close attempt cooldown — if we've failed too many times, skip
-        cooldown_until = self._close_attempt_cooldown.get(symbol)
+        cooldown_until = self.bot._close_attempt_cooldown.get(symbol)
         if cooldown_until and time.monotonic() < cooldown_until:
             remaining = int(cooldown_until - time.monotonic())
             logging.info(f"🧊 AI close: {symbol} in close attempt cooldown ({remaining}s remaining) — skipping. Position may need manual intervention.")
@@ -695,7 +695,7 @@ class SignalProcessor:
         if mid_to_close is None:
             logging.info(f"AI close: no position in {symbol}")
             # Reset attempt counter if position is gone
-            self._close_attempts.pop(symbol, None)
+            self.bot._close_attempts.pop(symbol, None)
             return False
 
         pos = self.tracker.positions[mid_to_close]
@@ -714,11 +714,11 @@ class SignalProcessor:
             pos.active_sl_order_id = sl_coi
         if not sl_success:
             # Track attempts with graduated delay
-            attempts = self._close_attempts.get(symbol, 0) + 1
-            self._close_attempts[symbol] = attempts
-            delay_idx = min(attempts - 1, len(self._sl_retry_delays) - 1)
-            retry_delay = self._sl_retry_delays[delay_idx]
-            self._close_attempt_cooldown[symbol] = time.monotonic() + retry_delay
+            attempts = self.bot._close_attempts.get(symbol, 0) + 1
+            self.bot._close_attempts[symbol] = attempts
+            delay_idx = min(attempts - 1, len(self.bot._sl_retry_delays) - 1)
+            retry_delay = self.bot._sl_retry_delays[delay_idx]
+            self.bot._close_attempt_cooldown[symbol] = time.monotonic() + retry_delay
             logging.warning(f"⚠️ Failed to submit close order for {pos.side} {symbol} (attempt {attempts}, retry in {retry_delay}s)")
             return False
 
@@ -728,13 +728,13 @@ class SignalProcessor:
 
         if not position_closed:
             # Increment attempt counter
-            attempts = self._close_attempts.get(symbol, 0) + 1
-            self._close_attempts[symbol] = attempts
-            logging.warning(f"⚠️ {symbol}: close order submitted but position still open (attempt {attempts}/{self._max_close_attempts})")
+            attempts = self.bot._close_attempts.get(symbol, 0) + 1
+            self.bot._close_attempts[symbol] = attempts
+            logging.warning(f"⚠️ {symbol}: close order submitted but position still open (attempt {attempts}/{self.bot._max_close_attempts})")
 
-            if attempts >= self._max_close_attempts:
+            if attempts >= self.bot._max_close_attempts:
                 # Escalate: set cooldown and alert
-                self._close_attempt_cooldown[symbol] = time.monotonic() + self._close_cooldown_seconds
+                self.bot._close_attempt_cooldown[symbol] = time.monotonic() + self.bot._close_cooldown_seconds
                 # CRITICAL-4: Log with estimated price as fallback after all retries exhausted
                 self._log_outcome(pos, current_price, "ai_close", estimated=True)
                 roe = ((current_price - pos.entry_price) / pos.entry_price * 100) if is_long \
@@ -744,20 +744,20 @@ class SignalProcessor:
                     f"{pos.side.upper()} {symbol}\n"
                     f"ROE: {roe:+.1f}%\n"
                     f"Order submitted but NOT filled after {attempts} attempts.\n"
-                    f"Cooldown: {self._close_cooldown_seconds // 60}min — may need manual intervention."
+                    f"Cooldown: {self.bot._close_cooldown_seconds // 60}min — may need manual intervention."
                 )
-                logging.error(f"🚨 {symbol}: max close attempts ({self._max_close_attempts}) reached. Setting {self._close_cooldown_seconds}s cooldown.")
+                logging.error(f"🚨 {symbol}: max close attempts ({self.bot._max_close_attempts}) reached. Setting {self.bot._close_cooldown_seconds}s cooldown.")
             return False
 
         # Position successfully closed — reset attempt counter
-        self._close_attempts.pop(symbol, None)
-        self._close_attempt_cooldown.pop(symbol, None)
+        self.bot._close_attempts.pop(symbol, None)
+        self.bot._close_attempt_cooldown.pop(symbol, None)
 
         fill_price = await self._get_fill_price(mid_to_close, sl_coi)
         exit_price = fill_price if fill_price else current_price
         # CRITICAL-4: Log outcome ONCE with actual fill price after verification
         self._log_outcome(pos, exit_price, "ai_close")
-        self._recently_closed[mid_to_close] = time.monotonic() + 300  # 5 min phantom guard
+        self.bot._recently_closed[mid_to_close] = time.monotonic() + 300  # 5 min phantom guard
         pos.active_sl_order_id = None  # MED-18
         self.bot.bot_managed_market_ids.discard(mid_to_close)
         self.tracker.remove_position(mid_to_close)
@@ -774,8 +774,8 @@ class SignalProcessor:
         logging.info(f"AI closed: {pos.side} {symbol} ROE={roe:+.1f}%")
 
         # Set cooldown — prevent re-opening this symbol for N minutes
-        self._ai_close_cooldown[symbol] = time.monotonic() + self._ai_cooldown_seconds
-        logging.info(f"🧊 {symbol}: AI close cooldown set ({self._ai_cooldown_seconds}s)")
+        self.bot._ai_close_cooldown[symbol] = time.monotonic() + self.bot._ai_cooldown_seconds
+        logging.info(f"🧊 {symbol}: AI close cooldown set ({self.bot._ai_cooldown_seconds}s)")
         return True
 
 
@@ -828,7 +828,7 @@ class SignalProcessor:
                 roe = ((exit_price - pos.entry_price) / pos.entry_price * 100) if is_long \
                     else ((pos.entry_price - exit_price) / pos.entry_price * 100)
                 logging.info(f"Emergency closed: {pos.side} {pos.symbol} ROE={roe:+.1f}%")
-                self._recently_closed[mid] = time.monotonic() + 300
+                self.bot._recently_closed[mid] = time.monotonic() + 300
                 pos.active_sl_order_id = None  # MED-18
                 self.bot.bot_managed_market_ids.discard(mid)
                 self.tracker.remove_position(mid)
@@ -849,7 +849,7 @@ class SignalProcessor:
     def _resolve_market_id(self, symbol: str) -> int | None:
         """Resolve symbol to market_id. Tries scanner signals first, then cached positions."""
         # Try from signals file
-        signals_path = Path(self._signals_file)
+        signals_path = Path(self.bot._signals_file)
         if signals_path.exists():
             # MED-23: Check staleness before using signals for market ID resolution.
             # Stale signals may have wrong market IDs (scanner could have reassigned IDs).
@@ -971,12 +971,12 @@ class SignalProcessor:
                 "positions": positions,
             }
             # Atomic write (same pattern as ai-trader)
-            tmp = str(self._ai_result_file) + ".tmp"
+            tmp = str(self.bot._ai_result_file) + ".tmp"
             with open(tmp, "w") as f:
                 json.dump(result, f, indent=2)
-            os.replace(tmp, str(self._ai_result_file))
+            os.replace(tmp, str(self.bot._ai_result_file))
             # HIGH-10: Mark result as fresh — refresh should not overwrite until next tick
-            self._result_dirty = True
+            self.bot._result_dirty = True
         except Exception as e:
             logging.warning(f"Failed to write AI result: {e}")
 
@@ -991,11 +991,11 @@ class SignalProcessor:
         """
         # HIGH-10: Skip if a fresh AI result was just written — don't overwrite
         # the AI trader's result before it has a chance to read it.
-        if self._result_dirty:
+        if self.bot._result_dirty:
             logging.debug("Refresh skipped: result is dirty (fresh AI result not yet consumed)")
             return
         try:
-            existing = safe_read_json(Path(self._ai_result_file))
+            existing = safe_read_json(Path(self.bot._ai_result_file))
             last_decision_id = existing.get("processed_decision_id") if existing else None
 
             positions = []
@@ -1020,10 +1020,10 @@ class SignalProcessor:
                 "success": existing.get("success", True) if existing else True,
                 "positions": positions,
             }
-            tmp = str(self._ai_result_file) + ".tmp"
+            tmp = str(self.bot._ai_result_file) + ".tmp"
             with open(tmp, "w") as f:
                 json.dump(result, f, indent=2)
-            os.replace(tmp, str(self._ai_result_file))
+            os.replace(tmp, str(self.bot._ai_result_file))
         except Exception as e:
             logging.debug(f"Failed to refresh position context: {e}")
 

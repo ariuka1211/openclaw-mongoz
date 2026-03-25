@@ -527,10 +527,16 @@ class ContextBuilder:
         else:
             session = "US"
 
+        max_pos = self.config.get("safety", {}).get("max_positions", 8)
+        if len(positions) >= max_pos:
+            slots_status = f"⚠️ ALL SLOTS FULL ({len(positions)}/{max_pos}) — DO NOT open new positions. Only consider closing existing ones."
+        else:
+            slots_status = f"- Open positions: {len(positions)}/{max_pos} max"
+
         account_section = (
             f"## Account\n"
             f"- Equity: ${equity:.2f}\n"
-            f"- Open positions: {len(positions)}/8 max\n"
+            f"{slots_status}\n"
             f"- Daily realized PnL: ${self.db.get_daily_pnl():+.2f}\n"
             f"- Win rate: {win_rate:.0f}% ({wins}/{total_trades})\n"
             f"- Avg win: ${avg_win:+.2f} | Avg loss: ${avg_loss:+.2f}\n"

@@ -107,6 +107,7 @@ class AITrader:
         self.safety = SafetyLayer(config, self.db)
         self.llm = LLMClient(config["llm"])
         self.system_prompt, self.decision_template = load_prompts()
+        self.system_prompt = self.system_prompt.format(max_positions=self.safety.max_positions)
 
         self.cycle_interval = config.get("cycle_interval_seconds", 180)
         self.MAX_CONSECUTIVE_FAILURES = config.get("max_consecutive_failures", 5)
@@ -211,12 +212,15 @@ class AITrader:
 
             self.last_cycle_time = time.time()
 
-            # Sleep until next cycle
+            # Sleep until next cycle (interruptible — checks running flag every 2s)
             elapsed = time.time() - start
-            sleep_time = max(0, self.cycle_interval - elapsed)
+            remaining = max(0, self.cycle_interval - elapsed)
             if self.running and not self.emergency_halt:
-                log.info(f"Next cycle in {sleep_time:.0f}s")
-                await asyncio.sleep(sleep_time)
+                log.info(f"Next cycle in {remaining:.0f}s")
+                while remaining > 0 and self.running:
+                    chunk = min(2, remaining)
+                    await asyncio.sleep(chunk)
+                    remaining -= chunk
 
         # Cleanup
         if self.emergency_halt:

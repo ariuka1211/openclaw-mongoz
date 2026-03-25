@@ -31,12 +31,17 @@ An automated crypto perpetual futures trading system running on **Lighter.xyz** 
 │                        ▼                                                │
 │  ┌─────────────────────────────────────────────────┐                    │
 │  │         ② AI TRADER (Python)                     │                    │
-│  │   ai_trader.py — runs every 2 min               │                    │
+│  │   ai_trader.py — thin coordinator, daemon loop   │                    │
 │  │   Components:                                    │                    │
-│  │     • context_builder.py — assembles LLM prompt  │                    │
-│  │     • llm_client.py — calls Kilo Gateway API     │                    │
-│  │     • safety.py — hard rules the LLM can't break │                    │
-│  │     • db.py — SQLite decision journal            │                    │
+│  │     • cycle_runner.py — orchestration pipeline    │                    │
+│  │     • context/ — modular prompt builder           │                    │
+│  │       • data_reader, pattern_engine, stats        │                    │
+│  │       • prompt_builder, sanitizer, token_estimator│                    │
+│  │     • llm/parser.py — response parsing            │                    │
+│  │     • ipc/bot_protocol.py — IPC layer             │                    │
+│  │     • llm_client.py — calls OpenRouter API        │                    │
+│  │     • safety.py — hard rules the LLM can't break  │                    │
+│  │     • db.py — SQLite decision journal             │                    │
 │  │   Outputs: ai-decision.json                      │                    │
 │  └─────────────────────┬───────────────────────────┘                    │
 │                        │ ai-decision.json                               │
@@ -186,23 +191,38 @@ Writes `signals.json` with all qualified opportunities (score ≥ 60, safety pas
 **Language:** Python (async daemon)
 **Service:** `ai-decisions.service`
 
-The LLM-driven decision engine. Runs every 2 minutes (configurable), calls LLM to decide what to trade.
+The LLM-driven decision engine. `ai_trader.py` is now a **thin coordinator** — it handles initialization, daemon loop timing, and calls `cycle_runner.run_cycle()`. All logic is delegated to modular sub-packages:
+
+#### Module Architecture:
+
+| Module | Responsibility |
+|--------|---------------|
+| `ai_trader.py` | Thin coordinator — init, daemon loop, main() |
+| `cycle_runner.py` | Cycle orchestration — context → LLM → parse → safety → IPC → log |
+| `db.py` | SQLite decision journal (unchanged) |
+| `llm_client.py` | OpenRouter LLM client with retry/backoff (unchanged) |
+| `safety.py` | Hard safety rules the LLM can't override (unchanged) |
+| `llm/parser.py` | Parse and validate LLM JSON responses |
+| `context/data_reader.py` | Read signals + positions from files, DB fallback |
+| `context/pattern_engine.py` | Learned pattern rules with decay/reinforcement |
+| `context/stats_formatter.py` | Performance stats + hold regret formatting |
+| `context/prompt_builder.py` | LLM prompt assembly with token budget |
+| `context/sanitizer.py` | Prompt injection detection |
+| `context/token_estimator.py` | Token counting (tiktoken with fallback) |
+| `ipc/bot_protocol.py` | IPC: send decisions, check results, emergency halt |
 
 #### Cycle Flow:
-1. Read `signals.json` (top 15 by score, filtered to exclude recently traded symbols)
-2. Read current positions from `ai-result.json`
-3. Read recent decisions from SQLite (last 20)
-4. Read trade outcomes from SQLite (last 10)
-5. Read strategy memory (`state/strategy_memory.md`)
-6. **Change detection:** SHA-256 hash of top 10 signals + positions. If nothing changed → skip LLM call (saves tokens)
-7. Build compressed prompt via `context_builder.py`
-8. Call LLM via Kilo Gateway API (`api.kilo.ai/api/gateway`)
-9. Parse JSON response, validate schema
-10. Safety check via `safety.py`
-11. If approved → write `ai-decision.json` for bot to consume
-12. Log everything to SQLite
+1. `context/data_reader.py` reads `signals.json` (top 15, filtered) + positions from `ai-result.json`
+2. `context/pattern_engine.py` loads learned patterns from DB
+3. `context/stats_formatter.py` computes performance stats
+4. **Change detection:** SHA-256 hash of top 10 signals + positions. If unchanged → skip LLM call
+5. `context/prompt_builder.py` assembles compressed prompt with token budget
+6. `llm_client.py` calls OpenRouter API
+7. `llm/parser.py` parses and validates JSON response
+8. `safety.py` checks hard rules
+9. `ipc/bot_protocol.py` writes `ai-decision.json` and logs to SQLite
 
-#### Kill Switches:
+#### Kill Switches (in `ipc/bot_protocol.py`):
 - **5 consecutive LLM failures** → emergency halt (writes `close_all` to bot)
 - **15 safety rejections in 30 min** → emergency halt
 - **Daily drawdown > 10%** → emergency halt
@@ -221,19 +241,7 @@ The LLM-driven decision engine. Runs every 2 minutes (configurable), calls LLM t
 }
 ```
 
-### 3.5 Context Builder (`context_builder.py`)
-
-Assembles the LLM prompt from compressed context. Includes:
-- Current positions with ROE
-- Top 10 market opportunities with funding direction
-- Recent trade outcomes (last 5)
-- Learned patterns from strategy memory (sanitized for injection)
-- Account stats (win rate, avg win/loss, daily PnL, session timing)
-- Recent decisions (last 5)
-
-Has a `_filter_traded_symbols()` method that removes symbols traded in the last 2 hours to avoid re-trading losers.
-
-### 3.6 Safety Layer (`safety.py`)
+### 3.5 Safety Layer (`safety.py`)
 
 Hard-coded rules the LLM cannot override. Every decision passes through before reaching the bot.
 
@@ -252,7 +260,7 @@ Hard-coded rules the LLM cannot override. Every decision passes through before r
 | Cooldown after loss | 5 minutes |
 | Liq distance ≥ 2× SL distance | Enforced |
 
-### 3.7 LLM Client (`llm_client.py`)
+### 3.6 LLM Client (`llm_client.py`)
 
 HTTP client for Kilo Gateway API (`api.kilo.ai/api/gateway`). Uses `KILOCODE_API_KEY` JWT.
 - Primary + fallback model (both `xiaomi/mimo-v2-pro`)
@@ -260,7 +268,7 @@ HTTP client for Kilo Gateway API (`api.kilo.ai/api/gateway`). Uses `KILOCODE_API
 - Rate limit handling (429 → 60s backoff)
 - Tracks stats: calls, tokens, latency
 
-### 3.8 Dashboard (`dashboard.py` + `dashboard/index.html`)
+### 3.7 Dashboard (`dashboard.py` + `dashboard/index.html`)
 
 FastAPI web server on port 8080. Endpoints:
 - `/` — HTML dashboard
@@ -269,7 +277,7 @@ FastAPI web server on port 8080. Endpoints:
 - `/api/performance` — win rate, PnL, trade counts
 - `/api/alerts` — recent alerts
 
-### 3.9 Auth Helper (`auth_helper.py`)
+### 3.8 Auth Helper (`auth_helper.py`)
 
 Manages Lighter REST API auth tokens. Tokens are long-lived (6-hour max), generated via `create_auth_token_with_expiry()`. Cached in-memory and on disk (`.auth_token.json`). Auto-refreshes 30 minutes before expiry.
 
@@ -290,12 +298,22 @@ Manages Lighter REST API auth tokens. Tokens are long-lived (6-hour max), genera
                                │ signals.json
                     ┌──────────▼──────────┐
                     │  AI Trader (Python)  │  Every 2 min
-                    │  Reads:              │
-                    │   • signals.json     │
-                    │   • ai-result.json   │  ← bot writes this
-                    │   • SQLite decisions │
-                    │   • SQLite outcomes  │
-                    │   • strategy_memory  │
+                    │  Coordinator:        │
+                    │   • ai_trader.py     │
+                    │   • cycle_runner.py  │
+                    │  Context modules:    │
+                    │   • data_reader      │
+                    │   • pattern_engine   │
+                    │   • prompt_builder   │
+                    │   • stats_formatter  │
+                    │   • sanitizer        │
+                    │   • token_estimator  │
+                    │  Pipeline:           │
+                    │   • llm/parser.py    │
+                    │   • ipc/bot_protocol │
+                    │   • llm_client.py    │
+                    │   • safety.py        │
+                    │   • db.py            │
                     │  Calls: LLM → safety│
                     └──────────┬──────────┘
                                │ ai-decision.json
@@ -321,7 +339,7 @@ Manages Lighter REST API auth tokens. Tokens are long-lived (6-hour max), genera
 | File | Written By | Read By | Format |
 |------|-----------|---------|--------|
 | `signals.json` | Scanner | AI Trader, Bot | `{timestamp, config, opportunities[]}` |
-| `ai-decision.json` | AI Trader | Bot | `{timestamp, action, symbol, direction, size_usd, ...}` |
+| `ai-decision.json` | `ipc/bot_protocol.py` | Bot | `{timestamp, action, symbol, direction, size_usd, ...}` |
 | `ai-result.json` | Bot | AI Trader | `{timestamp, positions[], success, ...}` |
 | `trader.db` | AI Trader, Bot | AI Trader, Reflection | SQLite (decisions, outcomes, alerts tables) |
 | `strategy_memory.md` | Reflection | AI Trader (context) | Markdown |
@@ -571,11 +589,22 @@ systemctl restart ai-trader
 ```
 projects/autopilot-trader/
 ├── ai-decisions/
-│   ├── ai_trader.py          # Main AI daemon
-│   ├── context_builder.py    # LLM prompt assembler
-│   ├── llm_client.py         # Kilo Gateway HTTP client
+│   ├── ai_trader.py          # Thin coordinator — init, daemon loop
+│   ├── cycle_runner.py       # Cycle orchestration pipeline
+│   ├── db.py                 # SQLite decision journal
+│   ├── llm_client.py         # OpenRouter HTTP client
 │   ├── safety.py             # Hard safety rules
-│   ├── db.py                 # SQLite helpers (DecisionDB)
+│   ├── llm/
+│   │   └── parser.py         # Parse LLM JSON responses
+│   ├── context/
+│   │   ├── data_reader.py    # Read signals + positions
+│   │   ├── pattern_engine.py # Learned pattern rules
+│   │   ├── stats_formatter.py# Performance stats + regret
+│   │   ├── prompt_builder.py # Prompt assembly w/ token budget
+│   │   ├── sanitizer.py      # Prompt injection detection
+│   │   └── token_estimator.py# Token counting (tiktoken)
+│   ├── ipc/
+│   │   └── bot_protocol.py   # IPC: decisions, results, halt
 │   ├── config.json           # AI trader config
 │   ├── prompts/
 │   │   ├── system.txt        # System prompt for LLM

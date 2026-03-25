@@ -17,12 +17,19 @@ tail -f projects/autopilot-trader/signals/scanner.log
 | `bot/dsl.py` | Dynamic Stop Loss engine (tiered trailing) |
 | `bot/config.yml` | Bot config (leverage, SL, DSL tiers) |
 | `bot/auth_helper.py` | Lighter REST API auth tokens |
-| `ai-decisions/ai_trader.py` | LLM decision loop (every 2 min) |
-| `ai-decisions/context_builder.py` | Prompt assembly for LLM |
-| `ai-decisions/safety.py` | Hard rules LLM can't override |
-| `ai-decisions/llm_client.py` | Kilo Gateway HTTP client |
-| `ai-decisions/db.py` | SQLite decision journal |
-| `ai-decisions/reflection.py` | Periodic learning loop |
+| `ai-decisions/ai_trader.py` | Thin coordinator — init, daemon loop, main() |
+| `ai-decisions/cycle_runner.py` | Cycle orchestration — context → LLM → parse → safety → IPC → log |
+| `ai-decisions/db.py` | SQLite decision journal (unchanged) |
+| `ai-decisions/llm_client.py` | OpenRouter LLM client (unchanged) |
+| `ai-decisions/safety.py` | Hard safety rules (unchanged) |
+| `ai-decisions/llm/parser.py` | Parse LLM JSON responses |
+| `ai-decisions/context/data_reader.py` | Read signals + positions from files, DB fallback |
+| `ai-decisions/context/pattern_engine.py` | Learned pattern rules with decay/reinforcement |
+| `ai-decisions/context/stats_formatter.py` | Performance stats + hold regret formatting |
+| `ai-decisions/context/prompt_builder.py` | LLM prompt assembly with token budget |
+| `ai-decisions/context/sanitizer.py` | Prompt injection detection |
+| `ai-decisions/context/token_estimator.py` | Token counting (tiktoken with fallback) |
+| `ai-decisions/ipc/bot_protocol.py` | IPC: send decisions, check results, emergency halt |
 | `scanner/opportunity-scanner.ts` | Signal scoring (every 5 min) |
 | `archives/scanner/correlation-guard.ts` | Prevents correlated positions (archived) |
 | `archives/scanner/funding-monitor.ts` | Funding rate dashboard (archived) |
@@ -31,7 +38,7 @@ tail -f projects/autopilot-trader/signals/scanner.log
 | File | Written By | Read By |
 |------|-----------|---------|
 | `signals/signals.json` | Scanner | AI Trader, Bot |
-| `signals/ai-decision.json` | AI Trader | Bot |
+| `signals/ai-decision.json` | `ipc/bot_protocol.py` | Bot |
 | `signals/ai-result.json` | Bot | AI Trader |
 | `bot/state/quota_state.json` | Bot | Bot (restart continuity) |
 

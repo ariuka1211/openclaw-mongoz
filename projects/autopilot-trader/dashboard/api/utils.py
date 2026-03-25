@@ -1,8 +1,20 @@
 """Shared utilities for dashboard API modules."""
 
 import json
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
+
+PROJECT_ROOT = Path("/root/.openclaw/workspace/projects/autopilot-trader")
+TRADER_DB_PATH = PROJECT_ROOT / "ai-decisions" / "state" / "trader.db"
+
+# Add ai-decisions to path for DecisionDB import
+sys.path.insert(0, str(PROJECT_ROOT / "ai-decisions"))
+try:
+    from db import DecisionDB
+    _db = DecisionDB(str(TRADER_DB_PATH))
+except Exception:
+    _db = None
 
 
 def read_json(path: Path) -> dict | list | None:

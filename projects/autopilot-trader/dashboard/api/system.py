@@ -9,22 +9,13 @@ from pathlib import Path
 
 from fastapi import APIRouter
 
-from dashboard.api.utils import time_ago
+from dashboard.api.utils import time_ago, _db
 
 log = logging.getLogger("dashboard.api.system")
 
 PROJECT_ROOT = Path("/root/.openclaw/workspace/projects/autopilot-trader")
 BOT_STATE_PATH = PROJECT_ROOT / "bot" / "state" / "bot_state.json"
 SIGNALS_PATH = PROJECT_ROOT / "ipc" / "signals.json"
-TRADER_DB_PATH = PROJECT_ROOT / "ai-decisions" / "state" / "trader.db"
-
-import sys
-sys.path.insert(0, str(PROJECT_ROOT / "ai-decisions"))
-try:
-    from db import DecisionDB
-    _db = DecisionDB(str(TRADER_DB_PATH))
-except Exception:
-    _db = None
 
 router = APIRouter()
 

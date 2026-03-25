@@ -1,29 +1,17 @@
 """AI Trader + Performance endpoints — queries via DecisionDB."""
 
 import logging
-import sys
 from pathlib import Path
 
 from fastapi import APIRouter, Query
 
-from dashboard.api.utils import read_json, time_ago
+from dashboard.api.utils import read_json, time_ago, _db
 
 log = logging.getLogger("dashboard.api.trader")
 
 PROJECT_ROOT = Path("/root/.openclaw/workspace/projects/autopilot-trader")
-TRADER_DB_PATH = PROJECT_ROOT / "ai-decisions" / "state" / "trader.db"
 AI_DECISION_PATH = PROJECT_ROOT / "ipc" / "ai-decision.json"
-AI_RESULT_PATH = PROJECT_ROOT / "ipc" / "ai-result.json"
 BOT_STATE_PATH = PROJECT_ROOT / "bot" / "state" / "bot_state.json"
-
-# Import DecisionDB from ai-decisions
-sys.path.insert(0, str(PROJECT_ROOT / "ai-decisions"))
-try:
-    from db import DecisionDB
-    _db = DecisionDB(str(TRADER_DB_PATH))
-except Exception as e:
-    log.error(f"Failed to load DecisionDB: {e}")
-    _db = None
 
 router = APIRouter()
 
@@ -83,17 +71,6 @@ async def get_performance():
     except Exception as e:
         log.error(f"get_performance error: {e}")
         return {"error": str(e)}
-
-
-@router.get("/api/trader/alerts")
-async def get_alerts(limit: int = Query(default=20, ge=1, le=100)):
-    if not _db:
-        return []
-    try:
-        return _db.get_recent_alerts(limit=limit)
-    except Exception as e:
-        log.error(f"get_alerts error: {e}")
-        return []
 
 
 @router.get("/api/trader/equity-curve")

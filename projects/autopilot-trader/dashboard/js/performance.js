@@ -32,28 +32,6 @@ const PerformanceTab = {
       ? '$' + fmt(p.max_drawdown)
       : '—';
 
-    // Direction breakdown — hide if no data
-    const byDir = p.by_direction;
-    const dirSection = document.getElementById('pf-direction-card');
-    const dirBody = document.getElementById('pf-direction-body');
-    if (!byDir || Object.keys(byDir).length === 0) {
-      if (dirSection) dirSection.style.display = 'none';
-    } else {
-      if (dirSection) dirSection.style.display = '';
-      dirBody.innerHTML = Object.entries(byDir).map(([dir, stats]) => {
-        const badge = dir === 'long'
-          ? '<span class="badge badge-green">LONG</span>'
-          : '<span class="badge badge-red">SHORT</span>';
-        const pnlSign = stats.total_pnl >= 0 ? '+' : '';
-        const pnlClass = stats.total_pnl >= 0 ? 'long' : 'short';
-        return `<tr>
-          <td>${badge}</td>
-          <td>${stats.trades ?? 0}</td>
-          <td class="${pnlClass}">${pnlSign}$${fmt(stats.total_pnl ?? 0)}</td>
-          <td>${stats.win_rate != null ? fmt(stats.win_rate, 0) + '%' : '—'}</td>
-        </tr>`;
-      }).join('') || '<tr><td colspan="4" class="empty-row">No data</td></tr>';
-    }
   },
 
   renderEquityChart(data) {

@@ -189,19 +189,6 @@ class LLMClient:
 
         return CallResult(content=content, tokens_in=tokens_in, tokens_out=tokens_out)
 
-    async def call_with_model(
-        self,
-        model: str,
-        system_prompt: str,
-        user_prompt: str,
-        temperature: float = 0.3,
-        max_tokens: int = 1024,
-    ) -> CallResult:
-        """Call a specific model (used for reflection with cheaper model)."""
-        return await self.call(
-            system_prompt, user_prompt, model=model, temperature=temperature, max_tokens=max_tokens
-        )
-
     async def close(self):
         """Close the reusable aiohttp session to prevent resource leaks."""
         if self._session is not None and not self._session.closed:

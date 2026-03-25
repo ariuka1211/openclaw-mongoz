@@ -10,7 +10,7 @@ from fastapi import APIRouter
 log = logging.getLogger("dashboard.api.portfolio")
 
 PROJECT_ROOT = Path("/root/.openclaw/workspace/projects/autopilot-trader")
-BOT_STATE_PATH = PROJECT_ROOT / "executor" / "state" / "bot_state.json"
+BOT_STATE_PATH = PROJECT_ROOT / "bot" / "state" / "bot_state.json"
 SIGNALS_PATH = PROJECT_ROOT / "ipc" / "signals.json"
 
 router = APIRouter()

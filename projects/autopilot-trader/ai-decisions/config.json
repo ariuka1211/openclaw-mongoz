@@ -14,7 +14,6 @@
   "llm": {
     "primary_model": "minimax/minimax-m2.5",
     "fallback_model": "openrouter/deepseek/deepseek-chat",
-    "reflection_model": "minimax/minimax-m2.5",
     "api_base": "https://api.kilo.ai/api/gateway",
     "timeout_seconds": 60,
     "max_retries": 2
@@ -32,16 +31,5 @@
     "min_stop_loss_pct": 0.5,
     "max_orders_per_hour": 50,
     "cooldown_after_loss_seconds": 300
-  },
-
-  "dashboard": {
-    "host": "0.0.0.0",
-    "port": 8080
-  },
-
-  "alerting": {
-    "alert_on_open": true,
-    "alert_on_close": true,
-    "alert_on_halt": true
   }
 }

@@ -11,13 +11,13 @@ from fastapi import APIRouter, Query
 log = logging.getLogger("dashboard.api.trader")
 
 PROJECT_ROOT = Path("/root/.openclaw/workspace/projects/autopilot-trader")
-TRADER_DB_PATH = PROJECT_ROOT / "signals" / "ai-trader" / "state" / "trader.db"
+TRADER_DB_PATH = PROJECT_ROOT / "ai-decisions" / "state" / "trader.db"
 AI_DECISION_PATH = PROJECT_ROOT / "ipc" / "ai-decision.json"
 AI_RESULT_PATH = PROJECT_ROOT / "ipc" / "ai-result.json"
-BOT_STATE_PATH = PROJECT_ROOT / "executor" / "state" / "bot_state.json"
+BOT_STATE_PATH = PROJECT_ROOT / "bot" / "state" / "bot_state.json"
 
-# Import DecisionDB from ai-trader
-sys.path.insert(0, str(PROJECT_ROOT / "signals" / "ai-trader"))
+# Import DecisionDB from ai-decisions
+sys.path.insert(0, str(PROJECT_ROOT / "ai-decisions"))
 try:
     from db import DecisionDB
     _db = DecisionDB(str(TRADER_DB_PATH))
@@ -60,7 +60,7 @@ async def get_trader_status():
 
     equity = None
     if state:
-        signals = _read_json(PROJECT_ROOT / "signals" / "signals.json")
+        signals = _read_json(PROJECT_ROOT / "ipc" / "signals.json")
         if signals and "config" in signals:
             equity = signals["config"].get("accountEquity")
 

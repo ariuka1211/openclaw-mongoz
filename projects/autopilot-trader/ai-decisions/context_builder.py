@@ -239,19 +239,6 @@ class ContextBuilder:
 
         return []
 
-    def read_strategy_memory(self) -> str:
-        """Read learned patterns from strategy memory file (truncated to save tokens)."""
-        if not self.memory_file.exists():
-            return ""
-        try:
-            content = self.memory_file.read_text().strip()
-            # Truncate to last 10000 chars to keep prompt size manageable
-            if len(content) > 10000:
-                content = "..." + content[-10000:]
-            return content
-        except OSError:
-            return ""
-
     # ── Pattern rules with decay ──────────────────────────────────────
 
     def _load_patterns(self) -> dict:

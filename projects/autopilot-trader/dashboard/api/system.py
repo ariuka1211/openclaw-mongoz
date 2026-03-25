@@ -12,9 +12,9 @@ from fastapi import APIRouter
 log = logging.getLogger("dashboard.api.system")
 
 PROJECT_ROOT = Path("/root/.openclaw/workspace/projects/autopilot-trader")
-BOT_STATE_PATH = PROJECT_ROOT / "executor" / "state" / "bot_state.json"
+BOT_STATE_PATH = PROJECT_ROOT / "bot" / "state" / "bot_state.json"
 SIGNALS_PATH = PROJECT_ROOT / "ipc" / "signals.json"
-TRADER_DB_PATH = PROJECT_ROOT / "signals" / "ai-trader" / "state" / "trader.db"
+TRADER_DB_PATH = PROJECT_ROOT / "ai-decisions" / "state" / "trader.db"
 
 import sys
 sys.path.insert(0, str(PROJECT_ROOT / "ai-decisions"))
@@ -92,7 +92,7 @@ async def get_health():
     ai_last_cycle = None
     model = None
     try:
-        with open(PROJECT_ROOT / "signals" / "ai-decision.json") as f:
+        with open(PROJECT_ROOT / "ipc" / "ai-decision.json") as f:
             decision = json.load(f)
         ai_last_cycle = decision.get("timestamp")
         model = decision.get("model")

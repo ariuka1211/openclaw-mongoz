@@ -22,7 +22,6 @@ function startAllProviders() {
   // AI Trader
   startPolling('traderStatus', '/api/trader/status', 10000);
   startPolling('decisions', '/api/trader/decisions?n=30', 10000);
-  startPolling('traderAlerts', '/api/trader/alerts?limit=20', 10000);
 
   // Performance
   startPolling('performance', '/api/trader/performance', 30000);

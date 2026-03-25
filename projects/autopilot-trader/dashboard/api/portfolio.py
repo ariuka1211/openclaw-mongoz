@@ -1,11 +1,11 @@
 """Portfolio endpoints — read bot_state.json, compute unrealized PnL."""
 
-import json
 import logging
-from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter
+
+from dashboard.api.utils import read_json
 
 log = logging.getLogger("dashboard.api.portfolio")
 
@@ -16,18 +16,9 @@ SIGNALS_PATH = PROJECT_ROOT / "ipc" / "signals.json"
 router = APIRouter()
 
 
-def _read_json(path: Path) -> dict | list | None:
-    try:
-        with open(path) as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError) as e:
-        log.warning(f"Failed to read {path}: {e}")
-        return None
-
-
 def _get_signals_price_map() -> dict:
     """Build symbol->lastPrice map from signals.json."""
-    data = _read_json(SIGNALS_PATH)
+    data = read_json(SIGNALS_PATH)
     if not data:
         return {}
     return {
@@ -55,7 +46,7 @@ def _compute_unrealized_pnl(position: dict, current_price: float) -> float:
 
 @router.get("/api/portfolio")
 async def get_portfolio():
-    state = _read_json(BOT_STATE_PATH)
+    state = read_json(BOT_STATE_PATH)
     if not state:
         return {
             "positions": [],
@@ -113,8 +104,8 @@ async def get_portfolio():
 
 @router.get("/api/portfolio/summary")
 async def get_portfolio_summary():
-    state = _read_json(BOT_STATE_PATH)
-    signals = _read_json(SIGNALS_PATH)
+    state = read_json(BOT_STATE_PATH)
+    signals = read_json(SIGNALS_PATH)
 
     equity = 0.0
     if signals and "config" in signals:

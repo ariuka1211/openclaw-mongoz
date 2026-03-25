@@ -1,12 +1,12 @@
 """AI Trader + Performance endpoints — queries via DecisionDB."""
 
-import json
 import logging
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Query
+
+from dashboard.api.utils import read_json, time_ago
 
 log = logging.getLogger("dashboard.api.trader")
 
@@ -28,46 +28,21 @@ except Exception as e:
 router = APIRouter()
 
 
-def _read_json(path: Path) -> dict | None:
-    try:
-        with open(path) as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return None
-
-
-def _time_ago(iso_str: str | None) -> str | None:
-    if not iso_str:
-        return None
-    try:
-        ts = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
-        delta = datetime.now(timezone.utc) - ts
-        minutes = int(delta.total_seconds() / 60)
-        if minutes < 1:
-            return "just now"
-        if minutes < 60:
-            return f"{minutes}m ago"
-        hours = minutes // 60
-        return f"{hours}h {minutes % 60}m ago"
-    except Exception:
-        return iso_str
-
-
 @router.get("/api/trader/status")
 async def get_trader_status():
-    decision = _read_json(AI_DECISION_PATH)
-    state = _read_json(BOT_STATE_PATH)
+    decision = read_json(AI_DECISION_PATH)
+    state = read_json(BOT_STATE_PATH)
 
     equity = None
     if state:
-        signals = _read_json(PROJECT_ROOT / "ipc" / "signals.json")
+        signals = read_json(PROJECT_ROOT / "ipc" / "signals.json")
         if signals and "config" in signals:
             equity = signals["config"].get("accountEquity")
 
     last_cycle_ts = decision.get("timestamp") if decision else None
     model = None
     # Read model from ai-trader config (not from decision file)
-    ai_config = _read_json(PROJECT_ROOT / "ai-decisions" / "config.json")
+    ai_config = read_json(PROJECT_ROOT / "ai-decisions" / "config.json")
     if ai_config and "llm" in ai_config:
         model = ai_config["llm"].get("primary_model")
 
@@ -82,7 +57,7 @@ async def get_trader_status():
     return {
         "alive": alive,
         "last_cycle": last_cycle_ts,
-        "last_cycle_ago": _time_ago(last_cycle_ts),
+        "last_cycle_ago": time_ago(last_cycle_ts),
         "model": model,
         "equity": equity,
     }

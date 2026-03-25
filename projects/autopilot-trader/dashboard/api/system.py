@@ -9,6 +9,8 @@ from pathlib import Path
 
 from fastapi import APIRouter
 
+from dashboard.api.utils import time_ago
+
 log = logging.getLogger("dashboard.api.system")
 
 PROJECT_ROOT = Path("/root/.openclaw/workspace/projects/autopilot-trader")
@@ -53,21 +55,6 @@ def _file_mtime(path: Path) -> str | None:
         return None
 
 
-def _time_ago(iso_str: str | None) -> str | None:
-    if not iso_str:
-        return None
-    try:
-        ts = datetime.fromisoformat(iso_str)
-        delta = datetime.now(timezone.utc) - ts
-        seconds = int(delta.total_seconds())
-        if seconds < 60:
-            return f"{seconds}s ago"
-        minutes = seconds // 60
-        return f"{minutes}m ago"
-    except Exception:
-        return iso_str
-
-
 @router.get("/api/system/health")
 async def get_health():
     bot_running, bot_pid = _pgrep("bot.py")
@@ -90,12 +77,19 @@ async def get_health():
         pass
 
     ai_last_cycle = None
-    model = None
     try:
         with open(PROJECT_ROOT / "ipc" / "ai-decision.json") as f:
             decision = json.load(f)
         ai_last_cycle = decision.get("timestamp")
-        model = decision.get("model")
+    except Exception:
+        pass
+
+    # Read model from config (ai-decision.json doesn't have a model field)
+    model = None
+    try:
+        with open(PROJECT_ROOT / "ai-decisions" / "config.json") as f:
+            ai_config = json.load(f)
+        model = ai_config.get("llm", {}).get("primary_model")
     except Exception:
         pass
 
@@ -107,20 +101,20 @@ async def get_health():
                 "running": bot_running,
                 "pid": bot_pid,
                 "last_state_update": bot_state_mtime,
-                "last_state_ago": _time_ago(bot_state_mtime),
+                "last_state_ago": time_ago(bot_state_mtime),
             },
             "ai_trader": {
                 "running": ai_running,
                 "pid": ai_pid,
                 "last_cycle": ai_last_cycle,
-                "last_cycle_ago": _time_ago(ai_last_cycle),
+                "last_cycle_ago": time_ago(ai_last_cycle),
                 "model": model,
             },
             "scanner": {
                 "running": scanner_running,
                 "pid": scanner_pid,
                 "last_scan": signals_mtime,
-                "last_scan_ago": _time_ago(signals_mtime),
+                "last_scan_ago": time_ago(signals_mtime),
                 "stale": signals_stale,
             },
         },

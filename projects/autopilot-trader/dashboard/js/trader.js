@@ -34,7 +34,7 @@ const TraderTab = {
     // Count safety rejections (last 30 min)
     const thirtyMinAgo = Date.now() - 30 * 60 * 1000;
     const rejections = data.filter(d => {
-      if (!d.safety_approved || d.executed) return false;
+      if (d.safety_approved) return false;
       try { return new Date(d.timestamp).getTime() > thirtyMinAgo; } catch { return false; }
     }).length;
     document.getElementById('t-rejections').textContent = rejections;

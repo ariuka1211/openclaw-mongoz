@@ -17,7 +17,7 @@
  *
  * Safety rules: liq distance ≥ 2× SL, max leverage cap, NaN guards.
  *
- * Usage: bun run scripts/opportunity-scanner.ts [--equity 1000] [--min-score 60] [--max-positions 3]
+ * Usage: bun run scanner/opportunity-scanner.ts [--equity 1000] [--min-score 60] [--max-positions 3]
  */
 import { rename } from "node:fs/promises";
 
@@ -785,7 +785,7 @@ async function main(): Promise<void> {
 
   // Score and size each market
   // First pass: identify which markets need OKX klines
-  const marketsNeedingKlines: { instId: string; symbol: string; index: number }[] = [];
+  const marketsNeedingKlines: { instId: string; symbol: string }[] = [];
   const scoredMarkets: { market: OrderBookDetail; ltRate: FundingRateRaw; cexRates: number[] }[] = [];
 
   for (const m of liquidMarkets) {
@@ -799,7 +799,7 @@ async function main(): Promise<void> {
   for (const sm of scoredMarkets) {
     const instId = getOkxInstId(sm.market.symbol);
     if (instId && !klinesCache.has(instId)) {
-      marketsNeedingKlines.push({ instId, symbol: sm.market.symbol, index: 0 });
+      marketsNeedingKlines.push({ instId, symbol: sm.market.symbol });
     }
   }
 
@@ -1056,26 +1056,6 @@ async function main(): Promise<void> {
   console.log("  Signal weights: Funding 35% | MA Alignment 25% | Order Block 15% | Momentum 15% | OI Trend 10%");
   console.log("  Sizing: risk-based (equity × riskPct / SL distance) | Max 20× leverage | Liq ≥ 2× SL");
 
-  // Check for suggested weights from signal analyzer
-  try {
-    const suggestedPath = "../ai-decisions/state/signal_weights_suggested.json";
-    const suggestedFile = Bun.file(suggestedPath);
-    if (await suggestedFile.exists()) {
-      const suggested = await suggestedFile.json();
-      if (suggested.suggested_weights_blended && suggested.trades_analyzed >= 5) {
-        console.log("");
-        console.log(`  💡 SUGGESTED WEIGHTS AVAILABLE (${suggested.trades_analyzed} trades analyzed)`);
-        console.log(`     FundingSpread: ${suggested.suggested_weights_blended.fundingSpreadScore}`);
-        console.log(`     OI Trend:      ${suggested.suggested_weights_blended.oiTrendScore}`);
-        console.log(`     Momentum:      ${suggested.suggested_weights_blended.momentumScore}`);
-        console.log(`     MA Alignment:  ${suggested.suggested_weights_blended.maAlignmentScore}`);
-        console.log(`     Order Block:   ${suggested.suggested_weights_blended.orderBlockScore}`);
-        console.log(`     Review at: ai-decisions/state/signal_weights_suggested.json`);
-      }
-    }
-  } catch {
-    // File doesn't exist or can't be parsed — that's fine
-  }
   console.log("═══════════════════════════════════════════════════════════════════════════════════════════════════════════════");
 
   // === Signal Cleanup: Remove opportunities older than 20 minutes ===

@@ -37,7 +37,6 @@ An automated crypto perpetual futures trading system running on **Lighter.xyz** 
 │  │     • llm_client.py — calls Kilo Gateway API     │                    │
 │  │     • safety.py — hard rules the LLM can't break │                    │
 │  │     • db.py — SQLite decision journal            │                    │
-│  │     • reflection.py — periodic learning loop     │                    │
 │  │   Outputs: ai-decision.json                      │                    │
 │  └─────────────────────┬───────────────────────────┘                    │
 │                        │ ai-decision.json                               │
@@ -58,11 +57,6 @@ An automated crypto perpetual futures trading system running on **Lighter.xyz** 
 │  │  Telegram    │  │   Dashboard  │  │  SQLite DB   │                  │
 │  │  Alerts      │  │  (FastAPI)   │  │  (trader.db) │                  │
 │  └──────────────┘  └──────────────┘  └──────────────┘                  │
-│                                                                         │
-│  ┌─────────────────────┐  ┌─────────────────────┐                      │
-│  │ Correlation Guard   │  │ Funding Monitor     │  (supporting scripts)│
-│  │ correlation-guard.ts│  │ funding-monitor.ts  │                      │
-│  └─────────────────────┘  └─────────────────────┘                      │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -266,21 +260,7 @@ HTTP client for Kilo Gateway API (`api.kilo.ai/api/gateway`). Uses `KILOCODE_API
 - Rate limit handling (429 → 60s backoff)
 - Tracks stats: calls, tokens, latency
 
-### 3.8 Reflection Agent (`reflection.py`)
-
-Periodic learning loop (runs every ~3 days via cron). Analyzes trade outcomes in SQLite and extracts patterns into `state/strategy_memory.md`. Uses the same LLM model. Includes quantitative analysis: win rate by direction, hold time bracket, entry confidence, and biggest loss patterns.
-
-### 3.9 Signal Analyzer (`signal_analyzer.py`)
-
-Correlates scanner signal components (funding, volume, momentum, MA, OB) with actual trade outcomes to suggest weight adjustments. **Outputs to `state/signal_weights_suggested.json` for human review only — never auto-applies.** Needs at least 5 trades to produce suggestions.
-
-### 3.10 Supporting Scripts
-
-- **`correlation-guard.ts`** — Calculates rolling Pearson correlation between assets using OKX daily klines. Prevents opening correlated positions in the same direction.
-- **`funding-monitor.ts`** — Fetches all Lighter funding rates, flags extreme rates (±0.1%/8hr), prints dashboard table. Standalone monitoring tool.
-- **`cleanup-old-signals.sh`** — Removes signals.json files older than 1 hour from the signals directory.
-
-### 3.11 Dashboard (`dashboard.py` + `static/index.html`)
+### 3.8 Dashboard (`dashboard.py` + `static/index.html`)
 
 FastAPI web server on port 8080. Endpoints:
 - `/` — HTML dashboard
@@ -289,7 +269,7 @@ FastAPI web server on port 8080. Endpoints:
 - `/api/performance` — win rate, PnL, trade counts
 - `/api/alerts` — recent alerts
 
-### 3.12 Auth Helper (`auth_helper.py`)
+### 3.9 Auth Helper (`auth_helper.py`)
 
 Manages Lighter REST API auth tokens. Tokens are long-lived (6-hour max), generated via `create_auth_token_with_expiry()`. Cached in-memory and on disk (`.auth_token.json`). Auto-refreshes 30 minutes before expiry.
 
@@ -590,52 +570,71 @@ systemctl restart ai-trader
 
 ```
 projects/autopilot-trader/
-├── bot/
-│   ├── bot.py                 # Main bot (PositionTracker, LighterAPI, LighterCopilot)
-│   ├── dsl.py                 # Dynamic Stop Loss engine
-│   ├── auth_helper.py         # REST API auth token manager
-│   ├── config.yml             # Bot configuration
-│   ├── venv/                  # Python virtual environment
+├── ai-decisions/
+│   ├── ai_trader.py          # Main AI daemon
+│   ├── context_builder.py    # LLM prompt assembler
+│   ├── llm_client.py         # Kilo Gateway HTTP client
+│   ├── safety.py             # Hard safety rules
+│   ├── db.py                 # SQLite helpers (DecisionDB)
+│   ├── config.json           # AI trader config
+│   ├── prompts/
+│   │   ├── system.txt        # System prompt for LLM
+│   │   └── decision.txt      # Decision prompt template
 │   ├── state/
-│   │   ├── tracked_markets.json
-│   │   └── quota_state.json
-│   └── bot.log
-├── signals/
-│   ├── scripts/
-│   │   ├── opportunity-scanner.ts   # Main scanner
-│   │   ├── correlation-guard.ts     # Position correlation check
-│   │   ├── funding-monitor.ts       # Funding rate dashboard
-│   │   └── cleanup-old-signals.sh   # Stale signal cleanup
-│   ├── ai-trader/
-│   │   ├── ai_trader.py       # Main AI daemon
-│   │   ├── context_builder.py # LLM prompt assembler
-│   │   ├── llm_client.py      # Kilo Gateway HTTP client
-│   │   ├── safety.py          # Hard safety rules
-│   │   ├── db.py              # SQLite helpers (DecisionDB)
-│   │   ├── reflection.py      # Periodic learning agent
-│   │   ├── signal_analyzer.py # Signal weight suggestion
-│   │   ├── dashboard.py       # FastAPI dashboard
-│   │   ├── config.json        # AI trader config
-│   │   ├── ai-decisions.service  # systemd service file
-│   │   ├── prompts/
-│   │   │   ├── system.txt     # System prompt for LLM
-│   │   │   └── decision.txt   # Decision prompt template
-│   │   ├── static/
-│   │   │   └── index.html     # Dashboard frontend
-│   │   ├── state/
-│   │   │   ├── trader.db      # SQLite database
-│   │   │   └── strategy_memory.md
-│   │   └── logs/
-│   ├── scanner-daemon.sh      # Scanner loop wrapper
-│   ├── scanner.log
-│   ├── signals.json           # Scanner output
-│   ├── ai-decision.json       # AI → Bot interface
-│   ├── ai-result.json         # Bot → AI interface
-│   └── docs/
-│       ├── ai-autopilot-spec.md    # Original design spec
-│       ├── ai-trader-research.md   # Research notes
-│       ├── ai-trader-infra.md      # Infrastructure notes
-│       └── perp-data-sources.md    # Data source analysis
+│   │   ├── patterns.json     # Trade pattern data
+│   │   └── trader.db-*       # SQLite WAL/SHM
+│   └── logs/
+├── bot/
+│   ├── bot.py                # Main bot loop
+│   ├── dsl.py                # Dynamic Stop Loss engine
+│   ├── auth_helper.py        # REST API auth token manager
+│   ├── config.yml            # Bot configuration
+│   ├── config.example.yml    # Config template
+│   ├── requirements.txt      # Python dependencies
+│   ├── healthcheck.py        # Health endpoint
+│   ├── venv/                 # Python virtual environment
+│   └── state/
+│       ├── tracked_markets.json
+│       └── bot_state.json
+├── scanner/
+│   ├── opportunity-scanner.ts  # Signal scoring (every 5 min)
+│   ├── scanner-daemon.sh       # Persistent loop wrapper
+│   └── .gitignore
+├── dashboard/
+│   ├── app.py                # Flask app factory
+│   ├── index.html            # Frontend (single-page)
+│   ├── api/
+│   │   ├── portfolio.py      # /api/portfolio endpoints
+│   │   ├── scanner.py        # /api/scanner endpoints
+│   │   ├── system.py         # /api/system endpoints
+│   │   └── trader.py         # /api/trader endpoints
+│   └── utils.py          # Shared helpers (read_json, time_ago)
+│   └── js/
+│       ├── store.js          # Shared state store
+│       ├── portfolio.js      # Portfolio module
+│       ├── scanner.js        # Scanner module
+│       ├── system.js         # System module
+│       ├── trader.js         # Trader module
+│       ├── performance.js    # Performance module
+│       └── providers.js      # Data providers
+├── ipc/
+│   ├── signals.json          # Scanner → AI, Bot
+│   ├── ai-decision.json      # AI → Bot
+│   └── ai-result.json        # Bot → AI
+├── shared/
+│   ├── __init__.py       # Python package marker
+│   └── ipc_utils.py          # Shared IPC read/write helpers
+├── archives/
+│   ├── bot-scanner/          # Old OSA scanner (deleted)
+│   └── scanner/              # Archived: correlation-guard, funding-monitor, cleanup scripts
+├── docs/
+│   ├── autopilot-trader.md   # This file
+│   ├── cheatsheet.md         # Quick file map + patterns
+│   ├── pocket-ideas.md       # Feature ideas backlog
+│   ├── unified-dashboard-plan.md
+│   └── lighter-quota-research.md
+└── signals/
+    └── oi-snapshot.json      # OI trend comparison data
 ```
 
 ---

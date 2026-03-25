@@ -45,6 +45,7 @@
 1. 🚨 **ASK BEFORE ACTING.** If it changes anything — files, services, configs, state, money — show what you'll do and wait for yes. **Reading is free. Everything else is not.**
 2. 🚨 **NEVER GUESS FINANCIAL DATA.** Read from .env/source files only. Account 719758, L1: 0x1D73456fA182B669783c5adaaB965AbB1A373bEE
 3. 🚨 **SPAWN SUBAGENTS.** Never debug/edit code in main session. Spawn immediately.
+4. 🚨 **ALWAYS VERIFY SUBAGENT WORK.** Subagents frequently claim "done" with missing edits, broken imports, or unchanged type signatures. After every subagent completes: read the changed files, grep for the target strings, check type definitions match values, and compile/run if possible. Assume subagents lie until verified.
 4. 🚨 **No tight polling loops.** `background: true`, set timeouts.
 5. 🚨 **When John says stop, stop.** Immediately.
 6. 🚨 **Agents never push to main.** Branch + PR only.

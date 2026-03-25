@@ -173,6 +173,12 @@ class LighterCopilot:
         logging.info("🔗 Initializing Lighter API...")
         self.api = LighterAPI(self.cfg)
 
+        # Update manager references — they captured None during __init__
+        self.signal_processor.api = self.api
+        self.state_manager.api = self.api
+        self.order_manager.api = self.api
+        self.execution_engine.api = self.api
+
         # Verify account tier on startup
         try:
             await self.api._ensure_client()

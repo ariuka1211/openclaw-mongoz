@@ -1,40 +1,31 @@
-# Session — 2026-03-24 22:31 MDT
+# Session — 2026-03-25 08:38 MDT
 
 ## What Happened
-John asked for a full reassessment of cross margin / DSL / ROE logic after the recent fixes. Conducted end-to-end audit.
+Review of recent merged changes + bug fixes for DSL effective leverage commit.
 
-## Critical Bug Found & Fixed
-**DSL was using config leverage (5x/10x) instead of effective leverage (notional/equity) for ROE calculations.** This caused DSL to be ~3x too aggressive — triggering tiers and locking floors based on inflated ROE numbers.
+## Review Findings
+John asked to review all changes merged to main. Reviewed commits `6078b1f` (DSL overhaul, cross margin ROE, prompt fix, sizing) and `6a7a008` (DSL effective leverage fix).
 
-Example: ETHFI with $100 notional on $59.62 equity → effective leverage 1.68x, not 5x.
+### Two Bugs Found & Fixed
+1. **`equity` NameError in context_builder.py** — `equity` used at line 423 (`_calc_roe(p, equity)`) but not defined until line 498. Crashed every ai-trader cycle with open positions.
+   - Fix: moved equity resolution to top of `build_prompt()`, before positions section
 
-## Changes Made
-### dsl.py
-- Added `effective_leverage` field to `DSLState` (default 10.0 for backwards compat)
-- `current_roe()` now uses `self.effective_leverage` instead of `self.leverage`
-- Hard SL uses `effective_leverage` + 0.001% floating point tolerance
+2. **Hard SL default 2.0% instead of 1.25%** — `BotConfig.sl_pct` and `DSLConfig.hard_sl_pct` both defaulted to 2.0. No override in config.json.
+   - Fix: both defaults changed to 1.25
 
-### bot.py
-- `add_position()`: calculates effective_leverage = notional / equity when creating DSL state
-- Equity refresh: recalculates effective_leverage for ALL positions on balance update
-- `_write_ai_result()` + `_refresh_position_context()`: write `effective_leverage` to ai-result.json
-- State save/restore: persists `effective_leverage` with backwards compat fallback
-- Position reconcile: recalculates effective_leverage on exchange sync
-- Tier lock alert: uses effective_leverage for ROE→price conversion
+### Subagent Used
+Spawned `fix-equity-and-sl` subagent — made all 3 edits (context_builder.py, bot.py, dsl.py). Verified edits landed correctly.
 
-### context_builder.py (AI trader)
-- Already correct — `_calc_roe()` computes effective_leverage from notional/equity independently
-
-## Other Finding
-- Per-position `sl_pct` (set by AI) is dead code when DSL is enabled — DSL uses config default 1.25% for all positions. Could wire AI's stop_loss_pct to override DSL hard SL per-position in future.
+## Service Restarts
+- Restarted `lighter-bot` first (picked up bot.py + dsl.py changes)
+- Found ai-trader still crashing on old bytecode — restarted `ai-trader`
+- Both services confirmed clean: no errors across multiple cycles
 
 ## Bot Status
-- 6 positions running: ENA, APT, BCH, ETHFI, RIVER, MON
-- All longs except RIVER and MON (shorts)
-- Changes NOT yet applied — bot needs restart
-- 2 files changed: dsl.py, bot.py
+- 4 positions: ENA (long), BCH (long), MON (long), SAMSUNG (short)
+- Hard SL confirmed at 1.25%
+- DSL effective leverage working
+- ai-trader cycling without errors
 
-## Next Steps
-- Restart bot to apply effective leverage fixes
-- Consider wiring per-position sl_pct to DSL hard SL
-- Monitor that DSL tiers now fire at correct ROE levels
+## Pending
+- Changes not committed/pushed yet

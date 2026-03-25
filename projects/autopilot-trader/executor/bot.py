@@ -137,7 +137,7 @@ class BotConfig:
     trailing_tp_delta_pct: float = 1.0     # Trail by 1% from peak
 
     # Stop loss
-    sl_pct: float = 2.0                    # Stop loss at -2% from entry
+    sl_pct: float = 1.25                   # Stop loss at -1.25% from entry
 
     # Telegram
     telegram_token: str = ""

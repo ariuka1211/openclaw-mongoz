@@ -40,7 +40,7 @@ class DSLConfig:
     tiers: list[DSLTier] = field(default_factory=lambda: list(DEFAULT_TIERS))
     stagnation_roe_pct: float = 8.0   # ROE% threshold for stagnation check
     stagnation_minutes: int = 60      # exit if no new high water mark for this long
-    hard_sl_pct: float = 2.0          # hard stop loss from entry (ignores DSL)
+    hard_sl_pct: float = 1.25         # hard stop loss from entry (ignores DSL)
 
 
 @dataclass

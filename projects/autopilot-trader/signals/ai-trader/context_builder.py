@@ -416,6 +416,18 @@ class ContextBuilder:
         sections = []
         section_tokens = {}
 
+        # Resolve equity early — needed by positions ROE calc below
+        equity = signals_config.get("accountEquity", 1000)
+        try:
+            equity_file = Path(self.config_dir if hasattr(self, 'config_dir') and self.config_dir else '.') / "state" / "equity.json"
+            if equity_file.exists():
+                eq_data = json.loads(equity_file.read_text())
+                file_equity = eq_data.get("equity", 0)
+                if file_equity > 0:
+                    equity = file_equity
+        except Exception:
+            pass
+
         # 1. Current positions (compressed)
         if positions:
             pos_summary = []
@@ -496,19 +508,6 @@ class ContextBuilder:
         sections.append(regret_section)
 
         # 7. Account state with win rate and timing
-        equity = signals_config.get("accountEquity", 1000)
-        
-        # Read fresher equity from bot's equity file if available
-        try:
-            equity_file = Path(self.config_dir if hasattr(self, 'config_dir') and self.config_dir else '.') / "state" / "equity.json"
-            if equity_file.exists():
-                eq_data = json.loads(equity_file.read_text())
-                file_equity = eq_data.get("equity", 0)
-                if file_equity > 0:
-                    equity = file_equity
-        except Exception:
-            pass
-
         # Win rate from DB performance stats
         stats = self.db.get_performance_stats()
         win_rate = stats.get("win_rate", 0)

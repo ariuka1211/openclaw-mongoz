@@ -83,7 +83,7 @@ class StateManager:
             "last_signal_timestamp": self._last_signal_timestamp,
             "last_signal_hash": self._last_signal_hash,
             # Convert monotonic deadlines to remaining seconds for portability
-            "recently_closed": {str(mid): max(0, t - now) for mid, t in self._recently_closed.items()},
+            "recently_closed": {str(mid): max(0, t - now) for mid, t in self.bot._recently_closed.items()},
             "ai_close_cooldown": {s: max(0, t - now) for s, t in self._ai_close_cooldown.items()},
             "close_attempts": self._close_attempts,
             "close_attempt_cooldown": {s: max(0, t - now) for s, t in self._close_attempt_cooldown.items()},
@@ -141,7 +141,7 @@ class StateManager:
             # Convert remaining seconds back to monotonic deadlines
             for mid_str, remaining in state.get("recently_closed", {}).items():
                 if remaining > 0:
-                    self._recently_closed[int(mid_str)] = now + remaining
+                    self.bot._recently_closed[int(mid_str)] = now + remaining
 
             for symbol, remaining in state.get("ai_close_cooldown", {}).items():
                 if remaining > 0:
@@ -179,8 +179,8 @@ class StateManager:
             restored = []
             if self._last_ai_decision_ts:
                 restored.append(f"ai_decision_ts={self._last_ai_decision_ts}")
-            if self._recently_closed:
-                restored.append(f"recently_closed={len(self._recently_closed)}")
+            if self.bot._recently_closed:
+                restored.append(f"recently_closed={len(self.bot._recently_closed)}")
             if self._ai_close_cooldown:
                 restored.append(f"ai_close_cooldown={len(self._ai_close_cooldown)}")
             if self._close_attempts:

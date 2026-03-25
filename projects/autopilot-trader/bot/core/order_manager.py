@@ -64,10 +64,10 @@ class OrderManager:
             del self.bot._no_price_ticks[m]
         # MED-7: Remove bot_managed_market_ids where market is no longer tracked
         # and not in recently closed (manual closes remove from tracker but didn't clean this set)
-        stale_managed = [m for m in self.bot_managed_market_ids
+        stale_managed = [m for m in self.bot.bot_managed_market_ids
                          if m not in self.tracker.positions and m not in self.bot._recently_closed]
         for m in stale_managed:
-            self.bot_managed_market_ids.discard(m)
+            self.bot.bot_managed_market_ids.discard(m)
         if stale_managed:
             logging.debug(f"🧹 Pruned {len(stale_managed)} stale bot_managed_market_ids")
 

@@ -322,6 +322,7 @@ class PositionTracker:
     def __init__(self, cfg: BotConfig):
         self.cfg = cfg
         self.positions: dict[int, TrackedPosition] = {}  # key: market_id
+        self.account_equity: float = 0.0  # Cached account equity for cross margin ROE
         # Build DSL config from bot config
         self.dsl_cfg = DSLConfig(
             stagnation_roe_pct=cfg.stagnation_roe_pct,
@@ -397,8 +398,9 @@ class PositionTracker:
             # Alert on tier lock
             if pos.dsl_state.locked_floor_roe is not None and not getattr(pos, '_tier_lock_alerted', False):
                 pos._tier_lock_alerted = True
-                floor_price = pos.entry_price * (1 + pos.dsl_state.locked_floor_roe / 100 / self.cfg.default_leverage) if pos.side == "long" \
-                    else pos.entry_price * (1 - pos.dsl_state.locked_floor_roe / 100 / self.cfg.default_leverage)
+                effective_lev = pos.dsl_state.leverage if pos.dsl_state else self.cfg.default_leverage
+                floor_price = pos.entry_price * (1 + pos.dsl_state.locked_floor_roe / 100 / effective_lev) if pos.side == "long" \
+                    else pos.entry_price * (1 - pos.dsl_state.locked_floor_roe / 100 / effective_lev)
                 return ("dsl_tier_lock", {
                     "roe": roe,
                     "floor_roe": pos.dsl_state.locked_floor_roe,
@@ -466,9 +468,15 @@ class PositionTracker:
         if trailing_just_activated:
             pnl_pct = ((price - pos.entry_price) / pos.entry_price * 100) if pos.side == "long" \
                 else ((pos.entry_price - price) / pos.entry_price * 100)
+            # Cross margin ROE: effective_leverage = notional / equity
+            notional = abs(pos.size * pos.entry_price)
+            if self.account_equity > 0 and notional > 0:
+                effective_lev = notional / self.account_equity
+            else:
+                effective_lev = self.cfg.default_leverage
             return ("trailing_activated", {
                 "price": price,
-                "roe": pnl_pct * self.cfg.default_leverage,
+                "roe": pnl_pct * effective_lev,
                 "pnl": pnl_pct,
             })
 
@@ -1228,19 +1236,18 @@ class LighterCopilot:
         except Exception as e:
             logging.warning(f"⚠️ Account tier check failed: {e}")
 
-        # Check balance
+        # Check balance — needed for effective leverage (cross margin ROE)
         logging.info("💰 Checking balance...")
-        # TODO: Re-enable once API rate limits are resolved
-        # try:
-        #     result = await self.api._account_api.account(
-        #         by="index", value=str(self.cfg.account_index)
-        #     )
-        #     for acc in result.accounts:
-        #         balance = float(acc.collateral) if acc.collateral else 0
-        #         logging.info(f"   Balance: ${balance:,.2f} USDC")
-        # except Exception as e:
-        #     logging.warning(f"Could not fetch balance: {e}")
-        logging.info("   Balance check skipped due to API rate limits")
+        try:
+            balance = await self._get_balance()
+            if balance > 0:
+                self.tracker.account_equity = balance
+                logging.info(f"   Balance: ${balance:,.2f} USDC")
+                self._write_equity_file(balance)
+            else:
+                logging.warning(f"   Balance fetch returned 0 — using default leverage for ROE")
+        except Exception as e:
+            logging.warning(f"   Could not fetch balance: {e} — using default leverage for ROE")
 
         await self.alerts.send(
             "🟢 *Lighter Copilot* started\n"
@@ -1454,10 +1461,8 @@ class LighterCopilot:
                     actual_size = verified_pos["size"]
                     self.tracker.add_position(mid, symbol, direction, current_price, actual_size, leverage=min(self.cfg.default_leverage, 10))
 
-                    # Update DSL state with effective leverage from exchange (L3 fix)
-                    pos = self.tracker.positions.get(mid)
-                    if pos and pos.dsl_state and verified_pos.get("leverage"):
-                        pos.dsl_state.leverage = verified_pos["leverage"]
+                    # NOTE: DSL uses config leverage from add_position, NOT exchange-reported leverage.
+                    # Exchange leverage can vary for cross margin and would break DSL tier calibration.
 
                     # Persist state immediately after opening to prevent crash data loss
                     self._save_state()
@@ -1727,10 +1732,8 @@ class LighterCopilot:
             ai_leverage = min(float(decision.get("leverage", self.cfg.default_leverage)), 10)
             self.tracker.add_position(market_id, symbol, direction, current_price, actual_size, leverage=ai_leverage, sl_pct=ai_sl_pct)
 
-            # Update DSL state with effective leverage from exchange (L3 fix)
-            pos = self.tracker.positions.get(market_id)
-            if pos and pos.dsl_state and verified_pos.get("leverage"):
-                pos.dsl_state.leverage = verified_pos["leverage"]
+            # NOTE: DSL uses config leverage from add_position, NOT exchange-reported leverage.
+            # Exchange leverage can vary for cross margin and would break DSL tier calibration.
 
             # Persist state immediately after opening to prevent crash data loss
             self._save_state()
@@ -2168,8 +2171,15 @@ class LighterCopilot:
             pnl_usd = size_usd * pnl_pct / 100
             hold_seconds = int((datetime.now(timezone.utc) - pos.opened_at).total_seconds())
             # ROE = return relative to margin (not notional) = pnl_pct × leverage
-            # Use actual position leverage, not config default
-            actual_leverage = pos.dsl_state.leverage if pos.dsl_state else self.cfg.default_leverage
+            # For cross margin: effective_leverage = notional / equity
+            # Fall back to DSL state leverage, then config default
+            equity = self.tracker.account_equity
+            if equity > 0 and size_usd > 0:
+                actual_leverage = size_usd / equity
+            elif pos.dsl_state:
+                actual_leverage = pos.dsl_state.leverage
+            else:
+                actual_leverage = self.cfg.default_leverage
             roe_pct = pnl_pct * actual_leverage
 
             # Mark as estimated if we haven't verified the fill yet
@@ -2211,8 +2221,14 @@ class LighterCopilot:
                 else ((pos.entry_price - exit_price) / pos.entry_price * 100)
             size_usd = pos.size * pos.entry_price
             pnl_usd = size_usd * pnl_pct / 100
-            # Use actual position leverage, not config default
-            actual_leverage = pos.dsl_state.leverage if pos.dsl_state else self.cfg.default_leverage
+            # For cross margin: effective_leverage = notional / equity
+            equity = self.tracker.account_equity
+            if equity > 0 and size_usd > 0:
+                actual_leverage = size_usd / equity
+            elif pos.dsl_state:
+                actual_leverage = pos.dsl_state.leverage
+            else:
+                actual_leverage = self.cfg.default_leverage
             roe_pct = pnl_pct * actual_leverage
 
             updated = _db.update_latest_outcome(
@@ -2241,6 +2257,7 @@ class LighterCopilot:
                     "entry_price": pos.entry_price,
                     "current_price": current_price if current_price and current_price > 0 else pos.entry_price,
                     "size": pos.size,
+                    "leverage": pos.dsl_state.leverage if pos.dsl_state else self.cfg.default_leverage,
                     "position_size_usd": pos.size * pos.entry_price,
                 })
             result = {
@@ -2288,6 +2305,7 @@ class LighterCopilot:
                     "entry_price": pos.entry_price,
                     "current_price": current_price if current_price and current_price > 0 else pos.entry_price,
                     "size": pos.size,
+                    "leverage": pos.dsl_state.leverage if pos.dsl_state else self.cfg.default_leverage,
                     "position_size_usd": pos.size * pos.entry_price,
                 })
             result = {
@@ -2465,6 +2483,14 @@ class LighterCopilot:
 
             # Cache mark prices from unrealized_pnl (authoritative exchange price for PnL)
             self.api.update_mark_prices_from_positions(live_positions)
+
+            # Refresh account equity for cross margin ROE calculations
+            try:
+                new_balance = await self._get_balance()
+                if new_balance > 0:
+                    self.tracker.account_equity = new_balance
+            except Exception as e:
+                logging.debug(f"Equity refresh failed (using cached): {e}")
 
         # Detect new positions & closed positions — only when API succeeded
         # When live_positions is None, skip entirely to preserve tracker state (EDGE-03)
@@ -2691,6 +2717,13 @@ class LighterCopilot:
         # Reset no-price counter on successful price fetch
         if mid in self._no_price_ticks:
             del self._no_price_ticks[mid]
+
+        # NOTE: DSL uses config leverage (5x/10x), NOT effective leverage.
+        # Effective leverage (notional/equity) is only used for:
+        # - AI prompt display (_calc_roe in context_builder.py)
+        # - Outcome logging in bot.py
+        # DO NOT override pos.dsl_state.leverage here — DSL tiers are
+        # calibrated for fixed config leverage values.
 
         action = self.tracker.update_price(mid, price)
         is_long = pos.side == "long"

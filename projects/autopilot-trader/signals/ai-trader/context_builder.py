@@ -420,7 +420,7 @@ class ContextBuilder:
         if positions:
             pos_summary = []
             for p in positions:
-                roe = self._calc_roe(p)
+                roe = self._calc_roe(p, equity)
                 pos_summary.append(
                     f"- {p.get('symbol', '?')} {p.get('side', '?').upper()} "
                     # MED-26: Canonical field is 'position_size_usd' (written by bot's _write_ai_result)
@@ -497,6 +497,17 @@ class ContextBuilder:
 
         # 7. Account state with win rate and timing
         equity = signals_config.get("accountEquity", 1000)
+        
+        # Read fresher equity from bot's equity file if available
+        try:
+            equity_file = Path(self.config_dir if hasattr(self, 'config_dir') and self.config_dir else '.') / "state" / "equity.json"
+            if equity_file.exists():
+                eq_data = json.loads(equity_file.read_text())
+                file_equity = eq_data.get("equity", 0)
+                if file_equity > 0:
+                    equity = file_equity
+        except Exception:
+            pass
 
         # Win rate from DB performance stats
         stats = self.db.get_performance_stats()
@@ -530,8 +541,11 @@ class ContextBuilder:
         max_pos = self.config.get("safety", {}).get("max_positions", 8)
         if len(positions) >= max_pos:
             slots_status = f"⚠️ ALL SLOTS FULL ({len(positions)}/{max_pos}) — DO NOT open new positions. Only consider closing existing ones."
+        elif len(positions) == 0:
+            slots_status = f"📊 {max_pos} slots available — no positions open. Scan signals for high-score opportunities."
         else:
-            slots_status = f"- Open positions: {len(positions)}/{max_pos} max"
+            available = max_pos - len(positions)
+            slots_status = f"📊 {available}/{max_pos} slots open — consider adding positions from strong signals (score ≥ 70, safety ✅)."
 
         account_section = (
             f"## Account\n"
@@ -598,8 +612,12 @@ class ContextBuilder:
         return "\n\n".join(s for s in sections if s)
 
     @staticmethod
-    def _calc_roe(position: dict) -> float:
-        """Calculate ROE% for a position."""
+    def _calc_roe(position: dict, equity: float = 0) -> float:
+        """Calculate ROE% for a position.
+        
+        For cross margin: ROE = raw_move% × (notional / equity)
+        Falls back to isolated margin (raw_move% × leverage) if equity is unavailable.
+        """
         entry = position.get("entry_price", 0)
         current = position.get("current_price", entry)
         side = position.get("side", "long")
@@ -608,4 +626,11 @@ class ContextBuilder:
         raw = (current - entry) / entry * 100
         if side == "short":
             raw = -raw
-        return raw
+        # Cross margin ROE: effective_leverage = notional / equity
+        notional = position.get("position_size_usd", position.get("size_usd", 0))
+        if equity > 0 and notional > 0:
+            effective_lev = notional / equity
+            return raw * effective_lev
+        # Fallback: isolated margin
+        leverage = position.get("leverage", 1.0)
+        return raw * leverage

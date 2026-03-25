@@ -1,28 +1,28 @@
-# Session Handoff — 2026-03-25 13:26 MDT
+# Session Handoff — 2026-03-25 13:41 MDT
 
 ## What We Did
-- **Bot folder audit** — John asked for dead code, garbage, unused files, and logic errors in `bot/`
-- **Findings:**
-  - `VolumeQuotaError` — caught 7×, never raised → dead code
-  - `_start_volume_quota_cooldown()` and related cooldown infrastructure — dead after VolumeQuotaError removal
-  - `_sl_retry_delays` duplicate in `__init__` — only 1 definition existed (audit misread)
-  - Legacy SL cooldown dict — audit misread, was already correct
-  - README KILL filename mismatch (`KILL` → `state/KILL_SWITCH`)
-  - `.pytest_cache/` not in `.gitignore`
-  - No test files but pytest in requirements.txt (minor, keep if planning tests)
-- **Fixes applied (via subagents + manual):**
-  - Removed `VolumeQuotaError` class + all 7 except blocks
-  - Removed dead cooldown infrastructure: 3 methods, 3 instance vars, all call sites
-  - Fixed README KILL_SWITCH filename
-  - Added `.pytest_cache/` to .gitignore
-  - Fixed stray `n()` at end of file (introduced during edits, caught in final verification)
-- **Verified safe:** syntax valid, all imports used, no orphaned refs, cross-service imports unaffected
+- **Dashboard folder audit** — dead code, garbage, unused files, logic errors
+- **6 findings:** 3 dead code, 3 duplication
+- **Fixes applied (2 subagents + manual):**
+  1. Removed dead `by_direction` rendering from `performance.js`
+  2. Removed dead `#pf-direction-card` HTML from `index.html`
+  3. Removed dead `GET /api/trader/alerts` endpoint from `trader.py`
+  4. Removed unused `AI_RESULT_PATH` constant from `trader.py`
+  5. Consolidated `DecisionDB` import into `utils.py` (was duplicated in system.py + trader.py)
+  6. Removed duplicate `sys.path.insert` + DB init from system.py and trader.py
+- **Verified:** all 6 Python + 7 JS files parse clean, dashboard restarted, all 15 endpoints 200, zero errors in journal
+
+## State
+- All dashboard audit fixes are uncommitted (working tree changes)
+- All other sessions' changes already pushed to main (dbd905e)
+- Bot, scanner, ai-decisions services running clean
+- `signals/oi-snapshot.json` still tracked (should untrack eventually)
 
 ## Open Items
-- **Bot changes NOT committed yet** — needs branch + PR (91 net lines removed from bot.py)
-- `signals/oi-snapshot.json` still tracked (pre-existing from earlier audit, should untrack later)
-- pytest/pytest-cov in requirements.txt with no test files — keep if planning tests
+- Dashboard fixes need committing to branch + PR
+- Backtesting implementation (triple barrier) — still not started
+- Consider untracking `signals/oi-snapshot.json`
 
 ## Next Steps
-- Commit bot audit fixes to branch, push, PR
-- Consider untracking `signals/oi-snapshot.json`
+- Commit dashboard audit fixes to branch, push, PR
+- Backtesting when ready

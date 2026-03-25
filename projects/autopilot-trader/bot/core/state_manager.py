@@ -79,16 +79,16 @@ class StateManager:
         """Persist critical ephemeral state to disk for crash/restart recovery."""
         now = time.monotonic()
         state = {
-            "last_ai_decision_ts": self._last_ai_decision_ts,
-            "last_signal_timestamp": self._last_signal_timestamp,
-            "last_signal_hash": self._last_signal_hash,
+            "last_ai_decision_ts": self.bot._last_ai_decision_ts,
+            "last_signal_timestamp": self.bot._last_signal_timestamp,
+            "last_signal_hash": self.bot._last_signal_hash,
             # Convert monotonic deadlines to remaining seconds for portability
             "recently_closed": {str(mid): max(0, t - now) for mid, t in self.bot._recently_closed.items()},
-            "ai_close_cooldown": {s: max(0, t - now) for s, t in self._ai_close_cooldown.items()},
-            "close_attempts": self._close_attempts,
-            "close_attempt_cooldown": {s: max(0, t - now) for s, t in self._close_attempt_cooldown.items()},
-            "dsl_close_attempts": self._dsl_close_attempts,
-            "dsl_close_attempt_cooldown": {s: max(0, t - now) for s, t in self._dsl_close_attempt_cooldown.items()},
+            "ai_close_cooldown": {s: max(0, t - now) for s, t in self.bot._ai_close_cooldown.items()},
+            "close_attempts": self.bot._close_attempts,
+            "close_attempt_cooldown": {s: max(0, t - now) for s, t in self.bot._close_attempt_cooldown.items()},
+            "dsl_close_attempts": self.bot._dsl_close_attempts,
+            "dsl_close_attempt_cooldown": {s: max(0, t - now) for s, t in self.bot._dsl_close_attempt_cooldown.items()},
             # BUG-07: Which market_ids were opened by the bot
             "bot_managed_market_ids": sorted(self.bot.bot_managed_market_ids),
             # Persist position state + DSL state for restart recovery
@@ -134,9 +134,9 @@ class StateManager:
                 state = json.load(f)
             now = time.monotonic()
 
-            self._last_ai_decision_ts = state.get("last_ai_decision_ts")
-            self._last_signal_timestamp = state.get("last_signal_timestamp")
-            self._last_signal_hash = state.get("last_signal_hash")
+            self.bot._last_ai_decision_ts = state.get("last_ai_decision_ts")
+            self.bot._last_signal_timestamp = state.get("last_signal_timestamp")
+            self.bot._last_signal_hash = state.get("last_signal_hash")
 
             # Convert remaining seconds back to monotonic deadlines
             for mid_str, remaining in state.get("recently_closed", {}).items():
@@ -145,19 +145,19 @@ class StateManager:
 
             for symbol, remaining in state.get("ai_close_cooldown", {}).items():
                 if remaining > 0:
-                    self._ai_close_cooldown[symbol] = now + remaining
+                    self.bot._ai_close_cooldown[symbol] = now + remaining
 
-            self._close_attempts = state.get("close_attempts", {})
+            self.bot._close_attempts = state.get("close_attempts", {})
 
             for symbol, remaining in state.get("close_attempt_cooldown", {}).items():
                 if remaining > 0:
-                    self._close_attempt_cooldown[symbol] = now + remaining
+                    self.bot._close_attempt_cooldown[symbol] = now + remaining
 
-            self._dsl_close_attempts = state.get("dsl_close_attempts", {})
+            self.bot._dsl_close_attempts = state.get("dsl_close_attempts", {})
 
             for symbol, remaining in state.get("dsl_close_attempt_cooldown", {}).items():
                 if remaining > 0:
-                    self._dsl_close_attempt_cooldown[symbol] = now + remaining
+                    self.bot._dsl_close_attempt_cooldown[symbol] = now + remaining
 
             # BUG-07: Load bot-managed market IDs
             managed_ids = state.get("bot_managed_market_ids", [])
@@ -177,14 +177,14 @@ class StateManager:
             self.bot._saved_positions = state.get("positions") or None
 
             restored = []
-            if self._last_ai_decision_ts:
-                restored.append(f"ai_decision_ts={self._last_ai_decision_ts}")
+            if self.bot._last_ai_decision_ts:
+                restored.append(f"ai_decision_ts={self.bot._last_ai_decision_ts}")
             if self.bot._recently_closed:
                 restored.append(f"recently_closed={len(self.bot._recently_closed)}")
-            if self._ai_close_cooldown:
-                restored.append(f"ai_close_cooldown={len(self._ai_close_cooldown)}")
-            if self._close_attempts:
-                restored.append(f"close_attempts={len(self._close_attempts)}")
+            if self.bot._ai_close_cooldown:
+                restored.append(f"ai_close_cooldown={len(self.bot._ai_close_cooldown)}")
+            if self.bot._close_attempts:
+                restored.append(f"close_attempts={len(self.bot._close_attempts)}")
             if self.bot._saved_positions:
                 restored.append(f"saved_positions={len(self.bot._saved_positions)}")
             if restored:
@@ -195,10 +195,10 @@ class StateManager:
             # - Same timestamp → ACK to unblock AI trader (post-crash unblock, from IPC fix)
             # - Different timestamp → new decision arrived during downtime, skip ACK
             #   so _tick() processes it normally (otherwise the decision is lost)
-            if self._last_ai_decision_ts:
+            if self.bot._last_ai_decision_ts:
                 try:
                     current_decision = safe_read_json(Path(self._ai_decision_file))
-                    if current_decision and current_decision.get("timestamp") == self._last_ai_decision_ts:
+                    if current_decision and current_decision.get("timestamp") == self.bot._last_ai_decision_ts:
                         # Same decision bot was processing before crash — ACK to unblock AI trader
                         ack_path = str(Path(self._ai_decision_file)) + ".ack"
                         decision_id = current_decision.get("decision_id", "")

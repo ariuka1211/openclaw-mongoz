@@ -59,13 +59,13 @@ class OrderManager:
             for mid in expired_symbols:
                 del self.api._symbol_cache[mid]
         # Prune no-price ticks for positions no longer tracked
-        orphaned_mids = [m for m in self.bot._no_price_ticks if m not in self.tracker.positions]
+        orphaned_mids = [m for m in self.bot._no_price_ticks if m not in self.bot.tracker.positions]
         for m in orphaned_mids:
             del self.bot._no_price_ticks[m]
         # MED-7: Remove bot_managed_market_ids where market is no longer tracked
         # and not in recently closed (manual closes remove from tracker but didn't clean this set)
         stale_managed = [m for m in self.bot.bot_managed_market_ids
-                         if m not in self.tracker.positions and m not in self.bot._recently_closed]
+                         if m not in self.bot.tracker.positions and m not in self.bot._recently_closed]
         for m in stale_managed:
             self.bot.bot_managed_market_ids.discard(m)
         if stale_managed:

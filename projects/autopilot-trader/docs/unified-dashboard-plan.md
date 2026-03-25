@@ -333,7 +333,7 @@ python3 dashboard/app.py
 ```
 
 ### Step 3: Disable ai-trader dashboard startup
-If `ai-trader.service` or `ai_trader.py` starts its own dashboard on port 8080, either:
+If `ai-decisions.service` or `ai_trader.py` starts its own dashboard on port 8080, either:
 - Remove the dashboard startup from `ai_trader.py` (it calls `init_dashboard()` + `uvicorn.run()`)
 - Or change ai-trader dashboard to a different port (9090) as backup
 

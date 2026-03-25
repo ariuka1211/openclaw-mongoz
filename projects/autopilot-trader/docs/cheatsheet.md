@@ -4,9 +4,9 @@
 
 ## Services
 ```bash
-systemctl status lighter-bot lighter-scanner ai-trader
-journalctl -u lighter-bot -f          # bot logs
-journalctl -u ai-trader -f            # AI trader logs
+systemctl status bot scanner ai-trader
+journalctl -u bot -f          # bot logs
+journalctl -u ai-decisions -f            # AI trader logs
 tail -f projects/autopilot-trader/signals/scanner.log
 ```
 

@@ -1,7 +1,7 @@
 # MEMORY.md
 
 ## Active Projects
-- **Trading Bot** — Lighter DEX, Python executor + TS scanner/AI. Services: lighter-scanner, lighter-bot, ai-trader. Full architecture: `projects/autopilot-trader/docs/`
+- **Trading Bot** — Lighter DEX, Python executor + TS scanner/AI. Services: scanner, bot, ai-decisions. Full architecture: `projects/autopilot-trader/docs/`
 - **Token Tracking** — tiktoken estimation, per-section breakdown, DB persistence. Kilo gateway has ~13K+ hidden tokens per call (persistent session cache, not a bug).
 - **Watchdog** — `watchdog-daemon.sh start|stop|status`. Monitors gateway, OpenRouter, sub-agents.
 

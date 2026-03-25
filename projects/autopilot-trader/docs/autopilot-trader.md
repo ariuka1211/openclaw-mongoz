@@ -86,7 +86,7 @@ Bot also manages exits via DSL (tiered trailing stop-loss) — independent of AI
 
 **Location:** `projects/autopilot-trader/bot/bot.py`
 **Language:** Python (runs in a venv)
-**Service:** `lighter-bot.service`
+**Service:** `bot.service`
 
 The core position management daemon. It does NOT decide what to trade — it only executes decisions from the AI trader and manages exits via DSL or legacy trailing stop-loss.
 
@@ -155,7 +155,7 @@ Adapted from Senpi's DSL v5. A tiered trailing stop-loss system that tightens as
 
 **Location:** `projects/autopilot-trader/scripts/opportunity-scanner.ts`
 **Language:** TypeScript (runs via Bun)
-**Service:** `lighter-scanner.service` (wraps `scanner-daemon.sh`, runs every 5 min)
+**Service:** `scanner.service` (wraps `scanner-daemon.sh`, runs every 5 min)
 
 Scans all Lighter perp markets for actionable opportunities.
 
@@ -190,7 +190,7 @@ Writes `signals.json` with all qualified opportunities (score ≥ 60, safety pas
 
 **Location:** `projects/autopilot-trader/ai-decisions/ai_trader.py`
 **Language:** Python (async daemon)
-**Service:** `ai-trader.service`
+**Service:** `ai-decisions.service`
 
 The LLM-driven decision engine. Runs every 2 minutes (configurable), calls LLM to decide what to trade.
 
@@ -437,9 +437,9 @@ All secrets are in `/root/.openclaw/workspace/.env`:
 
 | Service | File | Working Dir | Command | Status |
 |---------|------|-------------|---------|--------|
-| `lighter-bot` | `/etc/systemd/system/lighter-bot.service` | `.../bot/` | `venv/bin/python3 bot.py` | active |
-| `lighter-scanner` | `/etc/systemd/system/lighter-scanner.service` | N/A | `scanner-daemon.sh` (runs bun in loop) | active |
-| `ai-trader` | `/etc/systemd/system/ai-trader.service` | `.../ai-decisions/` | `python3 ai_trader.py` | active |
+| `bot` | `/etc/systemd/system/bot.service` | `.../bot/` | `venv/bin/python3 bot.py` | active |
+| `scanner` | `/etc/systemd/system/scanner.service` | N/A | `scanner-daemon.sh` (runs bun in loop) | active |
+| `ai-trader` | `/etc/systemd/system/ai-decisions.service` | `.../ai-decisions/` | `python3 ai_trader.py` | active |
 
 ### Scanner Daemon (`scanner-daemon.sh`)
 
@@ -448,16 +448,16 @@ Simple bash loop: runs `bun run scripts/opportunity-scanner.ts --max-positions 3
 ### Management Commands:
 ```bash
 # Check status
-systemctl status lighter-bot lighter-scanner ai-trader
+systemctl status bot scanner ai-trader
 
 # View logs
-journalctl -u lighter-bot -f
-journalctl -u ai-trader -f
+journalctl -u bot -f
+journalctl -u ai-decisions -f
 tail -f projects/autopilot-trader/scanner.log
 
 # Restart
-systemctl restart lighter-bot
-systemctl restart lighter-scanner
+systemctl restart bot
+systemctl restart scanner
 systemctl restart ai-trader
 ```
 
@@ -481,7 +481,7 @@ systemctl restart ai-trader
 
 6. **SOCKS5 Proxy Required** — Lighter API is geo-restricted. The bot patches `lighter.rest.RESTClientObject.__init__` to use `aiohttp_socks.ProxyConnector`. The `SignerClient` is subclassed (`ProxySignerClient`) to use proxy-configured `ApiClient`. Both REST and signer need the proxy.
 
-7. **Bot Config Path** — All three systemd services use correct `projects/autopilot-trader/` paths. `ai-trader.service` uses `ai-trader.env` symlinked to workspace `.env`.
+7. **Bot Config Path** — All three systemd services use correct `projects/autopilot-trader/` paths. `ai-decisions.service` uses `ai-trader.env` symlinked to workspace `.env`.
 
 8. **Mark Price Derivation** — Bot reverse-engineers mark price from `unrealized_pnl / size`. This is more accurate than `recent_trades` for ROE evaluation but depends on correct side detection (was buggy before fix).
 
@@ -616,7 +616,7 @@ projects/autopilot-trader/
 │   │   ├── signal_analyzer.py # Signal weight suggestion
 │   │   ├── dashboard.py       # FastAPI dashboard
 │   │   ├── config.json        # AI trader config
-│   │   ├── ai-trader.service  # systemd service file
+│   │   ├── ai-decisions.service  # systemd service file
 │   │   ├── prompts/
 │   │   │   ├── system.txt     # System prompt for LLM
 │   │   │   └── decision.txt   # Decision prompt template

@@ -1,34 +1,29 @@
-# Session Handoff — 2026-03-24 17:53 MDT
+# Session Handoff — 2026-03-24 18:15 MDT
 
 ## What Happened
-- **Max positions increase:** Changed from 3 → 8 in both `config.json` (safety.max_positions) and `bot.py` (hardcoded limit). Updated context_builder account section to show "/8 max".
-- **ai-trader not trading diagnosis:** All LLM decisions were "hold None conf=0.90" because every "open" order was rejected by the bot ("max positions reached, skipping"). The LLM learned to stop trying after hours of rejections.
-- **Live reflection system built:** Replaced slow file-based reflection (3-day cron) with real-time prompt injection. Three new sections added to every cycle:
-  1. **Performance Window** — live stats: win rate by direction, hold time buckets, current streak (from DB queries)
-  2. **Learned Patterns** — rules with confidence decay (state/patterns.json). Decays 0.02/cycle, drops below 0.3, reinforced on confirmed patterns.
-  3. **Hold Regret** — shows missed opportunities: top signals when LLM chose "hold" and whether those symbols were later traded profitably.
+- **LLM waste when positions full:** Investigated whether ai-trader wastes API calls when max positions is reached. Confirmed yes — LLM still called, outputs "open", safety rejects.
+- **First attempt (reverted):** Added early-exit guard in ai_trader.py to skip LLM entirely when at max positions. Reverted because it also prevents the LLM from closing bad positions.
+- **Prompt-based fix:** Instead, the prompt now explicitly warns the LLM when full: `⚠️ ALL SLOTS FULL (8/8) — DO NOT open new positions. Only consider closing existing ones.` Added to context_builder.py account section.
+- **System prompt stale:** system.txt said "Max 3 concurrent positions" — fixed to use `{max_positions}` template, injected from config at runtime.
+- **Bug fix:** Initial context_builder change referenced `self.safety` which doesn't exist on ContextBuilder. Fixed to use `self.config.get("safety", {}).get("max_positions", 8)`.
+- **Restart hang fix:** Root-caused the ai-trader restart getting stuck. `asyncio.sleep(sleep_time)` with up to 120s sleep — SIGTERM sets flag but sleep completes. Fixed by sleeping in 2-second chunks with running flag check between each.
 
 ## Files Modified
-- `signals/ai-trader/config.json` — max_positions 3→8
-- `signals/ai-trader/bot.py` — hardcoded limit 3→8
-- `signals/ai-trader/db.py` — 4 new methods (direction_stats, hold_time_stats, streak, hold_regret_data)
-- `signals/ai-trader/context_builder.py` — 6 new methods, removed old strategy_memory handoff, wired live reflection into build_prompt()
-- `signals/ai-trader/ai_trader.py` — removed memory parameter from build_prompt() call
-- `signals/ai-trader/state/patterns.json` — created (empty, ready for learning)
+- `signals/ai-trader/ai_trader.py` — system_prompt template injection (line 110), interruptible sleep chunks (line ~216)
+- `signals/ai-trader/context_builder.py` — slots_status warning in account section (line ~530)
+- `signals/ai-trader/prompts/system.txt` — `{max_positions}` template placeholder
 
 ## State
-- Bot: 4 positions (ICP, JTO, HYUNDAI, BRENTOIL), limit 8
-- ai-trader: running, actively making open decisions again (broke hold pattern)
-- Patterns: empty (will populate as trades accumulate)
-- Services: all 3 running (ai-trader, lighter-bot, lighter-scanner)
-- Old reflection agent: still exists as cron job but no longer used by ai-trader
+- Bot: 3 positions (ICP, JTO, BRENTOIL), limit 8
+- ai-trader: running, making decisions normally
+- Services: all 3 running
+- Restart now takes ~2s instead of up to 120s
 
-## Known Issues
-- "Bot reported validation failure" message is misleading — it shows when bot rejects due to "already in position", not just validation errors
-- Old `read_strategy_memory()` method still exists in context_builder.py (dead code, harmless)
-- Bot restart is sluggish (stuck in "deactivating" state, needs SIGKILL)
+## Pending
+- None of these changes are committed yet
+- Monitor if LLM respects "DO NOT open" warning when at max positions
+- Consider: if LLM still tries to open when full, add dedicated `## ⚠️ CAPACITY ALERT` section at top of prompt
 
 ## Next
-- Monitor if live reflection improves trade decisions over next few hours
-- Consider adding pattern reinforcement when trade outcomes confirm a pattern (reinforce_pattern() exists but not wired to outcomes yet)
-- Old reflection-agent cron job could be removed since it's no longer used
+- Commit changes (branch + PR per protocol)
+- Monitor token savings from prompt warning vs early-exit approach

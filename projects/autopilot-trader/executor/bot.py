@@ -398,7 +398,7 @@ class PositionTracker:
             # Alert on tier lock
             if pos.dsl_state.locked_floor_roe is not None and not getattr(pos, '_tier_lock_alerted', False):
                 pos._tier_lock_alerted = True
-                effective_lev = pos.dsl_state.leverage if pos.dsl_state else self.cfg.default_leverage
+                effective_lev = pos.dsl_state.effective_leverage if pos.dsl_state else self.cfg.default_leverage
                 floor_price = pos.entry_price * (1 + pos.dsl_state.locked_floor_roe / 100 / effective_lev) if pos.side == "long" \
                     else pos.entry_price * (1 - pos.dsl_state.locked_floor_roe / 100 / effective_lev)
                 return ("dsl_tier_lock", {
@@ -501,12 +501,20 @@ class PositionTracker:
 
     def add_position(self, market_id: int, symbol: str, side: str, entry: float, size: float, leverage: float = None, sl_pct: float = None):
         lev = leverage or self.cfg.default_leverage
+        # Calculate effective leverage for cross margin ROE accuracy
+        # effective_leverage = notional / equity (accounts for shared margin across positions)
+        notional = abs(size * entry)
+        if self.account_equity > 0 and notional > 0:
+            eff_lev = notional / self.account_equity
+        else:
+            eff_lev = lev  # Fall back to config leverage if equity unknown
         dsl_state = None
         if self.cfg.dsl_enabled:
             dsl_state = DSLState(
                 side=side,
                 entry_price=entry,
                 leverage=lev,
+                effective_leverage=eff_lev,
                 high_water_price=entry,
                 high_water_time=datetime.now(timezone.utc),
             )
@@ -2257,7 +2265,7 @@ class LighterCopilot:
                     "entry_price": pos.entry_price,
                     "current_price": current_price if current_price and current_price > 0 else pos.entry_price,
                     "size": pos.size,
-                    "leverage": pos.dsl_state.leverage if pos.dsl_state else self.cfg.default_leverage,
+                    "leverage": pos.dsl_state.effective_leverage if pos.dsl_state else self.cfg.default_leverage,
                     "position_size_usd": pos.size * pos.entry_price,
                 })
             result = {
@@ -2305,7 +2313,7 @@ class LighterCopilot:
                     "entry_price": pos.entry_price,
                     "current_price": current_price if current_price and current_price > 0 else pos.entry_price,
                     "size": pos.size,
-                    "leverage": pos.dsl_state.leverage if pos.dsl_state else self.cfg.default_leverage,
+                    "leverage": pos.dsl_state.effective_leverage if pos.dsl_state else self.cfg.default_leverage,
                     "position_size_usd": pos.size * pos.entry_price,
                 })
             result = {
@@ -2489,6 +2497,12 @@ class LighterCopilot:
                 new_balance = await self._get_balance()
                 if new_balance > 0:
                     self.tracker.account_equity = new_balance
+                    # Recalculate effective leverage for all positions (cross margin reality)
+                    for _mid, _pos in self.tracker.positions.items():
+                        if _pos.dsl_state:
+                            _notional = abs(_pos.size * _pos.entry_price)
+                            if _notional > 0 and new_balance > 0:
+                                _pos.dsl_state.effective_leverage = _notional / new_balance
             except Exception as e:
                 logging.debug(f"Equity refresh failed (using cached): {e}")
 
@@ -2509,8 +2523,14 @@ class LighterCopilot:
                     existing.unverified_ticks = 0
                     existing.entry_price = pos["entry_price"]
                     existing.size = pos["size"]
-                    if pos.get("leverage") and existing.dsl_state:
-                        existing.dsl_state.leverage = pos["leverage"]
+                    if existing.dsl_state:
+                        # Recalculate effective leverage from current notional/equity
+                        notional = abs(existing.size * existing.entry_price)
+                        if self.tracker.account_equity > 0 and notional > 0:
+                            existing.dsl_state.effective_leverage = notional / self.tracker.account_equity
+                        elif pos.get("leverage"):
+                            existing.dsl_state.effective_leverage = pos["leverage"]
+                        existing.dsl_state.leverage = pos.get("leverage", existing.dsl_state.leverage)
                     continue
                 if mid in self.tracker.positions:
                     continue  # already tracked
@@ -2985,6 +3005,7 @@ class LighterCopilot:
             "side": dsl.side,
             "entry_price": dsl.entry_price,
             "leverage": dsl.leverage,
+            "effective_leverage": dsl.effective_leverage,
             "high_water_roe": dsl.high_water_roe,
             "high_water_price": dsl.high_water_price,
             "high_water_time": dsl.high_water_time.isoformat() if dsl.high_water_time else None,
@@ -3032,7 +3053,7 @@ class LighterCopilot:
                     "side": pos.side,
                     "entry_price": pos.entry_price,
                     "size": pos.size,
-                    "leverage": pos.dsl_state.leverage if pos.dsl_state else self.cfg.default_leverage,
+                    "leverage": pos.dsl_state.effective_leverage if pos.dsl_state else self.cfg.default_leverage,
                     "sl_pct": pos.sl_pct,
                     "high_water_mark": pos.high_water_mark,
                     "trailing_active": pos.trailing_active,
@@ -3290,6 +3311,8 @@ class LighterCopilot:
             pos.dsl_state.locked_floor_roe = dsl_data.get("locked_floor_roe")
             pos.dsl_state.stagnation_active = dsl_data.get("stagnation_active", False)
             pos.dsl_state.stagnation_started = stag_time
+            # Restore effective_leverage (backwards compat: fall back to leverage if not saved)
+            pos.dsl_state.effective_leverage = dsl_data.get("effective_leverage", dsl_data.get("leverage", pos.dsl_state.effective_leverage))
 
             logging.info(
                 f"🔄 Restored DSL state for {pos.symbol}: "

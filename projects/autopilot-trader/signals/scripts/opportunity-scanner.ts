@@ -2,12 +2,14 @@
  * Lighter.xyz Opportunity Scanner
  *
  * Scans all Lighter perp markets for actionable trading opportunities
- * based on funding rate arbitrage, volume anomalies, and price momentum.
+ * based on funding rate arbitrage, OI trend, and price momentum.
  *
  * Signal breakdown:
  *   A. Funding Rate Arbitrage — Lighter rate vs CEX average (PRIMARY signal)
- *   B. Volume Anomaly         — daily volume vs 30-day baseline estimate
- *   C. Price Momentum          — daily_price_change magnitude
+ *   B. OI Trend               — open interest change over ~24h (replaces volume anomaly)
+ *   C. Price Momentum          — daily_price_change (direction-aware)
+ *   D. MA Alignment            — 50/99/200 MA structure
+ *   E. Order Block             — nearest S/R order block
  *
  * Position sizing uses risk-based formula:
  *   positionSizeUsd = (equity × riskPct) / stopLossDistance
@@ -54,7 +56,8 @@ interface MarketOpportunity {
   marketId: number;
   // Signal scores (0-100)
   fundingSpreadScore: number;
-  volumeAnomalyScore: number;
+  oiTrendScore: number;
+  oiChangePct: number;
   momentumScore: number;
   maAlignmentScore: number;
   orderBlockScore: number;
@@ -106,6 +109,70 @@ const CONFIG = {
 const BASE_URL = "https://mainnet.zklighter.elliot.ai";
 const LIGHTER_ACCOUNT_INDEX = "719758";
 const EIGHT_HR_MULTIPLIER = 8;
+
+// --- OI Snapshot (for trend signal) ---
+
+interface OiSnapshot {
+  [symbol: string]: {
+    oi: number;
+    timestamp: string;  // ISO
+  };
+}
+
+const OI_SNAPSHOT_PATH = "../oi-snapshot.json";
+const OI_MAX_AGE_MS = 24 * 60 * 60 * 1000; // ~24 hours
+
+async function loadOiSnapshot(): Promise<OiSnapshot> {
+  try {
+    const file = Bun.file(OI_SNAPSHOT_PATH);
+    if (await file.exists()) {
+      return await file.json();
+    }
+  } catch { /* ignore */ }
+  return {};
+}
+
+async function saveOiSnapshot(snapshot: OiSnapshot): Promise<void> {
+  await Bun.write(OI_SNAPSHOT_PATH, JSON.stringify(snapshot, null, 2));
+}
+
+/**
+ * Score based on OI change percentage over ~24h.
+ *
+ * OI rising >10%  → 80-100 (conviction building)
+ * OI rising 3-10% → 60-70  (steady accumulation)
+ * OI flat ±3%     → 50     (neutral)
+ * OI falling 3-10%→ 30-40  (unwinding)
+ * OI falling >10% → 10-20  (capitulation)
+ * No previous data→ 50     (neutral)
+ */
+function scoreOiTrend(currentOi: number, prevOi: number | undefined): { score: number; changePct: number } {
+  if (prevOi === undefined || prevOi <= 0 || currentOi <= 0) {
+    return { score: 50, changePct: 0 };
+  }
+
+  const changePct = ((currentOi - prevOi) / prevOi) * 100;
+
+  let score: number;
+  if (changePct > 10) {
+    // Rising >10%: 80-100, linearly capped
+    score = Math.round(Math.min(100, 80 + (changePct - 10) * 1.5));
+  } else if (changePct > 3) {
+    // Rising 3-10%: 60-70
+    score = Math.round(60 + ((changePct - 3) / 7) * 10);
+  } else if (changePct >= -3) {
+    // Flat ±3%: 50
+    score = 50;
+  } else if (changePct >= -10) {
+    // Falling 3-10%: 30-40
+    score = Math.round(30 + ((changePct + 10) / 7) * 10);
+  } else {
+    // Falling >10%: 10-20
+    score = Math.round(Math.max(10, 20 + (changePct + 10) * 0.5));
+  }
+
+  return { score, changePct: Math.round(changePct * 100) / 100 };
+}
 
 // --- OKX Klines (for MA + Order Block signals) ---
 
@@ -445,63 +512,48 @@ function scoreFunding(
 }
 
 /**
- * B. Volume Anomaly Score (0-100)
- *
- * Compares today's daily_quote_token_volume against a 30-day baseline estimate.
- * Without historical data we use heuristics:
- *   - Markets with >$10M daily volume get a base score (they're active)
- *   - Markets with unusual volume relative to typical market caps score higher
- *
- * We estimate a "normal" volume for a market from its open_interest × price,
- * then compare actual volume to this proxy. If actual >> estimated, it's anomalous.
- *
- * Score: 0 = normal volume, 100 = volume 10× or more above baseline.
- */
-function scoreVolumeAnomaly(market: OrderBookDetail): number {
-  const vol = market.daily_quote_token_volume;
-  if (vol < 100_000) return 0;
-
-  // Proxy baseline: open_interest_value × average daily turnover multiplier
-  // Typical perp markets have 5-20× daily volume vs open interest value
-  const oiValue = market.open_interest * market.last_trade_price;
-  const baselineVol = oiValue * 10;  // assume 10× turnover is "normal"
-
-  if (baselineVol <= 0) {
-    // No OI baseline — just score by absolute volume tiers
-    if (vol > 100_000_000) return 80;  // >$100M = very active
-    if (vol > 10_000_000) return 60;   // >$10M = active
-    if (vol > 1_000_000) return 40;    // >$1M = moderate
-    return 20;
-  }
-
-  const ratio = vol / baselineVol;
-  // ratio > 1 = higher than expected volume = anomaly
-  const score = Math.min(100, Math.max(0, ratio * 30));
-  return Math.round(score);
-}
-
-/**
- * C. Price Momentum Score (0-100)
+ * C. Price Momentum Score (0-100) — direction-aware
  *
  * Uses daily_price_change from orderBookDetails.
+ * If MA direction is aligned with momentum → boost score by 1.3× (capped at 100).
+ * If MA direction opposes momentum → penalize by 0.5×.
+ * If MA is neutral ("↔") → use base scoring unchanged.
  *
- * Score by absolute magnitude:
+ * Base scoring by absolute magnitude:
  *   |change| ≥ 15% → 100 (extreme momentum)
- *   |change| ≥ 5%  → 60  (strong momentum)
- *   |change| ≥ 2%  → 30  (moderate)
- *   |change| < 2%  → 10  (quiet)
- *
- * Direction doesn't matter for the score — we're measuring opportunity
- * from volatility, not predicting direction.
+ *   |change| ≥ 10% → 80
+ *   |change| ≥ 5%  → 60
+ *   |change| ≥ 3%  → 40
+ *   |change| ≥ 1%  → 20
+ *   |change| < 1%  → 10
  */
-function scoreMomentum(dailyPriceChange: number): number {
+function scoreMomentum(dailyPriceChange: number, maDir: "↑" | "↓" | "↔"): number {
   const absChange = Math.abs(dailyPriceChange);
-  if (absChange >= 15) return 100;
-  if (absChange >= 10) return 80;
-  if (absChange >= 5) return 60;
-  if (absChange >= 3) return 40;
-  if (absChange >= 1) return 20;
-  return 10;
+
+  // Base score from magnitude
+  let base: number;
+  if (absChange >= 15) base = 100;
+  else if (absChange >= 10) base = 80;
+  else if (absChange >= 5) base = 60;
+  else if (absChange >= 3) base = 40;
+  else if (absChange >= 1) base = 20;
+  else base = 10;
+
+  // Direction-aware adjustment
+  if (maDir === "↔") {
+    return base; // neutral MA → no adjustment
+  }
+
+  // Check alignment: momentum (price change sign) vs MA direction
+  const momentumUp = dailyPriceChange > 0;
+  const maUp = maDir === "↑";
+  const aligned = (momentumUp && maUp) || (!momentumUp && !maUp);
+
+  if (aligned) {
+    return Math.min(100, Math.round(base * 1.3));
+  } else {
+    return Math.max(1, Math.round(base * 0.5));
+  }
 }
 
 // --- Position Sizing ---
@@ -626,7 +678,8 @@ function calculatePosition(market: OrderBookDetail, compositeScore: number): {
  * Rules:
  *   - 2+ signals agree → that direction
  *   - 0-1 votes or all 3 disagree → use MA as tiebreaker
- *   - MA also neutral → default "long" (conservative)
+ *   - MA also neutral → use funding spread direction if nonzero
+ *   - Everything neutral → default "long" (rare fallback)
  */
 function computeDirection(
   maDir: "↑" | "↓" | "↔",
@@ -656,7 +709,11 @@ function computeDirection(
   // Tiebreaker: MA direction
   if (maVote) return maVote;
 
-  // Conservative default
+  // No clear signal — use funding spread direction if nonzero
+  if (fundingSpread8h < 0) return "long";   // negative spread → longs receive → go long
+  if (fundingSpread8h > 0) return "short";  // positive spread → shorts receive → go short
+
+  // Everything neutral → rare fallback
   return "long";
 }
 
@@ -683,6 +740,10 @@ async function main(): Promise<void> {
     console.error("❌ Invalid account equity:", CONFIG.accountEquity);
     process.exit(1);
   }
+
+  // Load previous OI snapshot for trend comparison
+  const prevOiSnapshot = await loadOiSnapshot();
+  console.log(`  OI snapshot: ${Object.keys(prevOiSnapshot).length} markets loaded`);
 
   // Fetch actual balance from Lighter API
   const liveBalance = await fetchBalance();
@@ -751,17 +812,24 @@ async function main(): Promise<void> {
   }
 
   const opportunities: MarketOpportunity[] = [];
+  // Build new OI snapshot as we scan
+  const newOiSnapshot: OiSnapshot = {};
 
   for (const { market: m, ltRate, cexRates } of scoredMarkets) {
     // A. Funding arbitrage
     const funding = scoreFunding(ltRate.rate, cexRates);
 
-    // B. Volume anomaly
-    const volScore = scoreVolumeAnomaly(m);
+    // B. OI trend (replaces volume anomaly)
+    const prevEntry = prevOiSnapshot[m.symbol];
+    const oiResult = scoreOiTrend(m.open_interest, prevEntry?.oi);
 
-    // C. Momentum
-    const momScore = scoreMomentum(m.daily_price_change);
+    // Record current OI for snapshot
+    newOiSnapshot[m.symbol] = {
+      oi: m.open_interest,
+      timestamp: new Date().toISOString(),
+    };
 
+    // C. Momentum (direction-aware — needs MA direction first)
     // D. MA alignment + E. Order Block (from OKX klines)
     let maScore = 50;
     let maDir: "↑" | "↓" | "↔" = "↔";
@@ -792,9 +860,12 @@ async function main(): Promise<void> {
       }
     }
 
-    // Composite: Funding 35% | Volume 15% | Momentum 15% | MA 20% | OB 15%
+    // C. Momentum — now direction-aware (needs maDir)
+    const momScore = scoreMomentum(m.daily_price_change, maDir);
+
+    // Composite: Funding 35% | MA 25% | OB 15% | Momentum 15% | OI Trend 10%
     const composite = Math.round(
-      funding.score * 0.35 + volScore * 0.15 + momScore * 0.15 + maScore * 0.20 + obScore * 0.15
+      funding.score * 0.35 + maScore * 0.25 + obScore * 0.15 + momScore * 0.15 + oiResult.score * 0.10
     );
 
     // Position sizing + safety check
@@ -807,7 +878,8 @@ async function main(): Promise<void> {
       symbol: m.symbol,
       marketId: m.market_id,
       fundingSpreadScore: funding.score,
-      volumeAnomalyScore: volScore,
+      oiTrendScore: oiResult.score,
+      oiChangePct: oiResult.changePct,
       momentumScore: momScore,
       maAlignmentScore: maScore,
       orderBlockScore: obScore,
@@ -836,6 +908,10 @@ async function main(): Promise<void> {
       detectedAt: new Date().toISOString(),
     });
   }
+
+  // Save OI snapshot for next run
+  await saveOiSnapshot(newOiSnapshot);
+  console.log(`  OI snapshot saved: ${Object.keys(newOiSnapshot).length} markets`);
 
   // Sort by composite score descending
   opportunities.sort((a, b) => b.compositeScore - a.compositeScore);
@@ -866,7 +942,7 @@ async function main(): Promise<void> {
     console.log("");
 
     const COL = {
-      sym: 10, dir: 5, score: 6, fund: 10, spread: 10, vol: 8, mom: 6,
+      sym: 10, dir: 5, score: 6, fund: 10, spread: 10, oiTr: 8, mom: 6,
       ma: 10, ob: 14,
       risk: 8, slPct: 8, slAbs: 10, posSize: 10, lev: 6, liqD: 8,
     };
@@ -877,7 +953,7 @@ async function main(): Promise<void> {
       padL("SCORE", COL.score) +
       padL("FUND8H", COL.fund) +
       padL("SPREAD8H", COL.spread) +
-      padL("VOLUME", COL.vol) +
+      padL("OI TREND", COL.oiTr) +
       padL("CHG%", COL.mom) +
       padL("MA", COL.ma) +
       padL("OB", COL.ob) +
@@ -895,6 +971,7 @@ async function main(): Promise<void> {
       const maStr = `${o.maDirection}${o.maAlignmentScore}`;
       const obDistStr = o.obDistancePct !== null ? `${o.obDistancePct.toFixed(1)}%` : "—";
       const obStr = o.obType !== "none" ? `${o.obType === "support" ? "S" : "R"} ${obDistStr}` : "none";
+      const oiStr = `${o.oiTrendScore}(${o.oiChangePct >= 0 ? "+" : ""}${o.oiChangePct.toFixed(0)}%)`;
 
       console.log(
         `  ${pad(o.symbol, COL.sym)}` +
@@ -902,7 +979,7 @@ async function main(): Promise<void> {
         padL(String(o.compositeScore), COL.score) +
         padL(fmtPct(o.lighterFundingRate8h, 3), COL.fund) +
         padL(fmtPct(o.fundingSpread8h, 3), COL.spread) +
-        padL(fmtUsd(o.dailyVolumeUsd), COL.vol) +
+        padL(oiStr, COL.oiTr) +
         padL(fmtPct(o.dailyPriceChange, 1), COL.mom) +
         padL(maStr, COL.ma) +
         padL(obStr, COL.ob) +
@@ -976,7 +1053,7 @@ async function main(): Promise<void> {
   }
 
   console.log("");
-  console.log("  Signal weights: Funding 35% | Volume 15% | Momentum 15% | MA Alignment 20% | Order Block 15%");
+  console.log("  Signal weights: Funding 35% | MA Alignment 25% | Order Block 15% | Momentum 15% | OI Trend 10%");
   console.log("  Sizing: risk-based (equity × riskPct / SL distance) | Max 20× leverage | Liq ≥ 2× SL");
 
   // Check for suggested weights from signal analyzer
@@ -989,7 +1066,7 @@ async function main(): Promise<void> {
         console.log("");
         console.log(`  💡 SUGGESTED WEIGHTS AVAILABLE (${suggested.trades_analyzed} trades analyzed)`);
         console.log(`     FundingSpread: ${suggested.suggested_weights_blended.fundingSpreadScore}`);
-        console.log(`     VolumeAnomaly: ${suggested.suggested_weights_blended.volumeAnomalyScore}`);
+        console.log(`     OI Trend:      ${suggested.suggested_weights_blended.oiTrendScore}`);
         console.log(`     Momentum:      ${suggested.suggested_weights_blended.momentumScore}`);
         console.log(`     MA Alignment:  ${suggested.suggested_weights_blended.maAlignmentScore}`);
         console.log(`     Order Block:   ${suggested.suggested_weights_blended.orderBlockScore}`);
@@ -1023,7 +1100,8 @@ async function main(): Promise<void> {
       marketId: o.marketId,
       compositeScore: o.compositeScore,
       fundingSpreadScore: o.fundingSpreadScore,
-      volumeAnomalyScore: o.volumeAnomalyScore,
+      oiTrendScore: o.oiTrendScore,
+      oiChangePct: o.oiChangePct,
       momentumScore: o.momentumScore,
       maAlignmentScore: o.maAlignmentScore,
       orderBlockScore: o.orderBlockScore,

@@ -72,6 +72,7 @@ memory/session-watchdog-state.json
 projects/autopilot-trader/signals/signals.json
 projects/autopilot-trader/signals/ai-decision.json
 projects/autopilot-trader/signals/ai-result.json
+projects/autopilot-trader/oi-snapshot.json
 
 # Secrets
 auth-profiles.json

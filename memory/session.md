@@ -1,29 +1,34 @@
-# Session Handoff — 2026-03-24 18:15 MDT
+# Session Handoff — 2026-03-24 19:06 MDT
 
 ## What Happened
-- **LLM waste when positions full:** Investigated whether ai-trader wastes API calls when max positions is reached. Confirmed yes — LLM still called, outputs "open", safety rejects.
-- **First attempt (reverted):** Added early-exit guard in ai_trader.py to skip LLM entirely when at max positions. Reverted because it also prevents the LLM from closing bad positions.
-- **Prompt-based fix:** Instead, the prompt now explicitly warns the LLM when full: `⚠️ ALL SLOTS FULL (8/8) — DO NOT open new positions. Only consider closing existing ones.` Added to context_builder.py account section.
-- **System prompt stale:** system.txt said "Max 3 concurrent positions" — fixed to use `{max_positions}` template, injected from config at runtime.
-- **Bug fix:** Initial context_builder change referenced `self.safety` which doesn't exist on ContextBuilder. Fixed to use `self.config.get("safety", {}).get("max_positions", 8)`.
-- **Restart hang fix:** Root-caused the ai-trader restart getting stuck. `asyncio.sleep(sleep_time)` with up to 120s sleep — SIGTERM sets flag but sleep completes. Fixed by sleeping in 2-second chunks with running flag check between each.
+- **Scanner signal exploration:** Walked through full pipeline — scanner → signals.json → ai-trader → bot IPC. No DB in scanner, file-based IPC only.
+- **Scanner improvements (deployed):**
+  1. Direction-aware momentum: aligned with MA gets 1.3× boost, opposed gets 0.5× penalty
+  2. OI trend signal replaces volume anomaly — tracks open interest changes via `oi-snapshot.json`
+  3. Weights rebalanced: Funding 35% / MA 25% / OB 15% / Momentum 15% / OI 10%
+  4. No more blind "long" fallback — uses funding spread direction as tiebreaker
+  5. All output/display updated
+- **Signal analyzer patched:** `signal_analyzer.py` updated from `volumeAnomalyScore` → `oiTrendScore`, weights aligned with scanner
+- **Analyzer results (9 trades):** Funding all 100 (no differentiation), momentum NEGATIVE delta (-48), MA + OB positive. OI trend will populate with new data.
+- **Pocket ideas:** Created `projects/autopilot-trader/docs/pocket-ideas.md` — signal history table idea documented
 
 ## Files Modified
-- `signals/ai-trader/ai_trader.py` — system_prompt template injection (line 110), interruptible sleep chunks (line ~216)
-- `signals/ai-trader/context_builder.py` — slots_status warning in account section (line ~530)
-- `signals/ai-trader/prompts/system.txt` — `{max_positions}` template placeholder
+- `signals/scripts/opportunity-scanner.ts` — OI trend, direction-aware momentum, new weights, direction fallback
+- `signals/ai-trader/signal_analyzer.py` — volumeAnomalyScore → oiTrendScore, default weights updated
+- `projects/autopilot-trader/docs/pocket-ideas.md` — new file
 
 ## State
 - Bot: 3 positions (ICP, JTO, BRENTOIL), limit 8
-- ai-trader: running, making decisions normally
+- Scanner: restarted, running with new scoring. OI snapshot baseline created (107 markets)
 - Services: all 3 running
-- Restart now takes ~2s instead of up to 120s
+- First OI snapshot saved — next scan will show real trend data
 
-## Pending
-- None of these changes are committed yet
-- Monitor if LLM respects "DO NOT open" warning when at max positions
-- Consider: if LLM still tries to open when full, add dedicated `## ⚠️ CAPACITY ALERT` section at top of prompt
+## Pending / Open Issue
+- **SL volatility bug:** Stop loss distance = single-day (high-low)/price. Spikes give absurdly wide stops (CRCL 26.7%), quiet days give too-tight stops. Fix: use 7-day average daily range from OKX klines instead.
+- Signal history table in pocket-ideas.md (not urgent)
 
-## Next
-- Commit changes (branch + PR per protocol)
-- Monitor token savings from prompt warning vs early-exit approach
+## Next Steps
+- Fix SL volatility (use rolling average range from OKX klines)
+- Monitor OI trend data accumulation over next few scans
+- Monitor if direction-aware momentum changes trade quality
+- Commit all changes (branch + PR per protocol)

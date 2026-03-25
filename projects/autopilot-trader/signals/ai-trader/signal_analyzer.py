@@ -2,7 +2,7 @@
 Signal Weight Analyzer — correlates scanner signals with trade outcomes.
 
 Reads the decisions and outcomes tables to find which signal components
-(funding, volume, momentum, MA, orderbook) correlate with winning trades.
+(funding, OI trend, momentum, MA, orderbook) correlate with winning trades.
 Outputs suggested weight adjustments as JSON for human review.
 
 Does NOT auto-apply weights — just suggests.
@@ -25,18 +25,18 @@ log = logging.getLogger("ai-trader.signal_analyzer")
 # Signal score fields in the signals snapshot
 SIGNAL_KEYS = [
     "fundingSpreadScore",
-    "volumeAnomalyScore",
+    "oiTrendScore",
     "momentumScore",
     "maAlignmentScore",
     "orderBlockScore",
 ]
 
-# Default weights (what the scanner likely uses as baseline)
+# Default weights (what the scanner uses as baseline)
 DEFAULT_WEIGHTS = {
-    "fundingSpreadScore": 0.25,
-    "volumeAnomalyScore": 0.20,
-    "momentumScore": 0.25,
-    "maAlignmentScore": 0.15,
+    "fundingSpreadScore": 0.35,
+    "oiTrendScore": 0.10,
+    "momentumScore": 0.15,
+    "maAlignmentScore": 0.25,
     "orderBlockScore": 0.15,
 }
 

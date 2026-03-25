@@ -11,7 +11,7 @@
 **Start:**
 1. Read `memory/session.md` — handoff from last session
 2. Read `MEMORY.md` — long-term context
-3. Read `projects/autopilot-trader/docs/autopilot-trader.md` — trading system
+3. Read `projects/autopilot-trader/docs/cheatsheet.md` — quick file map + patterns (read `autopilot-trader.md` only if deeper context needed)
 4. Check `memory/` for today's daily file
 
 **End — 🔴 WRAP UP:** John says "wrap up" → reply with a checklist as each step completes:

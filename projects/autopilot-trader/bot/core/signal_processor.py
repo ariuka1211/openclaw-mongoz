@@ -508,7 +508,7 @@ class SignalProcessor:
             try:
                 await self.api._ensure_signer()
                 if self.api._signer is not None:
-                    if not hasattr(self, '_auth_manager'):
+                    if not hasattr(self.bot, '_auth_manager'):
                         self.bot._auth_manager = LighterAuthManager(
                             signer=self.api._signer,
                             account_index=self.cfg.account_index
@@ -626,7 +626,7 @@ class SignalProcessor:
         if not client_order_index:
             return None
         try:
-            if not hasattr(self, '_auth_manager'):
+            if not hasattr(self.bot, '_auth_manager'):
                 self.bot._auth_manager = LighterAuthManager(
                     signer=self.api._signer,
                     account_index=self.cfg.account_index

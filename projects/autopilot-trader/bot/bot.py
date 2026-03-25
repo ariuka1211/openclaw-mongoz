@@ -280,6 +280,11 @@ class LighterCopilot:
             logging.error(f"Failed to fetch balance: {e}")
         return 0
 
+    # ── Delegation methods (called by extracted modules via self.bot) ──
+    def _save_state(self):
+        """Delegate to StateManager. Called by signal_processor/execution_engine."""
+        self.state_manager._save_state()
+
     def _shutdown(self):
         logging.info("Shutdown requested...")
         self.running = False

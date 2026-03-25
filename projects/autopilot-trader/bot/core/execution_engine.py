@@ -51,7 +51,7 @@ class ExecutionEngine:
             logging.info("✅ Kill switch deactivated")
             await self.alerter.send("✅ *Kill switch deactivated*\nBot resumed normal operation.")
 
-        self.order_manager._prune_caches()
+        self.bot.order_manager._prune_caches()
         if not self.api:
             return
 
@@ -179,7 +179,7 @@ class ExecutionEngine:
                     exit_price = self.api.get_mark_price(mid) if self.api else pos.entry_price
                     if not exit_price or exit_price <= 0:
                         exit_price = pos.entry_price
-                    self.signal_processor._log_outcome(pos, exit_price, "exchange_close")
+                    self.bot.signal_processor._log_outcome(pos, exit_price, "exchange_close")
                     logging.info(f"Position closed by exchange: {pos.symbol}")
                     self.bot._recently_closed[mid] = time.monotonic() + 300
                     pos.active_sl_order_id = None  # MED-18
@@ -253,7 +253,7 @@ class ExecutionEngine:
         self.bot._pending_sync.clear()
 
         # Reconcile saved DSL state with detected positions (first tick after restart)
-        await self.state_manager._reconcile_positions(live_positions)
+        await self.bot.state_manager._reconcile_positions(live_positions)
 
         # MED-4: Refresh position context in result file so AI trader sees current positions
         # even between its own decisions (DSL/SL/TP closes update tracker but not result file)
@@ -261,15 +261,15 @@ class ExecutionEngine:
         if self._ai_mode:
             self._result_dirty = False
         if self._ai_mode and self.tracker.positions:
-            self.signal_processor._refresh_position_context()
+            self.bot.signal_processor._refresh_position_context()
 
         # 1.5. Process signals — AI mode or rule-based
         # NOTE: Moved AFTER position sync/confirmation so tracker is populated
         # before close_all or other AI decisions execute.
         if self._ai_mode:
-            await self.signal_processor._process_ai_decision()
+            await self.bot.signal_processor._process_ai_decision()
         else:
-            await self.signal_processor._process_signals()
+            await self.bot.signal_processor._process_signals()
 
         # 2. Update tracked markets
         self.api.set_tracked_markets(list(self.tracker.positions.keys()))
@@ -287,7 +287,7 @@ class ExecutionEngine:
                 continue  # one bad position doesn't kill the rest
 
         # Persist state for crash/restart recovery
-        self.state_manager._save_state()
+        self.bot.state_manager._save_state()
 
         # ── Idle tick tracking — extend sleep when flat with no activity ──
         if len(self.tracker.positions) == 0 and not self.bot._signal_processed_this_tick:
@@ -428,7 +428,7 @@ class ExecutionEngine:
                 pos.active_sl_order_id = sl_coi
             if sl_success:
                 # CRITICAL-4: Don't log outcome yet — log ONCE after verification
-                position_closed = await self.signal_processor._verify_position_closed(mid, pos.symbol)
+                position_closed = await self.bot.signal_processor._verify_position_closed(mid, pos.symbol)
                 if not position_closed:
                     # Increment DSL close attempt counter
                     attempts = self.bot._dsl_close_attempts.get(pos.symbol, 0) + 1
@@ -439,7 +439,7 @@ class ExecutionEngine:
                         # Escalate: set cooldown and alert
                         self.bot._dsl_close_attempt_cooldown[pos.symbol] = time.monotonic() + self.bot._close_cooldown_seconds
                         # CRITICAL-4: Log with estimated price as fallback after all retries exhausted
-                        self.signal_processor._log_outcome(pos, price, f"dsl_{action}", estimated=True)
+                        self.bot.signal_processor._log_outcome(pos, price, f"dsl_{action}", estimated=True)
                         await self.alerter.send(
                             f"🚨 *DSL CLOSE FAILED ×{attempts}*\n"
                             f"{pos.side.upper()} {pos.symbol}\n"
@@ -474,10 +474,10 @@ class ExecutionEngine:
                         f"MANUAL INTERVENTION may be needed."
                     )
                 return  # Don't remove from tracker, will retry after cooldown
-            fill_price = await self.signal_processor._get_fill_price(mid, sl_coi)
+            fill_price = await self.bot.signal_processor._get_fill_price(mid, sl_coi)
             exit_price = fill_price if fill_price else price
             # CRITICAL-4: Log outcome ONCE with actual fill price after verification
-            self.signal_processor._log_outcome(pos, exit_price, f"dsl_{action}")
+            self.bot.signal_processor._log_outcome(pos, exit_price, f"dsl_{action}")
             self.bot._recently_closed[mid] = time.monotonic() + 300  # 5 min phantom guard
             pos.active_sl_order_id = None  # MED-18
             self.bot.bot_managed_market_ids.discard(mid)
@@ -514,12 +514,12 @@ class ExecutionEngine:
         # Execute the order
         if action == "trailing_take_profit":
             # In quota emergency mode, skip TP orders — only SL proceeds
-            if self.order_manager._should_skip_non_critical_orders():
+            if self.bot.order_manager._should_skip_non_critical_orders():
                 logging.warning(f"🚫 {pos.symbol}: TP skipped in quota emergency mode, SL only")
                 return  # Keep position, will retry next tick when quota recovers
             await self.api.execute_tp(mid, pos.size, price, is_long)
             # TP submitted — log outcome immediately (no verification loop for TP)
-            self.signal_processor._log_outcome(pos, price, action)
+            self.bot.signal_processor._log_outcome(pos, price, action)
         else:
             # MED-18: Cancel stale SL order before placing new one
             if pos.active_sl_order_id:
@@ -531,14 +531,14 @@ class ExecutionEngine:
                 pos.active_sl_order_id = sl_coi
             if sl_success:
                 # CRITICAL-4: Don't log outcome yet — log ONCE after verification
-                position_closed = await self.signal_processor._verify_position_closed(mid, pos.symbol)
+                position_closed = await self.bot.signal_processor._verify_position_closed(mid, pos.symbol)
                 if not position_closed:
                     logging.warning(f"⚠️ {pos.symbol}: SL submitted but position still open — keeping in tracker")
                     return  # Don't remove from tracker, will retry next tick
-                fill_price = await self.signal_processor._get_fill_price(mid, sl_coi)
+                fill_price = await self.bot.signal_processor._get_fill_price(mid, sl_coi)
                 price = fill_price if fill_price else price
                 # CRITICAL-4: Log outcome ONCE with actual fill price after verification
-                self.signal_processor._log_outcome(pos, price, action)
+                self.bot.signal_processor._log_outcome(pos, price, action)
             else:
                 # SL order failed (rate-limited or rejected) — track attempts with graduated delay
                 # Note: _close_attempts is shared between AI close and legacy SL paths.
@@ -570,7 +570,7 @@ class ExecutionEngine:
     # ── Delegation methods for signal_processor ───────────────────
     def _save_state(self):
         """Delegate to StateManager (called by signal_processor via self.bot)."""
-        self.state_manager._save_state()
+        self.bot.state_manager._save_state()
 
 
 

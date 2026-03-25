@@ -1,22 +1,36 @@
-# Session — 2026-03-25 11:40-11:47 MDT
+# Session — 2026-03-25 11:49-12:11 MDT
 
 ## What Happened
-- Audited entire `dashboard/` folder for dead code, logic errors, and duplication
-- Found 7 issues: 2 logic bugs, 3 dead code items, 2 code quality (duplication)
-- Spawned 3 subagents to fix in parallel:
-  - **fix-logic-bugs** — rejections filter fix (trader.js), model source fix (system.py)
-  - **fix-dead-code** — removed traderAlerts polling, deleted start.sh, cleaned __pycache__
-  - **fix-shared-utils** — created `api/utils.py`, deduped `_read_json` and `_time_ago` across all API modules
-- **Caught subagent miss:** fix-logic-bugs claimed to edit system.py but didn't — fixed manually in review
-- Restarted dashboard, smoke tested all 15 API endpoints — all 200, clean logs
+- Full audit of `bot/` folder for dead code, unused files, logic errors
+- Found 7 issues across dead code and code smell categories
+- Fixed in 2 rounds of parallel subagents:
 
-## Key Fixes
-- `trader.js` rejections filter: `if (!d.safety_approved || d.executed)` → `if (d.safety_approved)` (was counting wrong thing)
-- `system.py` model: reads from `ai-decisions/config.json` llm.primary_model instead of missing field in ai-decision.json
-- `providers.js`: removed dead `traderAlerts` polling (10s interval, zero consumers)
-- New `dashboard/api/utils.py`: shared `read_json()` + `time_ago()` extracted from 4 files
+### Round 1 — Dead Code (3 subagents)
+- Deleted `Dockerfile` + `docker-compose.yml` (dead, bot runs via systemd, Dockerfile was broken missing auth_helper.py)
+- Deleted `.github/` directory (broken CI — no tests dir, always fails)
+- Rewrote `README.md` with accurate features list
+- Deleted ghost `scale_up.cpython-312.pyc`
+- Synced `config.example.yml` to match live config (missing DSL tiers, wrong paths, wrong values)
 
-## Pending
+### Round 2 — Code Smell (3 subagents)
+- Removed 3 debug quota extraction log lines from bot.py
+- Added `aiohttp-socks>=0.8` + `aiohttp-retry>=2.8` to requirements.txt
+- Fixed README typo: `cd executor` → `cd bot`
+- Deleted `.flake8` config (no longer needed without CI)
+
+### Additional
+- Pushed `signals/oi-snapshot.json` update
+
+## Key Findings
+- **No logic errors found** — bot.py and dsl.py control flow is correct
+- Bot runs via systemd (`bot.service`), not Docker — Docker files were dead since day 1
+- `auth_helper.py` is imported by bot.py but was missing from Dockerfile COPY — would crash if Docker was ever used
+- `aiohttp-socks` and `aiohttp-retry` were transitive deps from lighter-sdk, now explicit
+
+## Pending (from previous sessions)
 - Backtesting implementation (triple barrier method) — still not started
-- Uncommitted equity/SL fixes from earlier sessions — need checking if already on main
-- Dashboard fixes not committed yet — John will decide when to commit
+- Dashboard fixes from morning session — committed earlier today
+
+## Next Steps
+- Wrap up session.md + daily log (this session)
+- Push to main

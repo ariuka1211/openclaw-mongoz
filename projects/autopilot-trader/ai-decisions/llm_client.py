@@ -54,16 +54,6 @@ class LLMStats:
         self._latency_samples = self._latency_samples[-100:]
         self.avg_latency_ms = sum(self._latency_samples) / len(self._latency_samples)
 
-    def to_dict(self) -> dict:
-        return {
-            "total_calls": self.total_calls,
-            "total_tokens_in": self.total_tokens_in,
-            "total_tokens_out": self.total_tokens_out,
-            "total_cost": round(self.total_cost, 4),
-            "fallback_count": self.fallback_count,
-            "error_count": self.error_count,
-            "avg_latency_ms": round(self.avg_latency_ms, 1),
-        }
 
 
 class LLMClient:

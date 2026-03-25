@@ -118,14 +118,9 @@ class SafetyLayer:
         if len(positions) >= self.max_positions:
             reasons.append(f"max positions ({self.max_positions}) reached")
 
-        # Rule 9: No opening if same-direction position exists (unless adding)
-        for p in positions:
-            if p.get("symbol") == symbol and p.get("side") == direction:
-                reasons.append(f"already have {direction} position in {symbol}")
-
-        # Already in this market any direction
+        # No duplicate positions — block if any position already exists in this symbol
         if any(p.get("symbol") == symbol for p in positions):
-            reasons.append(f"already have position in {symbol} (different direction)")
+            reasons.append(f"already have position in {symbol}")
 
         # Rule 2: Max 20x leverage (must be positive)
         if leverage <= 0:

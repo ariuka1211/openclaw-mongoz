@@ -17,7 +17,7 @@ from pathlib import Path
 
 from context_builder import ContextBuilder
 from db import DecisionDB
-from llm_client import LLMClient
+from llm_client import LLMClient, LLMStats
 from safety import SafetyLayer
 
 # Add shared/ to path for IPC utilities
@@ -391,7 +391,6 @@ class AITrader:
         )
 
         # Log token usage and estimated cost
-        from llm_client import LLMStats
         cost = (
             tokens_in * LLMStats.COST_PER_1M_INPUT / 1_000_000
             + tokens_out * LLMStats.COST_PER_1M_OUTPUT / 1_000_000

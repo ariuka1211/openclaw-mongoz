@@ -344,7 +344,6 @@ class DecisionDB:
 
     def purge_old_data(self, keep_days: int = 7):
         """Remove decisions, alerts, and outcomes older than keep_days."""
-        cutoff = datetime.now(timezone.utc).isoformat()[:10]  # today
         with self._lock:
             # Delete old decisions
             cur = self._conn.execute(

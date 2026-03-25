@@ -108,12 +108,10 @@ class ContextBuilder:
         # Resolve relative paths relative to config file directory
         if config_dir:
             self.signals_file = Path(config_dir) / config["signals_file"]
-            self.memory_file = Path(config_dir) / config.get("strategy_memory_file", "state/strategy_memory.md")
             self.result_file = Path(config_dir) / config.get("result_file", "../ai-result.json")
             self.patterns_file = Path(config_dir) / config.get("patterns_file", "state/patterns.json")
         else:
             self.signals_file = Path(config["signals_file"])
-            self.memory_file = Path(config.get("strategy_memory_file", "state/strategy_memory.md"))
             self.result_file = Path(config.get("result_file", "../ai-result.json"))
             self.patterns_file = Path(config.get("patterns_file", "state/patterns.json"))
 
@@ -405,15 +403,6 @@ class ContextBuilder:
 
         # Resolve equity early — needed by positions ROE calc below
         equity = signals_config.get("accountEquity", 1000)
-        try:
-            equity_file = Path(self.config_dir if hasattr(self, 'config_dir') and self.config_dir else '.') / "state" / "equity.json"
-            if equity_file.exists():
-                eq_data = json.loads(equity_file.read_text())
-                file_equity = eq_data.get("equity", 0)
-                if file_equity > 0:
-                    equity = file_equity
-        except Exception:
-            pass
 
         # 1. Current positions (compressed)
         if positions:

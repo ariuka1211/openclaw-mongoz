@@ -1,3 +1,4 @@
+// NOTE: If re-integrated, change "-USDT-SWAP" to "-USDT" to match opportunity-scanner.ts symbol format
 /**
  * Correlation Guard — prevents opening correlated positions
  *

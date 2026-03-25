@@ -119,7 +119,7 @@ interface OiSnapshot {
   };
 }
 
-const OI_SNAPSHOT_PATH = "../oi-snapshot.json";
+const OI_SNAPSHOT_PATH = "../signals/oi-snapshot.json";
 const OI_MAX_AGE_MS = 24 * 60 * 60 * 1000; // ~24 hours
 
 async function loadOiSnapshot(): Promise<OiSnapshot> {

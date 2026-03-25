@@ -147,7 +147,7 @@ Adapted from Senpi's DSL v5. A tiered trailing stop-loss system that tightens as
 
 ### 3.3 Opportunity Scanner (`opportunity-scanner.ts`)
 
-**Location:** `projects/autopilot-trader/scripts/opportunity-scanner.ts`
+**Location:** `projects/autopilot-trader/scanner/opportunity-scanner.ts`
 **Language:** TypeScript (runs via Bun)
 **Service:** `scanner.service` (wraps `scanner-daemon.sh`, runs every 5 min)
 
@@ -260,7 +260,7 @@ HTTP client for Kilo Gateway API (`api.kilo.ai/api/gateway`). Uses `KILOCODE_API
 - Rate limit handling (429 → 60s backoff)
 - Tracks stats: calls, tokens, latency
 
-### 3.8 Dashboard (`dashboard.py` + `static/index.html`)
+### 3.8 Dashboard (`dashboard.py` + `dashboard/index.html`)
 
 FastAPI web server on port 8080. Endpoints:
 - `/` — HTML dashboard
@@ -423,7 +423,7 @@ All secrets are in `/root/.openclaw/workspace/.env`:
 
 ### Scanner Daemon (`scanner-daemon.sh`)
 
-Simple bash loop: runs `bun run scripts/opportunity-scanner.ts --max-positions 3` every 300 seconds. Output goes to `scanner.log`.
+Simple bash loop: runs `bun run scanner/opportunity-scanner.ts --max-positions 3` every 300 seconds. Output goes to `scanner.log`.
 
 ### Management Commands:
 ```bash
@@ -644,7 +644,7 @@ projects/autopilot-trader/
 *Hard-won knowledge from building and operating the system (March 2026).*
 
 - **DSL high-water marks reset on adoption/reconciliation** — Can't reconstruct from exchange data alone. Accepted tradeoff.
-- **Market orders work, limit orders don't on Lighter** — `avg_execution_price` acts as a hard limit. Use `create_market_order_limited_slippage`.
+- **Market orders work, limit orders don't on Lighter** — `avg_execution_price` acts as a hard limit. Use `create_market_order_if_slippage` instead of `create_market_order_limited_slippage` (the latter has a hard-limit bug — see Known Issue #1).
 - **Confidence scale mismatch** — AI outputs 0-1, bot expects 0-100. Mismatch silently rejects everything.
 - **`stop_loss_pct` from AI must be stored on TrackedPosition** — Otherwise bot silently ignores the AI's stop-loss instruction.
 - **Parse decision JSON with brace-depth tracking** — `rfind('}')` is fragile on nested JSON and will break.
@@ -654,3 +654,4 @@ projects/autopilot-trader/
 - **Always restart services after merging subagent fixes** — Bugs often only crash on first run.
 - **ExecStartPre healthcheck** — Prevents cascading restart loops.
 - **Signal staleness** — Check `signals.json` modification time before using. Could be hours old.
+d.

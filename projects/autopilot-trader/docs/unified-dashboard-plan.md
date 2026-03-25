@@ -2,7 +2,9 @@
 
 **Status:** Ready to build
 **Created:** 2026-03-24
-**Replaces:** `dashboard/app.py` (port 8080), `ai-decisions/dashboard.py` (port 8080)
+**Replaces:** `dashboard/app.py` (port 8080)
+
+> **Note:** `ai-decisions/dashboard.py` was planned as part of the AI trader component but was never implemented — the file does not exist. The plan mentions it in a few places as a to-be-replaced item; treat those as no-ops.
 
 ---
 
@@ -34,7 +36,7 @@ dashboard/
 - New `js/` directory with Store-based data layer — renderers subscribe to Store, providers populate it
   - Today: poll-based provider populates Store via `setInterval` + `fetch`
   - Future: swap to WebSocket provider — zero changes to render functions
-- `ai-decisions/dashboard.py` is left in place but **not started** — its port will conflict, so stop the ai-trader dashboard service
+- `ai-decisions/dashboard.py` was planned but never implemented — no conflict to resolve
 
 **Files NOT changed (read-only):**
 - `ai-decisions/db.py` — reused as-is (import DecisionDB)
@@ -319,7 +321,7 @@ Score cell has a small inline bar showing component breakdown (stacked colored s
 ```bash
 # Find and kill existing dashboard processes
 pkill -f "dashboard/app.py"
-pkill -f "ai-decisions/dashboard.py"
+# ai-decisions/dashboard.py was planned but never implemented — nothing to kill here
 # Check they're gone
 lsof -i :8080
 ```
@@ -440,7 +442,7 @@ Use CDN: `<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>`. No n
 Use absolute paths resolved from the project root:
 ```python
 PROJECT_ROOT = Path("/root/.openclaw/workspace/projects/autopilot-trader")
-BOT_STATE_PATH = PROJECT_ROOT / "executor" / "state" / "bot_state.json"
+BOT_STATE_PATH = PROJECT_ROOT / "bot" / "state" / "bot_state.json"
 TRADER_DB_PATH = PROJECT_ROOT / "state" / "trader.db"
 SIGNALS_PATH = PROJECT_ROOT / "signals" / "signals.json"
 AI_DECISION_PATH = PROJECT_ROOT / "signals" / "ai-decision.json"
@@ -492,6 +494,10 @@ startPolling("portfolio", "/api/portfolio", 5000);
 - WebSocket: add `ws.onmessage → Store.set(channel, data)`, remove polling. Zero renderer changes.
 - Optimistic updates: `Store.set("portfolio", [...pending, ...current])` before server confirms, reconcile on response.
 - Historical caching: Store.set for equity curve only when new trades detected, skip redundant fetches.
+
+### Error handling
+Each API endpoint should catch file-not-found and JSON decode errors, returning a `{"error": "..."}` response rather than 500. The frontend should show "—" for missing data.
+ trades detected, skip redundant fetches.
 
 ### Error handling
 Each API endpoint should catch file-not-found and JSON decode errors, returning a `{"error": "..."}` response rather than 500. The frontend should show "—" for missing data.

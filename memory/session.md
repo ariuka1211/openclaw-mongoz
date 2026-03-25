@@ -1,19 +1,19 @@
-# Session — 2026-03-25 12:27-12:40 MDT
+# Session — 2026-03-25 12:41-12:48 MDT
 
 ## What Happened
-- Scanner folder audit: 5 issues (2 medium, 2 low, 1 trivial)
-- Fixed 4 issues with subagent + manual verification
-- Subagent missed type definition (`index: number` still present after removing `index: 0`) — caught in verification
-- Cleaned stale docs in autopilot-trader.md: removed sections 3.8/3.9/3.10 (reflection, signal analyzer, supporting scripts), cleaned architecture diagram, rewrote Appendix A file tree to current structure
-- Added AGENTS.md rule #4: always verify subagent work
+- Audited `docs/` (5 files) and `shared/` (2 files) for dead code, stale refs, logic errors
+- Found 7 stale path references, 6 repo hygiene issues, 0 dead code in shared/
+- `ipc_utils.py` — clean, actively imported by 3 files
+- Subagents fixed all docs path corrections + created `.gitignore`
+- Verification: 12/12 checks PASS
 
-## Changes Committed
-- `524c10a` — scanner cleanup, doc cleanup, AGENTS.md verify rule
-
-## Bot Status
-- 4 positions: ENA, BCH, MON (longs), SAMSUNG (short)
-- All services running
-- Hard SL: 1.25%
+## Changes Made (not yet committed)
+- `docs/cheatsheet.md` — `scripts/` → `scanner/`, archived labels on correlation-guard/funding-monitor
+- `docs/autopilot-trader.md` — `scripts/` → `scanner/`, `static/` → `dashboard/`, SL workaround note
+- `docs/unified-dashboard-plan.md` — `executor/` → `bot/`, `dashboard.py` never-implemented note
+- `projects/autopilot-trader/.gitignore` — new file, covers __pycache__, *.pyc, *.log, .env, signals/, state/
 
 ## Pending
-- Backtesting implementation (still not started — discussed in session 2 today)
+- Commit + push to branch (John said wrap up, so committing to main per Maaraa rules — trivial doc/hygiene changes)
+- Backtesting implementation (still not started)
+- `signals/oi-snapshot.json` still tracked — can untrack later

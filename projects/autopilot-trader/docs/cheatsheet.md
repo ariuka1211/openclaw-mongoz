@@ -23,9 +23,9 @@ tail -f projects/autopilot-trader/signals/scanner.log
 | `ai-decisions/llm_client.py` | Kilo Gateway HTTP client |
 | `ai-decisions/db.py` | SQLite decision journal |
 | `ai-decisions/reflection.py` | Periodic learning loop |
-| `scripts/opportunity-scanner.ts` | Signal scoring (every 5 min) |
-| `scripts/correlation-guard.ts` | Prevents correlated positions |
-| `scripts/funding-monitor.ts` | Funding rate dashboard |
+| `scanner/opportunity-scanner.ts` | Signal scoring (every 5 min) |
+| `archives/scanner/correlation-guard.ts` | Prevents correlated positions (archived) |
+| `archives/scanner/funding-monitor.ts` | Funding rate dashboard (archived) |
 
 ## IPC Files
 | File | Written By | Read By |
@@ -48,4 +48,4 @@ tail -f projects/autopilot-trader/signals/scanner.log
 ## Environment
 - venv: `projects/autopilot-trader/bot/venv/`
 - secrets: `/root/.openclaw/workspace/.env`
-- scanner runs via Bun: `bun run scripts/opportunity-scanner.ts`
+- scanner runs via Bun: `bun run scanner/opportunity-scanner.ts`

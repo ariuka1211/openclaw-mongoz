@@ -1,33 +1,47 @@
-# Session Handoff — 2026-03-25 15:49 MDT
+# Session Handoff — 2026-03-25 16:05 MDT
 
 ## What Happened
-- **Bot modularization tests**: Built 251-test suite for modularized bot (was 236, added 15 regression tests)
-- **Deployed modularized code**: Merged `modularization-complete` branch to main, restarted all 3 services
-- **Runtime bug fixes**: Found and fixed 4 classes of `self.bot.` prefix bugs + api reference bug (6 commits total)
-- **Regression tests**: Added 15 integration tests using `_StrictBot` (raises AttributeError) to catch the same bugs in the future
+- **AI Decisions Modularization Plan**: Analyzed all 5 Python files in ai-decisions/ (2,303 lines), created detailed modularization plan
+- Plan saved to `docs/plans/ai-decisions-modularization-plan.md`
+- Reviewed and refined: fixed naming (token_estimator, data_reader, stats_formatter), removed pass-through methods from PromptBuilder, added data flow diagram
 
 ## Current State
-- **Branch**: main (all pushed)
-- **Bot**: Running modularized code (318 lines, down from 3,285). 7 positions tracked with DSL.
-- **Services**: bot ✅, scanner ✅, ai-decisions ✅ — all stable
-- **Tests**: 251 passing, 4s runtime, 73% coverage
-- **Commits today**: 6 on main (merge + 5 bug fixes + test additions)
+- **Branch**: main
+- **Bot**: Running modularized code (318 lines). 3 services stable.
+- **Tests**: 251 passing (bot)
+- **AI Decisions**: Not yet modularized — plan ready, implementation next session
 
-## Bug Fix Commits (all on main, pushed)
-1. `1ee0119` — test suite (236 tests) + missing imports in signal_processor + state_manager
-2. `08f59f8` — update manager api references after LighterAPI init
-3. `8887ecc` — self.bot prefix for _recently_closed + bot_managed_market_ids
-4. `41f16a1` — self.bot prefix for ALL manager state attributes (45+ refs)
-5. `edae90c` — 15 regression integration tests
+## Plan Summary — ai-decisions modularization
+**Target structure:**
+```
+ai-decisions/
+├── ai_trader.py           (~180 lines, was 625 — thin coordinator)
+├── cycle_runner.py        (~250 lines — extracted from execute_cycle)
+├── db.py                  (629 lines — unchanged)
+├── llm_client.py          (186 lines — unchanged)
+├── safety.py              (252 lines — unchanged)
+├── llm/
+│   └── parser.py          (~45 lines — parse_decision_json)
+├── context/
+│   ├── token_estimator.py (~25 lines — tiktoken estimation)
+│   ├── sanitizer.py       (~65 lines — injection detection)
+│   ├── data_reader.py     (~110 lines — signals + positions I/O)
+│   ├── pattern_engine.py  (~120 lines — learned patterns with decay)
+│   ├── stats_formatter.py (~80 lines — performance stats + hold regret)
+│   └── prompt_builder.py  (~170 lines — final prompt assembly, token budget)
+└── ipc/
+    └── bot_protocol.py    (~200 lines — send/receive/emergency_halt)
+```
 
-## Key Lessons
-- **Modularization creates self.bot prefix bugs**: When extracting methods to manager classes, every `self._attr` that was on the original class must become `self.bot._attr` in the manager
-- **MagicMock masks attribute access bugs**: Use strict mocks (raise AttributeError) for regression testing
-- **Managers capture None references**: When creating managers with `self.api=None`, must reassign after init
-- **Always use subagents for code work** (hard rule #3 — broken multiple times this session)
+**11 phases, ~66-88 estimated tests, same manager pattern as bot (receive ai_trader ref)**
 
-## Open Items
-- Backtesting still pending (from earlier sessions)
-- Coverage gaps: signal_processor (29%), execution_engine (43%), lighter_api (43%) — async heavy, harder to test
-- The `active_sl_order_id` error from old runs (20:24 UTC) — was from pre-fix code, not current
-- Network "Server disconnected" errors — proxy/network issue, bot handles gracefully
+## Next Session
+- Execute the modularization plan (Phase 1-11)
+- Start new session, read plan at `docs/plans/ai-decisions-modularization-plan.md`
+- Each phase = 1 commit, verify after each
+
+## Key Lessons (carry forward)
+- Subagent bugs: they claim "done" with missing edits. ALWAYS verify (hard rule #4)
+- All code changes through subagents (hard rule #3)
+- Manager pattern: take reference, access state via `self.ref.*`
+- PromptBuilder should NOT read data — receive as parameters, pure assembly

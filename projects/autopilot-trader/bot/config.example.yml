@@ -16,28 +16,43 @@ trailing_tp_trigger_pct: 0.0    # 0 = trailing SL starts immediately from peak
 trailing_tp_delta_pct: 1.0      # Trail by 1% from peak
 
 # Stop loss
-sl_pct: 2.0                     # Hard stop loss at -2% from entry (DSL: absolute floor)
+sl_pct: 1.25                    # Hard stop loss at -1.25% from entry (DSL: absolute floor)
 
 # DSL (Dynamic Stop Loss) — tiered trailing stop loss
 dsl_enabled: true               # false = use legacy flat trailing
 default_leverage: 10.0          # Leverage for ROE calculation
-stagnation_roe_pct: 8.0         # Exit if ROE ≥ this but no progress for stagnation_minutes
+stagnation_roe_pct: 5.0         # Exit if ROE ≥ this but no progress for stagnation_minutes
 stagnation_minutes: 60          # Minutes of stagnation before auto-exit
 
 # DSL tiers — progressively tighter as profit grows
 dsl_tiers:
+  - trigger_pct: 3
+    lock_hw_pct: 30
+    trailing_buffer_roe: 6
+    consecutive_breaches: 3
   - trigger_pct: 7
     lock_hw_pct: 40
+    trailing_buffer_roe: 5
     consecutive_breaches: 3
   - trigger_pct: 12
     lock_hw_pct: 55
+    trailing_buffer_roe: 4
     consecutive_breaches: 2
   - trigger_pct: 15
     lock_hw_pct: 75
+    trailing_buffer_roe: 3
     consecutive_breaches: 2
   - trigger_pct: 20
     lock_hw_pct: 85
-    consecutive_breaches: 1
+    trailing_buffer_roe: 2
+    consecutive_breaches: 2
+  - trigger_pct: 30
+    lock_hw_pct: 90
+    trailing_buffer_roe: 1
+    consecutive_breaches: 2
+
+# Position management scope
+track_manual_positions: true   # Adopt all exchange positions for DSL protection
 
 # Telegram alerts (optional)
 telegram_token: "${TELEGRAM_BOT_TOKEN}"
@@ -48,10 +63,10 @@ price_poll_interval: 5          # seconds between price checks
 price_call_delay: 5.0           # seconds between sequential get_price() calls within loops
 
 # Signal integration
-signals_file: "../signals/signals.json"
+signals_file: "../ipc/signals.json"
 
 # AI Autopilot mode
 ai_mode: true
-ai_decision_file: "../signals/ai-decision.json"
-ai_result_file: "../signals/ai-result.json"
+ai_decision_file: "../ipc/ai-decision.json"
+ai_result_file: "../ipc/ai-result.json"
 ai_trader_dir: "../ai-decisions"

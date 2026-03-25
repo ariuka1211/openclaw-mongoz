@@ -1,28 +1,37 @@
 # Lighter Copilot 🦊
 
-Trailing take profit + stop loss bot for [Lighter.xyz](https://lighter.xyz) perpetual futures.
+Autopilot trading bot for [Lighter.xyz](https://lighter.xyz) perpetual futures.
 
 ## Features
 
 - **Trailing Take Profit** — locks in gains by trailing the peak price
-- **Stop Loss** — automatic position protection
-- **Telegram Alerts** — get notified when TP/SL triggers
+- **Dynamic Stop Loss (DSL)** — tiered trailing stop with high-water mark tracking
+- **AI Autopilot Mode** — reads open/close decisions from `ai-decision.json` and executes them automatically
+- **Position Verification** — confirms positions on exchange after open, progressive retry for close
+- **Telegram Alerts** — notifications for all major events (entry, TP/SL triggers, errors)
+- **Kill Switch** — file-based emergency stop (`KILL` file triggers immediate halt)
+- **Crash Recovery** — state persisted to disk, resumes on restart
+- **Volume Quota Management** — exponential backoff when hitting rate limits
+- **Circuit Breaker** — halts after repeated failed close attempts
+- **Idle Polling** — reduced API calls when flat
+- **SOCKS5 Proxy Support** — for network-level privacy
+- **Cross Margin ROE** — accurate PnL calculation
 - **Zero fees** — Lighter Standard accounts have 0% maker/taker fees
 
-## Trailing TP Logic
+## Architecture
 
-1. You enter a LONG position at $100
-2. Price rises to $103 → trailing activates (+3% trigger)
-3. Price rises to $105 → new high-water mark
-4. Price drops to $104 → trailing TP triggers (1% from $105 peak)
-5. Position closed, profit locked in at ~+4%
-
-For SHORT positions, same logic inverted.
+```
+bot.py
+├── BotConfig           — YAML config loader
+├── TelegramAlerter     — Telegram notification sender
+├── PositionTracker     — Tracks positions, computes TP/SL/DSL levels
+└── LighterCopilot      — Main bot loop, connects API + tracker + alerts
+```
 
 ## Setup
 
 ```bash
-cd executor
+cd bot
 pip install -r requirements.txt
 cp config.example.yml config.yml
 # Edit config.yml with your Lighter credentials + Telegram token
@@ -42,21 +51,3 @@ python3 bot.py
 2. Create a bot, copy the token
 3. Send `/start` to your bot
 4. Get your chat ID via `https://api.telegram.org/bot<TOKEN>/getUpdates`
-
-## Architecture
-
-```
-bot.py
-├── BotConfig           — YAML config loader
-├── TelegramAlerter     — Telegram notification sender
-├── PositionTracker     — Tracks positions, computes TP/SL levels
-└── LighterCopilot      — Main bot loop, connects API + tracker + alerts
-```
-
-## Status
-
-- [x] Skeleton with trailing TP/SL logic
-- [ ] Real Lighter API integration (positions, prices, order execution)
-- [ ] WebSocket price feed
-- [ ] Suggestions engine
-- [ ] Dashboard / web UI

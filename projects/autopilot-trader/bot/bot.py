@@ -928,7 +928,6 @@ class LighterAPI:
                 if resp is not None:
                     # 🔍 DEBUG: Raw response structure analysis
                     quota_val, quota_detail = self._extract_quota_from_response(resp)
-                    logging.debug(f"🔍 TP response quota extraction: {quota_detail}")
                     
                     resp_code = getattr(resp, 'code', None)
                     resp_msg = getattr(resp, 'msg', None) or getattr(resp, 'message', None)
@@ -983,7 +982,7 @@ class LighterAPI:
                 if resp is not None:
                     # 🔍 DEBUG: Raw response structure analysis
                     quota_val, quota_detail = self._extract_quota_from_response(resp)
-                    logging.debug(f"🔍 Open response quota extraction: {quota_detail}")
+
                     
                     resp_code = getattr(resp, 'code', None)
                     resp_msg = getattr(resp, 'msg', None) or getattr(resp, 'message', None)
@@ -1049,7 +1048,7 @@ class LighterAPI:
                 if resp is not None:
                     # 🔍 DEBUG: Raw response structure analysis
                     quota_val, quota_detail = self._extract_quota_from_response(resp)
-                    logging.debug(f"🔍 SL response quota extraction: {quota_detail}")
+
                     
                     resp_code = getattr(resp, 'code', None)
                     resp_msg = getattr(resp, 'msg', None) or getattr(resp, 'message', None)

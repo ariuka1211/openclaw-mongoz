@@ -540,9 +540,6 @@ class PositionTracker:
         self.positions.pop(market_id, None)
 
 
-class VolumeQuotaError(Exception):
-    """Raised when an order is rejected due to volume quota exhaustion."""
-    pass
 
 
 # ── Lighter API Wrapper ──────────────────────────────────────────────
@@ -1166,10 +1163,6 @@ class LighterCopilot:
         self._dsl_close_attempts: dict[str, int] = {}  # symbol → consecutive DSL close attempts
         self._dsl_close_attempt_cooldown: dict[str, float] = {}  # symbol → monotonic() deadline
         self._sl_retry_delays: list[int] = [15, 60, 300, 900]  # 15s, 1min, 5min, 15min
-        # Volume quota cooldown
-        self._volume_quota_cooldown_until: float = 0  # timestamp when cooldown expires
-        self._volume_quota_backoff_seconds: int = 60  # current backoff duration
-        self._volume_quota_max_backoff: int = 300  # 5 minutes max
         self._last_order_time: float = 0  # for pacing orders in 15s free tx window
         self._last_quota_alert_time: float = 0  # periodic quota status alert (20min)
         self._quota_alert_interval: float = 3600  # 1 hour in seconds
@@ -1400,10 +1393,7 @@ class LighterCopilot:
 
             is_long = direction == "long"
 
-            # Check quota cooldown and pacing BEFORE fetching price (saves API calls)
-            if self._is_volume_quota_cooldown():
-                logging.debug(f"⏳ {symbol}: volume quota cooldown active, skipping open")
-                continue
+            # Check pacing BEFORE fetching price (saves API calls)
             if self._should_pace_orders():
                 logging.debug(f"⏳ {symbol}: pacing orders (low quota), skipping open")
                 continue
@@ -1431,14 +1421,9 @@ class LighterCopilot:
             # Open the position
             logging.info(f"📡 Signal: {direction.upper()} {symbol} score={opp['compositeScore']} size=${size_usd:.2f}")
             if self.api:
-                try:
-                    success = await self.api.open_position(mid, size_usd, is_long, current_price)
-                except VolumeQuotaError:
-                    self._start_volume_quota_cooldown()
-                    continue
+                success = await self.api.open_position(mid, size_usd, is_long, current_price)
                 if success:
                     self._mark_order_submitted()
-                    self._reset_volume_quota_backoff()
 
                     # Fix #13: Add to pending_sync and bot_managed BEFORE verification
                     # to prevent race conditions if _tick() sync cycle runs mid-verification
@@ -1680,10 +1665,7 @@ class LighterCopilot:
             logging.info(f"AI open: max positions reached, skipping {symbol}")
             return False
 
-        # Check quota cooldown and pacing
-        if self._is_volume_quota_cooldown():
-            logging.info(f"⏳ AI open: {symbol} in volume quota cooldown — skipping")
-            return False
+        # Check pacing
         if self._should_pace_orders():
             logging.info(f"⏱️ AI open: {symbol} pacing orders (low quota) — skipping")
             return False
@@ -1700,14 +1682,9 @@ class LighterCopilot:
             logging.warning(f"AI open: no price for {symbol}")
             return False
 
-        try:
-            success = await self.api.open_position(market_id, size_usd, is_long, current_price)
-        except VolumeQuotaError:
-            self._start_volume_quota_cooldown()
-            return False
+        success = await self.api.open_position(market_id, size_usd, is_long, current_price)
         if success:
             self._mark_order_submitted()
-            self._reset_volume_quota_backoff()
 
             # Fix #13: Add to pending_sync and bot_managed BEFORE verification
             # to prevent race conditions if _tick() sync cycle runs mid-verification
@@ -1967,25 +1944,14 @@ class LighterCopilot:
         if not current_price:
             return False
 
-        try:
-            # MED-18: Cancel stale SL order before placing new one
-            if pos.active_sl_order_id:
-                logging.info(f"🗑️ {pos.symbol}: cancelling stale SL order {pos.active_sl_order_id} before AI close")
-                await self.api._cancel_order(mid_to_close, int(pos.active_sl_order_id))
-                pos.active_sl_order_id = None
-            sl_success, sl_coi = await self.api.execute_sl(mid_to_close, pos.size, current_price, is_long)
-            if sl_success and sl_coi:
-                pos.active_sl_order_id = sl_coi
-        except VolumeQuotaError:
-            self._start_volume_quota_cooldown()
-            # Track attempts with graduated delay
-            attempts = self._close_attempts.get(symbol, 0) + 1
-            self._close_attempts[symbol] = attempts
-            delay_idx = min(attempts - 1, len(self._sl_retry_delays) - 1)
-            retry_delay = self._sl_retry_delays[delay_idx]
-            self._close_attempt_cooldown[symbol] = time.monotonic() + retry_delay
-            logging.warning(f"⚠️ AI close: {symbol} volume quota exhausted (attempt {attempts}, retry in {retry_delay}s)")
-            return False
+        # MED-18: Cancel stale SL order before placing new one
+        if pos.active_sl_order_id:
+            logging.info(f"🗑️ {pos.symbol}: cancelling stale SL order {pos.active_sl_order_id} before AI close")
+            await self.api._cancel_order(mid_to_close, int(pos.active_sl_order_id))
+            pos.active_sl_order_id = None
+        sl_success, sl_coi = await self.api.execute_sl(mid_to_close, pos.size, current_price, is_long)
+        if sl_success and sl_coi:
+            pos.active_sl_order_id = sl_coi
         if not sl_success:
             # Track attempts with graduated delay
             attempts = self._close_attempts.get(symbol, 0) + 1
@@ -2074,20 +2040,14 @@ class LighterCopilot:
                 failed_positions.append(pos.symbol)
                 continue
 
-            try:
-                # MED-18: Cancel stale SL order before placing new one
-                if pos.active_sl_order_id:
-                    logging.info(f"🗑️ {pos.symbol}: cancelling stale SL order {pos.active_sl_order_id} before close_all")
-                    await self.api._cancel_order(mid, int(pos.active_sl_order_id))
-                    pos.active_sl_order_id = None
-                sl_success, sl_coi = await self.api.execute_sl(mid, pos.size, current_price, is_long)
-                if sl_success and sl_coi:
-                    pos.active_sl_order_id = sl_coi
-            except VolumeQuotaError:
-                self._start_volume_quota_cooldown()
-                logging.warning(f"⚠️ AI close_all: volume quota exhausted for {pos.symbol} — cooldown started")
-                failed_positions.append(pos.symbol)
-                continue
+            # MED-18: Cancel stale SL order before placing new one
+            if pos.active_sl_order_id:
+                logging.info(f"🗑️ {pos.symbol}: cancelling stale SL order {pos.active_sl_order_id} before close_all")
+                await self.api._cancel_order(mid, int(pos.active_sl_order_id))
+                pos.active_sl_order_id = None
+            sl_success, sl_coi = await self.api.execute_sl(mid, pos.size, current_price, is_long)
+            if sl_success and sl_coi:
+                pos.active_sl_order_id = sl_coi
 
             if not sl_success:
                 logging.warning(f"⚠️ Failed to submit close order for {pos.side} {pos.symbol}")
@@ -2343,24 +2303,6 @@ class LighterCopilot:
         if stale_managed:
             logging.debug(f"🧹 Pruned {len(stale_managed)} stale bot_managed_market_ids")
 
-    def _is_volume_quota_cooldown(self) -> bool:
-        """Check if bot is in volume quota cooldown."""
-        return time.time() < self._volume_quota_cooldown_until
-
-    def _start_volume_quota_cooldown(self):
-        """Start quota cooldown with exponential backoff."""
-        self._volume_quota_cooldown_until = time.time() + self._volume_quota_backoff_seconds
-        logging.warning(f"🔄 Volume quota cooldown: {self._volume_quota_backoff_seconds}s (until {time.strftime('%H:%M:%S', time.localtime(self._volume_quota_cooldown_until))})")
-        # Exponential backoff: 60s → 120s → 300s (capped)
-        self._volume_quota_backoff_seconds = min(self._volume_quota_backoff_seconds * 2, self._volume_quota_max_backoff)
-
-    def _reset_volume_quota_backoff(self):
-        """Reset backoff on successful order."""
-        if self._volume_quota_backoff_seconds > 60:
-            logging.info("✅ Volume quota recovered, resetting backoff")
-        self._volume_quota_backoff_seconds = 60
-        self._volume_quota_cooldown_until = 0
-
     def _should_pace_orders(self) -> bool:
         """Pace orders to leverage 15-second free tx window when quota is low."""
         if self.api and self.api.volume_quota_remaining is not None and self.api.volume_quota_remaining < 35:
@@ -2415,13 +2357,6 @@ class LighterCopilot:
             self._kill_switch_active = False
             logging.info("✅ Kill switch deactivated")
             await self.alerts.send("✅ *Kill switch deactivated*\nBot resumed normal operation.")
-
-        # NOTE: Don't skip entire tick during quota cooldown —
-        # position sync, DSL evaluation, and AI decisions still need to run.
-        # Order submission points handle quota errors individually via VolumeQuotaError.
-        quota_cooldown = self._is_volume_quota_cooldown()
-        if quota_cooldown:
-            logging.debug("⏳ Quota cooldown active — running tick with order submission guards")
 
         self._prune_caches()
         if not self.api:
@@ -2599,7 +2534,7 @@ class LighterCopilot:
         if now - self._last_quota_alert_time > self._quota_alert_interval:
             self._last_quota_alert_time = now
             api_quota = self.api.volume_quota_remaining if self.api else None
-            in_cooldown = self._is_volume_quota_cooldown()
+            in_cooldown = False
             if api_quota is not None:
                 status = f"{api_quota} TX"
             elif self.api and self.api._last_known_quota is not None:
@@ -2662,10 +2597,10 @@ class LighterCopilot:
         self._save_state()
 
         # ── Idle tick tracking — extend sleep when flat with no activity ──
-        if len(self.tracker.positions) == 0 and not self._signal_processed_this_tick and not quota_cooldown:
+        if len(self.tracker.positions) == 0 and not self._signal_processed_this_tick:
             self._idle_tick_count += 1
         else:
-            # Reset on any activity (positions, signals, or quota cooldown)
+            # Reset on any activity (positions or signals)
             self._idle_tick_count = 0
         self._signal_processed_this_tick = False  # reset per-tick flag
 
@@ -2788,25 +2723,14 @@ class LighterCopilot:
                 logging.info(f"🧊 DSL close: {pos.symbol} in DSL close cooldown ({remaining}s remaining) — skipping. Position may need manual intervention.")
                 return  # Don't remove from tracker, but stop retrying
 
-            try:
-                # MED-18: Cancel stale SL order before placing new one
-                if pos.active_sl_order_id:
-                    logging.info(f"🗑️ {pos.symbol}: cancelling stale SL order {pos.active_sl_order_id} before DSL close")
-                    await self.api._cancel_order(mid, int(pos.active_sl_order_id))
-                    pos.active_sl_order_id = None
-                sl_success, sl_coi = await self.api.execute_sl(mid, pos.size, price, is_long)
-                if sl_success and sl_coi:
-                    pos.active_sl_order_id = sl_coi
-            except VolumeQuotaError:
-                self._start_volume_quota_cooldown()
-                # Track attempts with graduated delay (same as failed SL)
-                attempts = self._dsl_close_attempts.get(pos.symbol, 0) + 1
-                self._dsl_close_attempts[pos.symbol] = attempts
-                delay_idx = min(attempts - 1, len(self._sl_retry_delays) - 1)
-                retry_delay = self._sl_retry_delays[delay_idx]
-                self._dsl_close_attempt_cooldown[pos.symbol] = time.monotonic() + retry_delay
-                logging.warning(f"⚠️ DSL close: {pos.symbol} volume quota exhausted (attempt {attempts}, retry in {retry_delay}s)")
-                return  # Don't remove from tracker, will retry after cooldown
+            # MED-18: Cancel stale SL order before placing new one
+            if pos.active_sl_order_id:
+                logging.info(f"🗑️ {pos.symbol}: cancelling stale SL order {pos.active_sl_order_id} before DSL close")
+                await self.api._cancel_order(mid, int(pos.active_sl_order_id))
+                pos.active_sl_order_id = None
+            sl_success, sl_coi = await self.api.execute_sl(mid, pos.size, price, is_long)
+            if sl_success and sl_coi:
+                pos.active_sl_order_id = sl_coi
             if sl_success:
                 # CRITICAL-4: Don't log outcome yet — log ONCE after verification
                 position_closed = await self._verify_position_closed(mid, pos.symbol)
@@ -2898,34 +2822,18 @@ class LighterCopilot:
             if self._should_skip_non_critical_orders():
                 logging.warning(f"🚫 {pos.symbol}: TP skipped in quota emergency mode, SL only")
                 return  # Keep position, will retry next tick when quota recovers
-            try:
-                await self.api.execute_tp(mid, pos.size, price, is_long)
-            except VolumeQuotaError:
-                self._start_volume_quota_cooldown()
-                logging.warning(f"⚠️ TP: {pos.symbol} volume quota exhausted — cooldown started")
-                return  # Keep position, will retry after cooldown
+            await self.api.execute_tp(mid, pos.size, price, is_long)
             # TP submitted — log outcome immediately (no verification loop for TP)
             self._log_outcome(pos, price, action)
         else:
-            try:
-                # MED-18: Cancel stale SL order before placing new one
-                if pos.active_sl_order_id:
-                    logging.info(f"🗑️ {pos.symbol}: cancelling stale SL order {pos.active_sl_order_id} before legacy SL")
-                    await self.api._cancel_order(mid, int(pos.active_sl_order_id))
-                    pos.active_sl_order_id = None
-                sl_success, sl_coi = await self.api.execute_sl(mid, pos.size, price, is_long)
-                if sl_success and sl_coi:
-                    pos.active_sl_order_id = sl_coi
-            except VolumeQuotaError:
-                self._start_volume_quota_cooldown()
-                # Track attempts with graduated delay
-                attempts = self._close_attempts.get(pos.symbol, 0) + 1
-                self._close_attempts[pos.symbol] = attempts
-                delay_idx = min(attempts - 1, len(self._sl_retry_delays) - 1)
-                retry_delay = self._sl_retry_delays[delay_idx]
-                self._close_attempt_cooldown[pos.symbol] = time.monotonic() + retry_delay
-                logging.warning(f"⚠️ SL: {pos.symbol} volume quota exhausted (attempt {attempts}, retry in {retry_delay}s)")
-                return  # Don't remove from tracker, will retry after cooldown
+            # MED-18: Cancel stale SL order before placing new one
+            if pos.active_sl_order_id:
+                logging.info(f"🗑️ {pos.symbol}: cancelling stale SL order {pos.active_sl_order_id} before legacy SL")
+                await self.api._cancel_order(mid, int(pos.active_sl_order_id))
+                pos.active_sl_order_id = None
+            sl_success, sl_coi = await self.api.execute_sl(mid, pos.size, price, is_long)
+            if sl_success and sl_coi:
+                pos.active_sl_order_id = sl_coi
             if sl_success:
                 # CRITICAL-4: Don't log outcome yet — log ONCE after verification
                 position_closed = await self._verify_position_closed(mid, pos.symbol)

@@ -9,7 +9,7 @@ Autopilot trading bot for [Lighter.xyz](https://lighter.xyz) perpetual futures.
 - **AI Autopilot Mode** — reads open/close decisions from `ai-decision.json` and executes them automatically
 - **Position Verification** — confirms positions on exchange after open, progressive retry for close
 - **Telegram Alerts** — notifications for all major events (entry, TP/SL triggers, errors)
-- **Kill Switch** — file-based emergency stop (`KILL` file triggers immediate halt)
+- **Kill Switch** — file-based emergency stop (`state/KILL_SWITCH` file triggers immediate halt)
 - **Crash Recovery** — state persisted to disk, resumes on restart
 - **Volume Quota Management** — exponential backoff when hitting rate limits
 - **Circuit Breaker** — halts after repeated failed close attempts

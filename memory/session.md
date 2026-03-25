@@ -1,34 +1,24 @@
-# Session Handoff — 2026-03-24 19:06 MDT
+# Session Handoff — 2026-03-24 19:30 MDT
 
 ## What Happened
-- **Scanner signal exploration:** Walked through full pipeline — scanner → signals.json → ai-trader → bot IPC. No DB in scanner, file-based IPC only.
-- **Scanner improvements (deployed):**
-  1. Direction-aware momentum: aligned with MA gets 1.3× boost, opposed gets 0.5× penalty
-  2. OI trend signal replaces volume anomaly — tracks open interest changes via `oi-snapshot.json`
-  3. Weights rebalanced: Funding 35% / MA 25% / OB 15% / Momentum 15% / OI 10%
-  4. No more blind "long" fallback — uses funding spread direction as tiebreaker
-  5. All output/display updated
-- **Signal analyzer patched:** `signal_analyzer.py` updated from `volumeAnomalyScore` → `oiTrendScore`, weights aligned with scanner
-- **Analyzer results (9 trades):** Funding all 100 (no differentiation), momentum NEGATIVE delta (-48), MA + OB positive. OI trend will populate with new data.
-- **Pocket ideas:** Created `projects/autopilot-trader/docs/pocket-ideas.md` — signal history table idea documented
+- **DSL alert ROE bug found:** Two Telegram alerts for same close showed different ROE numbers (-21% vs -2.1%). Alert 1 used leveraged ROE, Alert 2 and 3 used raw price movement but labeled it "ROE".
+- **Fix: ROE → dollar amounts:** Replaced ROE% with Position ($), P&L ($), Margin ($) in all three DSL alerts (trigger, close confirmation, SL failed). More useful than abstract ROE%.
+- **Branch:** `fix/dsl-alert-roe` pushed, PR pending merge.
 
 ## Files Modified
-- `signals/scripts/opportunity-scanner.ts` — OI trend, direction-aware momentum, new weights, direction fallback
-- `signals/ai-trader/signal_analyzer.py` — volumeAnomalyScore → oiTrendScore, default weights updated
-- `projects/autopilot-trader/docs/pocket-ideas.md` — new file
+- `projects/autopilot-trader/executor/bot.py` — DSL alerts (lines ~2748, ~2851, ~2941): replaced ROE with notional_usd, pnl_usd, margin_usd
 
 ## State
-- Bot: 3 positions (ICP, JTO, BRENTOIL), limit 8
-- Scanner: restarted, running with new scoring. OI snapshot baseline created (107 markets)
+- Bot: 1 position (CRCL), limit 3 (was 8, session.md says 8 but config was changed)
 - Services: all 3 running
-- First OI snapshot saved — next scan will show real trend data
+- Bot restarted to pick up alert fix
 
-## Pending / Open Issue
-- **SL volatility bug:** Stop loss distance = single-day (high-low)/price. Spikes give absurdly wide stops (CRCL 26.7%), quiet days give too-tight stops. Fix: use 7-day average daily range from OKX klines instead.
-- Signal history table in pocket-ideas.md (not urgent)
+## Pending / Open Items
+- SL volatility bug (use rolling average range from OKX klines) — from prior session, not addressed this session
+- Signal history table idea in pocket-ideas.md
+- Merge PR `fix/dsl-alert-roe`
 
 ## Next Steps
-- Fix SL volatility (use rolling average range from OKX klines)
-- Monitor OI trend data accumulation over next few scans
-- Monitor if direction-aware momentum changes trade quality
-- Commit all changes (branch + PR per protocol)
+- Monitor new dollar-amount alerts on next close
+- Fix SL volatility bug (rolling average)
+- Commit scanner + analyzer changes from prior session (still uncommitted?)

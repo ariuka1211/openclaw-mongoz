@@ -16,6 +16,7 @@ from config import BotConfig
 from core.models import TrackedPosition
 from api.lighter_api import LighterAPI
 from core.position_tracker import PositionTracker
+from dsl import DSLState
 
 
 class StateManager:

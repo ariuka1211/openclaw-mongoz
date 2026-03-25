@@ -5,6 +5,8 @@ Handles signals.json, ai-decision.json processing, position opening/closing,
 verification, and outcome logging.
 """
 
+import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -15,6 +17,22 @@ from pathlib import Path
 
 from config import BotConfig
 from core.models import TrackedPosition
+
+# shared/ path for IPC utilities
+_shared_dir = Path(__file__).resolve().parent.parent.parent / "shared"
+if str(_shared_dir) not in sys.path:
+    sys.path.insert(0, str(_shared_dir))
+from ipc_utils import safe_read_json
+
+# AI Trader DB (for outcome logging)
+_ai_trader_dir = os.environ.get("AI_TRADER_DIR", str(Path(__file__).resolve().parent.parent.parent / "ai-decisions"))
+if _ai_trader_dir not in sys.path:
+    sys.path.insert(0, _ai_trader_dir)
+try:
+    from db import DecisionDB
+    _db = DecisionDB(f"{_ai_trader_dir}/state/trader.db")
+except Exception:
+    _db = None
 
 
 class SignalProcessor:

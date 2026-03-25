@@ -1,4 +1,0 @@
-aiohttp>=3.9
-fastapi>=0.110
-uvicorn>=0.29
-tiktoken>=0.7

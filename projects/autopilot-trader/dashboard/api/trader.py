@@ -12,8 +12,8 @@ log = logging.getLogger("dashboard.api.trader")
 
 PROJECT_ROOT = Path("/root/.openclaw/workspace/projects/autopilot-trader")
 TRADER_DB_PATH = PROJECT_ROOT / "signals" / "ai-trader" / "state" / "trader.db"
-AI_DECISION_PATH = PROJECT_ROOT / "signals" / "ai-decision.json"
-AI_RESULT_PATH = PROJECT_ROOT / "signals" / "ai-result.json"
+AI_DECISION_PATH = PROJECT_ROOT / "ipc" / "ai-decision.json"
+AI_RESULT_PATH = PROJECT_ROOT / "ipc" / "ai-result.json"
 BOT_STATE_PATH = PROJECT_ROOT / "executor" / "state" / "bot_state.json"
 
 # Import DecisionDB from ai-trader
@@ -67,7 +67,7 @@ async def get_trader_status():
     last_cycle_ts = decision.get("timestamp") if decision else None
     model = None
     # Read model from ai-trader config (not from decision file)
-    ai_config = _read_json(PROJECT_ROOT / "signals" / "ai-trader" / "config.json")
+    ai_config = _read_json(PROJECT_ROOT / "ai-decisions" / "config.json")
     if ai_config and "llm" in ai_config:
         model = ai_config["llm"].get("primary_model")
 

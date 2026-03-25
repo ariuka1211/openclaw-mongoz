@@ -11,7 +11,7 @@ log = logging.getLogger("dashboard.api.portfolio")
 
 PROJECT_ROOT = Path("/root/.openclaw/workspace/projects/autopilot-trader")
 BOT_STATE_PATH = PROJECT_ROOT / "executor" / "state" / "bot_state.json"
-SIGNALS_PATH = PROJECT_ROOT / "signals" / "signals.json"
+SIGNALS_PATH = PROJECT_ROOT / "ipc" / "signals.json"
 
 router = APIRouter()
 

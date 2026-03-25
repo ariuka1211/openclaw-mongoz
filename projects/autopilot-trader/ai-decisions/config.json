@@ -1,7 +1,8 @@
 {
   "db_path": "state/trader.db",
-  "decision_file": "../ai-decision.json",
-  "signals_file": "../signals.json",
+  "decision_file": "../ipc/ai-decision.json",
+  "signals_file": "../ipc/signals.json",
+  "result_file": "../ipc/ai-result.json",
   "strategy_memory_file": "state/strategy_memory.md",
 
   "max_signals": 15,

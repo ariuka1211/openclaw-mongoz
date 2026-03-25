@@ -54,4 +54,4 @@ signals_file: "../signals/signals.json"
 ai_mode: true
 ai_decision_file: "../signals/ai-decision.json"
 ai_result_file: "../signals/ai-result.json"
-ai_trader_dir: "../signals/ai-trader"
+ai_trader_dir: "../ai-decisions"

@@ -6,7 +6,7 @@ Quick ideas worth considering, parked for later.
 
 ## 1. Signal History Table (2026-03-24)
 
-**Problem:** Scanner overwrites `signals.json` every 5 min. No history of what it saw between decisions. Signal snapshots only saved when ai-trader makes a decision (top 10 embedded in `decisions` table).
+**Problem:** Scanner overwrites `signals.json` every 5 min. No history of what it saw between decisions. Signal snapshots only saved when ai-decisions makes a decision (top 10 embedded in `decisions` table).
 
 **Idea:** Store raw scanner output per cycle in a SQLite table.
 
@@ -47,7 +47,7 @@ CREATE INDEX idx_sig_history_sym ON signal_history(symbol);
 - Scanner drift detection: fewer qualifying signals over time?
 - Discrepancy debugging: rewind to exact scan that produced a bad signal
 
-**Where to hook in:** Either scanner appends a JSON log, or ai-trader snapshots signals every cycle (not just on decisions). The ai-trader approach is cleaner since it already reads signals.json.
+**Where to hook in:** Either scanner appends a JSON log, or ai-decisions snapshots signals every cycle (not just on decisions). The ai-decisions approach is cleaner since it already reads signals.json.
 
 **Effort:** Small. Add one table + one insert per cycle. ~20 lines of code.
 

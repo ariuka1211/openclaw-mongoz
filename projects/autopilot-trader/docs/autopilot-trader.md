@@ -84,7 +84,7 @@ Bot also manages exits via DSL (tiered trailing stop-loss) — independent of AI
 
 ### 3.1 Executor Bot (`bot.py`)
 
-**Location:** `projects/autopilot-trader/executor/bot.py`
+**Location:** `projects/autopilot-trader/bot/bot.py`
 **Language:** Python (runs in a venv)
 **Service:** `lighter-bot.service`
 
@@ -126,7 +126,7 @@ The core position management daemon. It does NOT decide what to trade — it onl
 
 ### 3.2 DSL — Dynamic Stop Loss (`dsl.py`)
 
-**Location:** `projects/autopilot-trader/executor/dsl.py`
+**Location:** `projects/autopilot-trader/bot/dsl.py`
 **Language:** Pure Python (no LLM, no exchange dependency)
 
 Adapted from Senpi's DSL v5. A tiered trailing stop-loss system that tightens as profit increases.
@@ -153,7 +153,7 @@ Adapted from Senpi's DSL v5. A tiered trailing stop-loss system that tightens as
 
 ### 3.3 Opportunity Scanner (`opportunity-scanner.ts`)
 
-**Location:** `projects/autopilot-trader/signals/scripts/opportunity-scanner.ts`
+**Location:** `projects/autopilot-trader/scripts/opportunity-scanner.ts`
 **Language:** TypeScript (runs via Bun)
 **Service:** `lighter-scanner.service` (wraps `scanner-daemon.sh`, runs every 5 min)
 
@@ -188,7 +188,7 @@ Writes `signals.json` with all qualified opportunities (score ≥ 60, safety pas
 
 ### 3.4 AI Trader (`ai_trader.py`)
 
-**Location:** `projects/autopilot-trader/signals/ai-trader/ai_trader.py`
+**Location:** `projects/autopilot-trader/ai-decisions/ai_trader.py`
 **Language:** Python (async daemon)
 **Service:** `ai-trader.service`
 
@@ -352,7 +352,7 @@ Manages Lighter REST API auth tokens. Tokens are long-lived (6-hour max), genera
 
 ## 5. Configuration
 
-### Bot Config (`executor/config.yml`)
+### Bot Config (`bot/config.yml`)
 
 ```yaml
 lighter_url: "https://mainnet.zklighter.elliot.ai"
@@ -382,7 +382,7 @@ price_poll_interval: 5
 price_call_delay: 5.0
 ```
 
-### AI Trader Config (`signals/ai-trader/config.json`)
+### AI Trader Config (`ai-decisions/config.json`)
 
 ```json
 {
@@ -437,13 +437,13 @@ All secrets are in `/root/.openclaw/workspace/.env`:
 
 | Service | File | Working Dir | Command | Status |
 |---------|------|-------------|---------|--------|
-| `lighter-bot` | `/etc/systemd/system/lighter-bot.service` | `.../executor/` | `venv/bin/python3 bot.py` | active |
+| `lighter-bot` | `/etc/systemd/system/lighter-bot.service` | `.../bot/` | `venv/bin/python3 bot.py` | active |
 | `lighter-scanner` | `/etc/systemd/system/lighter-scanner.service` | N/A | `scanner-daemon.sh` (runs bun in loop) | active |
-| `ai-trader` | `/etc/systemd/system/ai-trader.service` | `.../signals/ai-trader/` | `python3 ai_trader.py` | active |
+| `ai-trader` | `/etc/systemd/system/ai-trader.service` | `.../ai-decisions/` | `python3 ai_trader.py` | active |
 
 ### Scanner Daemon (`scanner-daemon.sh`)
 
-Simple bash loop: runs `bun run scripts/opportunity-scanner.ts --max-positions 3` every 300 seconds. Output goes to `signals/scanner.log`.
+Simple bash loop: runs `bun run scripts/opportunity-scanner.ts --max-positions 3` every 300 seconds. Output goes to `scanner.log`.
 
 ### Management Commands:
 ```bash
@@ -453,7 +453,7 @@ systemctl status lighter-bot lighter-scanner ai-trader
 # View logs
 journalctl -u lighter-bot -f
 journalctl -u ai-trader -f
-tail -f projects/autopilot-trader/signals/scanner.log
+tail -f projects/autopilot-trader/scanner.log
 
 # Restart
 systemctl restart lighter-bot
@@ -590,7 +590,7 @@ systemctl restart ai-trader
 
 ```
 projects/autopilot-trader/
-├── executor/
+├── bot/
 │   ├── bot.py                 # Main bot (PositionTracker, LighterAPI, LighterCopilot)
 │   ├── dsl.py                 # Dynamic Stop Loss engine
 │   ├── auth_helper.py         # REST API auth token manager

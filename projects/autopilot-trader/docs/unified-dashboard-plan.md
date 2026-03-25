@@ -2,14 +2,14 @@
 
 **Status:** Ready to build
 **Created:** 2026-03-24
-**Replaces:** `signals/dashboard/app.py` (port 8080), `signals/ai-trader/dashboard.py` (port 8080)
+**Replaces:** `dashboard/app.py` (port 8080), `ai-decisions/dashboard.py` (port 8080)
 
 ---
 
 ## 1. File Structure
 
 ```
-signals/dashboard/
+dashboard/
 ├── app.py                    # ← REPLACE existing (new unified FastAPI app)
 ├── index.html                # ← REPLACE existing (new tabbed frontend)
 ├── start.sh                  # ← MODIFY (update port/path if needed)
@@ -29,16 +29,16 @@ signals/dashboard/
 ```
 
 **Key decisions:**
-- Replaces `signals/dashboard/app.py` in-place (single ownership)
+- Replaces `dashboard/app.py` in-place (single ownership)
 - New `api/` subdirectory keeps endpoints modular but still one FastAPI app
 - New `js/` directory with Store-based data layer — renderers subscribe to Store, providers populate it
   - Today: poll-based provider populates Store via `setInterval` + `fetch`
   - Future: swap to WebSocket provider — zero changes to render functions
-- `signals/ai-trader/dashboard.py` is left in place but **not started** — its port will conflict, so stop the ai-trader dashboard service
+- `ai-decisions/dashboard.py` is left in place but **not started** — its port will conflict, so stop the ai-trader dashboard service
 
 **Files NOT changed (read-only):**
-- `signals/ai-trader/db.py` — reused as-is (import DecisionDB)
-- `executor/state/bot_state.json` — read-only
+- `ai-decisions/db.py` — reused as-is (import DecisionDB)
+- `bot/state/bot_state.json` — read-only
 - `signals/signals.json` — read-only
 - `signals/ai-decision.json`, `ai-result.json` — read-only
 
@@ -53,7 +53,7 @@ signals/dashboard/
 | `/api/portfolio` | GET | `bot_state.json` | All positions with computed unrealized PnL, exposure, DSL state |
 | `/api/portfolio/summary` | GET | `bot_state.json` + `ai-result.json` | Equity, balance, total exposure, volume quota |
 
-**Data source:** Read `executor/state/bot_state.json` directly. Current price comes from `lastPrice` in each position's data OR from the most recent signals.json entry for that symbol. Compute unrealized PnL = `(current - entry) / entry * size * leverage` for longs, inverted for shorts.
+**Data source:** Read `bot/state/bot_state.json` directly. Current price comes from `lastPrice` in each position's data OR from the most recent signals.json entry for that symbol. Compute unrealized PnL = `(current - entry) / entry * size * leverage` for longs, inverted for shorts.
 
 **Response shape:**
 ```json
@@ -304,7 +304,7 @@ Score cell has a small inline bar showing component breakdown (stacked colored s
 ```
 
 **Read patterns:**
-1. `/api/portfolio` → open + JSON.parse `executor/state/bot_state.json` (every tick from bot ~5s)
+1. `/api/portfolio` → open + JSON.parse `bot/state/bot_state.json` (every tick from bot ~5s)
 2. `/api/trader/*` → `DecisionDB("state/trader.db").get_*()` methods (SQLite WAL reads, no lock contention)
 3. `/api/scanner/*` → open + JSON.parse `signals/signals.json` (updated every 5min)
 4. `/api/system/*` → subprocess `pgrep` + `os.path.getmtime()` for file freshness
@@ -318,17 +318,17 @@ Score cell has a small inline bar showing component breakdown (stacked colored s
 ### Step 1: Stop old dashboards
 ```bash
 # Find and kill existing dashboard processes
-pkill -f "signals/dashboard/app.py"
-pkill -f "signals/ai-trader/dashboard.py"
+pkill -f "dashboard/app.py"
+pkill -f "ai-decisions/dashboard.py"
 # Check they're gone
 lsof -i :8080
 ```
 
 ### Step 2: Deploy new unified dashboard
-The new `signals/dashboard/app.py` replaces the old one. It reads from all three data sources. Start it:
+The new `dashboard/app.py` replaces the old one. It reads from all three data sources. Start it:
 ```bash
 cd /root/.openclaw/workspace/projects/autopilot-trader
-python3 signals/dashboard/app.py
+python3 dashboard/app.py
 # Or via start.sh
 ```
 
@@ -343,7 +343,7 @@ If `ai-trader.service` or `ai_trader.py` starts its own dashboard on port 8080, 
 ```bash
 #!/bin/bash
 cd /root/.openclaw/workspace/projects/autopilot-trader
-exec python3 signals/dashboard/app.py
+exec python3 dashboard/app.py
 ```
 
 ### Step 5: Verify
@@ -352,7 +352,7 @@ exec python3 signals/dashboard/app.py
 - Wait 5s — portfolio tab should auto-refresh positions
 - Check browser console for no errors
 
-**Rollback:** If issues, restore old `signals/dashboard/app.py` from git and restart. The old dashboard is self-contained and doesn't depend on new endpoints.
+**Rollback:** If issues, restore old `dashboard/app.py` from git and restart. The old dashboard is self-contained and doesn't depend on new endpoints.
 
 ---
 

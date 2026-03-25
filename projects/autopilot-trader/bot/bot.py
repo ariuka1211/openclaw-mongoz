@@ -104,7 +104,7 @@ _lighter_rest.RESTClientObject.__init__ = _patched_rest_client_init
 # ── AI Trader DB (for outcome logging) ──────────────────────────────
 
 # Configurable via env var; also settable in config.yml (ai_trader_dir).
-_AI_TRADER_DIR = os.environ.get("AI_TRADER_DIR", str(Path(__file__).parent.parent / "signals" / "ai-trader"))
+_AI_TRADER_DIR = os.environ.get("AI_TRADER_DIR", str(Path(__file__).parent.parent / "ai-decisions"))
 if _AI_TRADER_DIR not in sys.path:
     sys.path.insert(0, _AI_TRADER_DIR)
 
@@ -152,10 +152,10 @@ class BotConfig:
 
     # AI Autopilot mode
     ai_mode: bool = False
-    ai_decision_file: str = "../signals/ai-decision.json"
-    ai_result_file: str = "../signals/ai-result.json"
-    ai_trader_dir: str = "../signals/ai-trader"
-    signals_file: str = "../signals/signals.json"
+    ai_decision_file: str = "../ipc/ai-decision.json"
+    ai_result_file: str = "../ipc/ai-result.json"
+    ai_trader_dir: str = "../ai-decisions"
+    signals_file: str = "../ipc/signals.json"
 
     # DSL (Dynamic Stop Loss)
     dsl_enabled: bool = True

@@ -16,7 +16,7 @@ from db import DecisionDB
 log = logging.getLogger("ai-trader.context")
 
 # Add shared/ to path for IPC utilities
-_shared_dir = Path(__file__).resolve().parent.parent.parent / "shared"
+_shared_dir = Path(__file__).resolve().parent.parent / "shared"
 if str(_shared_dir) not in sys.path:
     sys.path.insert(0, str(_shared_dir))
 from ipc_utils import safe_read_json

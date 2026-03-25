@@ -3,10 +3,10 @@
 # Fallback method if scanner cleanup isn't running
 set -e
 
-cd /root/.openclaw/workspace/projects/autopilot-trader/signals
+SIGNALS_FILE="/root/.openclaw/workspace/projects/autopilot-trader/ipc/signals.json"
 
-if [ ! -f signals.json ]; then
-  echo "❌ signals.json not found"
+if [ ! -f "$SIGNALS_FILE" ]; then
+  echo "❌ signals.json not found at $SIGNALS_FILE"
   exit 1
 fi
 
@@ -14,7 +14,7 @@ python3 -c "
 import json
 from datetime import datetime, timedelta, timezone
 
-with open('signals.json') as f:
+with open('$SIGNALS_FILE') as f:
     data = json.load(f)
 
 before = len(data.get('opportunities', []))
@@ -34,7 +34,7 @@ for o in data.get('opportunities', []):
         filtered.append(o)  # Keep if can't parse
 
 data['opportunities'] = filtered
-with open('signals.json', 'w') as f:
+with open('$SIGNALS_FILE', 'w') as f:
     json.dump(data, f, indent=2)
 
 removed = before - len(filtered)

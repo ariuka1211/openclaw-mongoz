@@ -1,14 +1,37 @@
-# Session — 2026-03-25 09:44 MDT
+# Session — 2026-03-25 10:10-10:38 MDT
 
 ## What Happened
-- Discussed backtesting approaches for autopilot-trader. Reviewed Hummingbot's architecture (Controllers, triple barrier method, Quants Lab). Recommended starting with signal backtesting (triple barrier on scanner signals, no LLM needed).
-- Cleaned up docs: deleted `signals/docs/` folder entirely (3 redundant spec files moved there earlier). Deleted 5 stale fix/research docs from `docs/` (fix-bug-02, fix-bug-08, fix-flaw-01, fix-state-01, lighter-research-findings). Kept: autopilot-trader.md, trading-lessons.md, pocket-ideas.md, unified-dashboard-plan.md.
-- Created `docs/cheatsheet.md` — lean file map + key patterns for fast session startup. Updated AGENTS.md step 3 to read cheatsheet first instead of full autopilot-trader.md.
+- Major directory restructure of autopilot-trader. Flattened `signals/` into top-level services.
+- Executed in 5 phases with subagents:
+  1. Moved scanner → `scanner/`
+  2. Moved ai-trader Python files → `ai-trader/`
+  3. Moved IPC files → `ipc/`, updated all path references across codebase
+  4. Moved Flask dashboard → `dashboard/`, deleted embedded FastAPI dashboard
+  5. Deleted `signals/` dir, updated systemd units, restarted services
+- Renamed directories for clarity:
+  - `ai-trader/` → `ai-decisions/`
+  - `executor/` → `bot/`
+- Fixed stale `signals/ai-trader/` paths in dashboard API modules (trader.py, system.py) that survived the refactor
+- Restored `prompts/` directory (system.txt, decision.txt) that was left behind during ai-trader move
+- All 3 services restarted clean, zero errors
+
+## Final Structure
+```
+autopilot-trader/
+├── ai-decisions/    # LLM decision engine
+├── bot/             # Trading bot executor
+├── dashboard/       # Flask web dashboard
+├── docs/
+├── ipc/             # signals.json, ai-decision.json, ai-result.json
+├── scanner/         # Signal scoring (Bun/TS)
+└── shared/          # ipc_utils.py
+```
 
 ## Decisions
-- Backtesting: start with signal-level backtesting using triple barrier method (Option 1 from discussion). Not implemented yet.
-- Docs: single docs folder at `projects/autopilot-trader/docs/`. No more scattered doc folders.
+- Kept Flask dashboard, removed FastAPI (embedded in old ai-trader)
+- Kept systemd service names unchanged (ai-trader.service, lighter-bot.service) — only updated paths
+- Left Python logger names as "ai-trader.*" (namespace strings, not paths)
 
 ## Pending
-- Backtesting implementation (signal backtester — not started)
-- Uncommitted changes from last session (equity fix, SL default fix) still need pushing
+- Backtesting implementation (triple barrier method) — not started
+- Commit and push all changes

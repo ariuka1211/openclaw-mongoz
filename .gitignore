@@ -68,10 +68,10 @@ memory/session-current.md
 memory/projects/
 memory/session-watchdog-state.json
 
-# Signals runtime
-projects/autopilot-trader/signals/signals.json
-projects/autopilot-trader/signals/ai-decision.json
-projects/autopilot-trader/signals/ai-result.json
+# IPC runtime files
+projects/autopilot-trader/ipc/signals.json
+projects/autopilot-trader/ipc/ai-decision.json
+projects/autopilot-trader/ipc/ai-result.json
 projects/autopilot-trader/oi-snapshot.json
 
 # Secrets

@@ -1058,7 +1058,7 @@ async function main(): Promise<void> {
 
   // Check for suggested weights from signal analyzer
   try {
-    const suggestedPath = "../ai-trader/state/signal_weights_suggested.json";
+    const suggestedPath = "../ai-decisions/state/signal_weights_suggested.json";
     const suggestedFile = Bun.file(suggestedPath);
     if (await suggestedFile.exists()) {
       const suggested = await suggestedFile.json();
@@ -1070,7 +1070,7 @@ async function main(): Promise<void> {
         console.log(`     Momentum:      ${suggested.suggested_weights_blended.momentumScore}`);
         console.log(`     MA Alignment:  ${suggested.suggested_weights_blended.maAlignmentScore}`);
         console.log(`     Order Block:   ${suggested.suggested_weights_blended.orderBlockScore}`);
-        console.log(`     Review at: ai-trader/state/signal_weights_suggested.json`);
+        console.log(`     Review at: ai-decisions/state/signal_weights_suggested.json`);
       }
     }
   } catch {
@@ -1129,9 +1129,9 @@ async function main(): Promise<void> {
       detectedAt: o.detectedAt,
     })),
   };
-  await Bun.write("signals.json.tmp", JSON.stringify(signalsOutput, null, 2));
-  await rename("signals.json.tmp", "signals.json");
-  console.log("\n  💾 Written: signals.json (atomic write)");
+  await Bun.write("../ipc/signals.json.tmp", JSON.stringify(signalsOutput, null, 2));
+  await rename("../ipc/signals.json.tmp", "../ipc/signals.json");
+  console.log("\n  💾 Written: ../ipc/signals.json (atomic write)");
 }
 
 main().catch((err) => {

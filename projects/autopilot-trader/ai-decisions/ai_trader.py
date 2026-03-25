@@ -18,11 +18,10 @@ from pathlib import Path
 from context_builder import ContextBuilder
 from db import DecisionDB
 from llm_client import LLMClient
-import dashboard
 from safety import SafetyLayer
 
 # Add shared/ to path for IPC utilities
-_shared_dir = Path(__file__).resolve().parent.parent.parent / "shared"
+_shared_dir = Path(__file__).resolve().parent.parent / "shared"
 if str(_shared_dir) not in sys.path:
     sys.path.insert(0, str(_shared_dir))
 from ipc_utils import atomic_write, safe_read_json
@@ -398,10 +397,7 @@ class AITrader:
             + tokens_out * LLMStats.COST_PER_1M_OUTPUT / 1_000_000
         )
         log.info(f"--- Cycle {cycle_id} done (latency={latency_ms}ms, tokens={tokens_in}→{tokens_out}, cost=${cost:.4f}, executed={executed}) ---")
-        
-        # LOW: Update dashboard cycle timestamp
-        dashboard.set_cycle_time()
-
+    
     async def _check_bot_result(self, decision_id: str) -> dict | None:
         """Check bot result file for correlation with sent decision.
 

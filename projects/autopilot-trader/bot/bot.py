@@ -378,11 +378,14 @@ class PositionTracker:
             result = evaluate_dsl(pos.dsl_state, price, self.dsl_cfg)
             roe = pos.dsl_state.current_roe(price)
             if result:
+                floor_str = (f"Floor: {pos.dsl_state.locked_floor_roe:+.1f}%"
+                             if pos.dsl_state.locked_floor_roe else "")
+                tier_str = (str(pos.dsl_state.current_tier.trigger_pct)
+                            if pos.dsl_state.current_tier else "none")
                 logging.info(
                     f"🛑 {pos.symbol} DSL {result} | "
                     f"ROE: {roe:+.1f}% | HW: {pos.dsl_state.high_water_roe:+.1f}% | "
-                    f"Tier: {pos.dsl_state.current_tier.trigger_pct if pos.dsl_state.current_tier else 'none'} | "
-                    f"Floor: {pos.dsl_state.locked_floor_roe:+.1f}%" if pos.dsl_state.locked_floor_roe else ""
+                    f"Tier: {tier_str} | {floor_str}"
                 )
                 return result
 
@@ -2214,43 +2217,6 @@ class LighterCopilot:
             )
         except Exception as e:
             logging.warning(f"Failed to log outcome: {e}")
-
-    def _update_outcome(self, pos: TrackedPosition, exit_price: float, exit_reason: str):
-        """Update the most recent outcome for this symbol with actual fill price.
-
-        Called after verification confirms the actual fill. If this fails or the
-        bot crashes, the estimated outcome already exists in the DB.
-        """
-        if _db is None:
-            return
-        try:
-            is_long = pos.side == "long"
-            pnl_pct = ((exit_price - pos.entry_price) / pos.entry_price * 100) if is_long \
-                else ((pos.entry_price - exit_price) / pos.entry_price * 100)
-            size_usd = pos.size * pos.entry_price
-            pnl_usd = size_usd * pnl_pct / 100
-            # For cross margin: effective_leverage = notional / equity
-            equity = self.tracker.account_equity
-            if equity > 0 and size_usd > 0:
-                actual_leverage = size_usd / equity
-            elif pos.dsl_state:
-                actual_leverage = pos.dsl_state.leverage
-            else:
-                actual_leverage = self.cfg.default_leverage
-            roe_pct = pnl_pct * actual_leverage
-
-            updated = _db.update_latest_outcome(
-                pos.symbol, exit_price, pnl_usd, pnl_pct, roe_pct, exit_reason
-            )
-            if updated:
-                logging.info(
-                    f"📝 Outcome updated: {pos.side} {pos.symbol} "
-                    f"PnL=${pnl_usd:+.2f} ({roe_pct:+.1f}% ROE @ {actual_leverage:.1f}x) reason={exit_reason}"
-                )
-            else:
-                logging.warning(f"Outcome update: no matching record for {pos.symbol}")
-        except Exception as e:
-            logging.warning(f"Failed to update outcome: {e}")
 
     def _write_ai_result(self, decision: dict, success: bool):
         """Write execution result for the AI trader to read."""

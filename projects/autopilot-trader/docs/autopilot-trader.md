@@ -637,3 +637,21 @@ projects/autopilot-trader/
 │       ├── ai-trader-infra.md      # Infrastructure notes
 │       └── perp-data-sources.md    # Data source analysis
 ```
+
+---
+
+## Lessons Learned
+
+*Hard-won knowledge from building and operating the system (March 2026).*
+
+- **DSL high-water marks reset on adoption/reconciliation** — Can't reconstruct from exchange data alone. Accepted tradeoff.
+- **Market orders work, limit orders don't on Lighter** — `avg_execution_price` acts as a hard limit. Use `create_market_order_limited_slippage`.
+- **Confidence scale mismatch** — AI outputs 0-1, bot expects 0-100. Mismatch silently rejects everything.
+- **`stop_loss_pct` from AI must be stored on TrackedPosition** — Otherwise bot silently ignores the AI's stop-loss instruction.
+- **Parse decision JSON with brace-depth tracking** — `rfind('}')` is fragile on nested JSON and will break.
+- **Proxy URL scheme** — `socks5://` is correct for SOCKS5. `http://` varies by aiohttp version and may fail.
+- **State file wiped to empty by crash storms** — Multiple crashes can leave `{}`. Reconciliation handles this gracefully.
+- **Close cooldown** — 30min too aggressive, 5min reasonable.
+- **Always restart services after merging subagent fixes** — Bugs often only crash on first run.
+- **ExecStartPre healthcheck** — Prevents cascading restart loops.
+- **Signal staleness** — Check `signals.json` modification time before using. Could be hours old.

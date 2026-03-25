@@ -1,22 +1,21 @@
-# Session Handoff — 2026-03-25 14:51 MDT
+# Session Handoff — 2026-03-25 14:57 MDT
 
 ## What Happened
 - **Bot modularization** — executed all 11 phases from `bot-modularization-plan.md`
 - bot.py: **3,285 → 318 lines** (90.3% reduction)
 - Created 10 new modules across `api/`, `core/`, `alerts/`
-- Ran comprehensive audit with subagent — found and fixed 3 bugs:
-  1. Missing `_save_state()` delegation in bot.py
-  2. `self.signal_processor` → `self.bot.signal_processor` in execution_engine
-  3. `hasattr(self, '_auth_manager')` → `hasattr(self.bot, ...)` in signal_processor
+- Comprehensive audit with subagent — found and fixed 3 bugs
+- **Test suite plan** created at `docs/plans/bot-test-suite-plan.md` (4 phases, ~100 tests, 75%+ coverage target)
 
 ## Current State
-- All 11 modules compile, cross-references verified, ready for runtime testing
-- On branch `modularization-complete` (commit 2dabbd2)
+- All 11 modules compile, cross-references verified
+- On branch `modularization-complete` (commits 8991b68, 2dabbd2, 98ef384)
 - **NOT merged to main** — needs runtime test before merge
 - `lighter-bot` service still running old code (not restarted)
+- Memory files synced to main ✅
 
 ## Next Steps
-1. **Runtime test**: restart bot service with modularized code
-2. **Monitor** for 1-2 cycles — watch for import errors, attribute errors
-3. **Merge to main** if clean
-4. Resume bot tasks: dashboard refactor, docs cleanup, phase 2 automation
+1. **Implement tests**: follow `docs/plans/bot-test-suite-plan.md` (4 phases)
+2. **Runtime test**: restart bot service with modularized code
+3. **Monitor** for 1-2 cycles — watch for import/attribute errors
+4. **Merge to main** if clean

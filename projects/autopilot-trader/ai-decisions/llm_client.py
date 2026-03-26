@@ -83,7 +83,7 @@ class LLMClient:
         user_prompt: str,
         model: str | None = None,
         temperature: float = 0.3,
-        max_tokens: int = 1024,
+        max_tokens: int = 5000,
     ) -> CallResult:
         """Call LLM with retry + fallback. Returns CallResult with content + token counts."""
         model = model or self.primary_model

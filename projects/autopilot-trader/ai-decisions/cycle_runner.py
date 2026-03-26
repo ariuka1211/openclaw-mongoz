@@ -49,6 +49,8 @@ class CycleRunner:
         # HIGH-2: Check signals freshness — skip cycle if data is stale
         try:
             signals_age = time.time() - os.path.getmtime(self.ai_trader.data_reader.signals_file)
+            # INTENTIONAL: Hardcoded to prevent trading on stale data. Safer as a fixed guard than
+            # a config value that could be accidentally widened. Match scanner cycle (2-3 min).
             if signals_age > 600:  # 10 minutes
                 log.warning(f"⚠️ Signals are stale (age={signals_age:.0f}s > 600s) — skipping cycle to avoid trading on frozen data")
                 return

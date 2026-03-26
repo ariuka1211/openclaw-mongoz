@@ -28,6 +28,7 @@ from core.state_manager import StateManager
 from core.signal_processor import SignalProcessor
 from core.models import TrackedPosition
 from dsl import DSLState, evaluate_dsl, DSLConfig
+from core.shared_utils import should_skip_open_for_quota
 
 
 # ── Helpers ─────────────────────────────────────────────────────────
@@ -342,7 +343,7 @@ class TestQuotaCheckChain:
         mock_api.volume_quota_remaining = 10
         bot = _build_mock_bot(config, mock_api, mock_alerter)
 
-        result = bot.order_manager._should_skip_open_for_quota()
+        result = should_skip_open_for_quota(bot, mock_api)
         assert result is True
 
     def test_should_skip_open_for_quota_allows_when_sufficient(self, config, mock_api, mock_alerter):
@@ -350,7 +351,7 @@ class TestQuotaCheckChain:
         mock_api.volume_quota_remaining = 100
         bot = _build_mock_bot(config, mock_api, mock_alerter)
 
-        result = bot.order_manager._should_skip_open_for_quota()
+        result = should_skip_open_for_quota(bot, mock_api)
         assert result is False
 
     def test_quota_check_chain_blocks_signal_processor_indirectly(self, config, mock_api, mock_alerter, tmp_path):
@@ -358,7 +359,7 @@ class TestQuotaCheckChain:
         mock_api.volume_quota_remaining = 20
         bot = _build_mock_bot(config, mock_api, mock_alerter)
 
-        assert bot.order_manager._should_skip_open_for_quota() is True
+        assert should_skip_open_for_quota(bot, mock_api) is True
 
 
 # ── Test 8: DSL evaluation chain ───────────────────────────────────

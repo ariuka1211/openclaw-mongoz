@@ -17,7 +17,7 @@ import { CONFIG } from "./config";
  *   - Liquidation distance must be ≥ 2× stop-loss distance
  *   - NaN guards on all inputs
  */
-export function calculatePosition(market: OrderBookDetail, compositeScore: number): {
+export function calculatePosition(market: OrderBookDetail): {
   maxLeverage: number;
   positionSizeUsd: number;
   actualLeverage: number;

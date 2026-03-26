@@ -131,7 +131,7 @@ describe("calculatePosition", () => {
     expect(result).toHaveProperty("pass");
     expect(result).toHaveProperty("reason");
     expect(typeof result.maxLeverage).toBe("number");
-    typeof result.positionSizeUsd === "number";
+    expect(typeof result.positionSizeUsd).toBe("number");
   });
 
   it("negative price field → pass=false", () => {

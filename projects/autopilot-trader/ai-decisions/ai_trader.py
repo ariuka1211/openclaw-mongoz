@@ -64,8 +64,8 @@ class AITrader:
 
         self.cycle_interval = config.get("cycle_interval_seconds", 180)
         self.MAX_CONSECUTIVE_FAILURES = config.get("max_consecutive_failures", 5)
-        self.max_rejection_halt_count = config.get("safety", {}).get("max_rejection_halt_count", 15)
-        self.rejection_halt_window_minutes = config.get("safety", {}).get("rejection_halt_window_minutes", 30)
+        self.max_rejection_halt_count = config.get("max_rejection_halt_count", 15)
+        self.rejection_halt_window_minutes = config.get("rejection_halt_window_minutes", 30)
         self._last_purge_time: float = 0
         self.running = True
         self.emergency_halt = False

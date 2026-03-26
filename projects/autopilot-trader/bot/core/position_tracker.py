@@ -56,7 +56,9 @@ class PositionTracker:
     def compute_sl_price(self, pos: TrackedPosition) -> float:
         """Return trailing stop loss level. Trails upward on longs, downward on shorts."""
         sl_pct = self._get_sl_pct(pos)
-        return pos.trailing_sl_level or pos.entry_price * (1 - sl_pct / 100 if pos.side == "long" else 1 + sl_pct / 100)
+        if pos.trailing_sl_level is not None:
+            return pos.trailing_sl_level
+        return pos.entry_price * (1 - sl_pct / 100 if pos.side == "long" else 1 + sl_pct / 100)
 
     def _get_sl_pct(self, pos: TrackedPosition) -> float:
         """Get effective stop loss % — per-position (AI) or config default."""

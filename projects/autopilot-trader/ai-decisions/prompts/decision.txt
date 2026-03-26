@@ -2,6 +2,8 @@
 
 Based on this data, output your trading decision as valid JSON:
 
+Note: "close_all" is NOT listed here — it's triggered by the safety layer only (emergency halt), not by the LLM.
+
 {{
   "action": "open" | "close" | "hold",
   "symbol": "TOKEN" | null,

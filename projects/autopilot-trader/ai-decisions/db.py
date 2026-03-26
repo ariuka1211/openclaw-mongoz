@@ -371,7 +371,9 @@ class DecisionDB:
             total = decisions_deleted + alerts_deleted + stale_alerts + outcomes_deleted
             if total > 0:
                 log.info(f"Purged: {decisions_deleted} decisions, {alerts_deleted + stale_alerts} alerts, {outcomes_deleted} outcomes")
-        # WAL checkpoint + vacuum outside lock to avoid blocking
+        # INTENTIONAL: VACUUM outside lock. Holding the lock during VACUUM (which can take seconds)
+        # would block all other DB operations. The DELETEs above ran inside the lock; VACUUM only
+        # reclaims freed space. If another query runs concurrently, SQLite busy_timeout (5s) handles it.
         self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         self._conn.execute("VACUUM")
 
@@ -624,6 +626,7 @@ class DecisionDB:
             },
         }
 
+    # INTENTIONAL: Lock protects against concurrent access during shutdown (e.g., purge running)
     def close(self):
         with self._lock:
             self._conn.close()

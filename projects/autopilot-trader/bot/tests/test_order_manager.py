@@ -11,6 +11,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from core.order_manager import OrderManager
+from core.shared_utils import should_pace_orders, should_skip_open_for_quota
 
 
 def _make_order_manager(config, mock_api, mock_bot):
@@ -122,21 +123,21 @@ class TestShouldPaceOrders:
         mock_api.volume_quota_remaining = 30
         mock_bot._last_order_time = time.time() - 10  # 10s ago
         om = _make_order_manager(config, mock_api, mock_bot)
-        assert om._should_pace_orders() is True
+        assert should_pace_orders(mock_bot) is True
 
     def test_should_pace_orders_quota_low_old_order(self, config, mock_api, mock_bot):
         """Quota < 35 and last order > 16s ago → False."""
         mock_api.volume_quota_remaining = 30
         mock_bot._last_order_time = time.time() - 20  # 20s ago
         om = _make_order_manager(config, mock_api, mock_bot)
-        assert om._should_pace_orders() is False
+        assert should_pace_orders(mock_bot) is False
 
     def test_should_pace_orders_quota_sufficient(self, config, mock_api, mock_bot):
         """Quota >= 35 → False (no pacing)."""
         mock_api.volume_quota_remaining = 50
         mock_bot._last_order_time = time.time() - 5  # 5s ago
         om = _make_order_manager(config, mock_api, mock_bot)
-        assert om._should_pace_orders() is False
+        assert should_pace_orders(mock_bot) is False
 
 
 # ── _should_skip_open_for_quota() ───────────────────────────────────
@@ -148,19 +149,19 @@ class TestShouldSkipOpenForQuota:
         """Quota < 35 → True."""
         mock_api.volume_quota_remaining = 20
         om = _make_order_manager(config, mock_api, mock_bot)
-        assert om._should_skip_open_for_quota() is True
+        assert should_skip_open_for_quota(mock_bot, mock_api) is True
 
     def test_should_skip_open_quota_sufficient(self, config, mock_api, mock_bot):
         """Quota >= 35 → False."""
         mock_api.volume_quota_remaining = 50
         om = _make_order_manager(config, mock_api, mock_bot)
-        assert om._should_skip_open_for_quota() is False
+        assert should_skip_open_for_quota(mock_bot, mock_api) is False
 
     def test_should_skip_open_quota_none(self, config, mock_api, mock_bot):
         """Quota is None → False."""
         mock_api.volume_quota_remaining = None
         om = _make_order_manager(config, mock_api, mock_bot)
-        assert om._should_skip_open_for_quota() is False
+        assert should_skip_open_for_quota(mock_bot, mock_api) is False
 
 
 # ── _is_quota_emergency() ───────────────────────────────────────────

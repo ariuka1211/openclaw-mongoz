@@ -184,7 +184,7 @@ async function main(): Promise<void> {
     );
 
     // Position sizing + safety check
-    const pos = calculatePosition(m, composite);
+    const pos = calculatePosition(m);
 
     // Direction: majority vote of MA + OB + funding spread
     const direction = computeDirection(maDir, obType, funding.spread8h);

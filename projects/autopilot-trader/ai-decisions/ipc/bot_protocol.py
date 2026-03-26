@@ -179,7 +179,7 @@ class BotProtocol:
                 "reasoning": f"Emergency halt triggered: {reason}",
                 "confidence": 1.0,
                 "requested_size_usd": None,
-                "positions": current_positions,
+                "positions": current_positions,  # Informational only — bot closes ALL from result file
             }
             # Clean up ACK file so bot can process emergency halt immediately
             ack_path = str(self.ai_trader.decision_file) + ".ack"

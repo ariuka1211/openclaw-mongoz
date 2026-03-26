@@ -73,40 +73,17 @@ class OrderManager:
 
 
 
-    def _should_pace_orders(self) -> bool:
-        """Pace orders to leverage 15-second free tx window when quota is low."""
-        if self.api and self.api.volume_quota_remaining is not None and self.api.volume_quota_remaining < 35:
-            time_since_last = time.time() - self.bot._last_order_time
-            if time_since_last < 16:  # 16s to be safe
-                logging.debug(f"⏱️ Pacing orders (quota={self.api.volume_quota_remaining}, last_order={time_since_last:.1f}s ago)")
-                return True
-        return False
-
-
-
-    def _should_skip_open_for_quota(self) -> bool:
-        """Skip new opens when quota is low to preserve it for SL orders."""
-        quota = self.api.volume_quota_remaining if self.api else None
-        if quota is not None and quota < 35:
-            logging.debug(f"🚫 Skipping new opens (quota={quota} < 35, preserving for SL)")
-            return True
-        return False
-
-
-
     def _is_quota_emergency(self) -> bool:
         """Emergency mode when quota is critically low."""
         quota = self.api.volume_quota_remaining if self.api else None
         return quota is not None and quota < 5
-
-
 
     def _should_skip_non_critical_orders(self) -> bool:
         """In emergency mode, only allow SL orders."""
         if self._is_quota_emergency():
             # Rate-limit warning to once per minute
             now = time.monotonic()
-            if now - getattr(self, '_last_quota_emergency_warn', 0) > 60:
+            if now - getattr(self.bot, '_last_quota_emergency_warn', 0) > 60:
                 self.bot._last_quota_emergency_warn = now
                 quota = self.api.volume_quota_remaining if self.api else None
                 logging.warning(f"🚨 Quota emergency mode (remaining={quota}), SL only")

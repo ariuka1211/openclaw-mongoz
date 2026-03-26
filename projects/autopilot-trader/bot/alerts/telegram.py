@@ -17,7 +17,6 @@ class TelegramAlerter:
         if not self.enabled:
             logging.debug(f"[alert] {text}")
             return
-        import aiohttp
         url = f"https://api.telegram.org/bot{self.token}/sendMessage"
         try:
             timeout = aiohttp.ClientTimeout(total=10)

@@ -36,11 +36,6 @@ class StateManager:
         self.alerter = alerter
         self.bot = bot
 
-        # State file paths
-        self.state_dir = Path(__file__).parent.parent / "state"
-        self.state_file = self.state_dir / "bot_state.json"
-        self.equity_file = self.state_dir / "equity.txt"
-
     def _serialize_dsl_state(self, dsl: DSLState) -> dict:
         """Serialize DSLState to a JSON-compatible dict."""
         return {

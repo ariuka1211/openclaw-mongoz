@@ -31,7 +31,7 @@ def write_ai_result(bot, cfg, api, tracker, decision: dict, success: bool):
                 "entry_price": pos.entry_price,
                 "current_price": current_price if current_price and current_price > 0 else pos.entry_price,
                 "size": pos.size,
-                "leverage": pos.dsl_state.effective_leverage if pos.dsl_state else cfg.default_leverage,
+                "leverage": pos.dsl_state.leverage if pos.dsl_state else cfg.dsl_leverage,
                 "position_size_usd": pos.size * pos.entry_price,
             })
         result = {
@@ -80,7 +80,7 @@ def refresh_position_context(bot, cfg, api, tracker):
                 "entry_price": pos.entry_price,
                 "current_price": current_price if current_price and current_price > 0 else pos.entry_price,
                 "size": pos.size,
-                "leverage": pos.dsl_state.effective_leverage if pos.dsl_state else cfg.default_leverage,
+                "leverage": pos.dsl_state.leverage if pos.dsl_state else cfg.dsl_leverage,
                 "position_size_usd": pos.size * pos.entry_price,
             })
         result = {

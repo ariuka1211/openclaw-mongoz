@@ -7,6 +7,7 @@ export const CONFIG = {
   riskPct: 0.05,                    // 5% of equity risked per trade
   stopLossMultiple: 1.0,            // SL = dailyVolatility × this multiple
   maxLeverageCap: 20,               // never exceed 20x
+  maxPositionUsd: 15,               // Fixed USD cap per position
   maxConcurrentPositions: 3,        // max simultaneous positions (1-5)
   minDailyVolume: 100000,           // $100k minimum daily volume
   safetyMultiple: 2,               // liquidation must be 2× stop-loss away

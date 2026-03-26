@@ -69,7 +69,7 @@ class TestSendDecision:
             "symbol": "BTC-USDT",
             "direction": "long",
             "size_pct_equity": 5.0,
-            "leverage": 3,
+
             "stop_loss_pct": 2.0,
             "reasoning": "Strong momentum",
             "confidence": 0.8,

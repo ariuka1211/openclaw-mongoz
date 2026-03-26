@@ -65,7 +65,7 @@ def _do_save_load(sm, state_file):
                 "side": pos.side,
                 "entry_price": pos.entry_price,
                 "size": pos.size,
-                "leverage": pos.dsl_state.effective_leverage if pos.dsl_state else 10.0,
+                "leverage": pos.dsl_state.leverage if pos.dsl_state else 10.0,
                 "sl_pct": pos.sl_pct,
                 "high_water_mark": pos.high_water_mark,
                 "trailing_active": pos.trailing_active,
@@ -120,8 +120,7 @@ def test_serialize_dsl_state_full_state_all_fields(config, mock_api, mock_alerte
     dsl = DSLState(
         side="long",
         entry_price=100.0,
-        leverage=10.0,
-        effective_leverage=15.0,
+        leverage=15.0,
         high_water_roe=25.5,
         high_water_price=105.0,
         high_water_time=now,
@@ -134,8 +133,7 @@ def test_serialize_dsl_state_full_state_all_fields(config, mock_api, mock_alerte
     result = sm._serialize_dsl_state(dsl)
     assert result["side"] == "long"
     assert result["entry_price"] == 100.0
-    assert result["leverage"] == 10.0
-    assert result["effective_leverage"] == 15.0
+    assert result["leverage"] == 15.0
     assert result["high_water_roe"] == 25.5
     assert result["high_water_price"] == 105.0
     assert result["current_tier_trigger"] == 12
@@ -187,7 +185,6 @@ def test_save_load_roundtrip_positions_restored(config, mock_api, mock_alerter, 
         side="long",
         entry_price=50000.0,
         leverage=10.0,
-        effective_leverage=12.0,
         high_water_roe=15.0,
         high_water_price=52000.0,
         current_tier=DSLTier(trigger_pct=12, lock_hw_pct=55),
@@ -232,7 +229,6 @@ def test_save_load_roundtrip_dsl_state_fields(config, mock_api, mock_alerter, mo
         side="short",
         entry_price=3000.0,
         leverage=10.0,
-        effective_leverage=20.0,
         high_water_roe=8.0,
         high_water_price=2900.0,
         high_water_time=hw_time,
@@ -257,7 +253,7 @@ def test_save_load_roundtrip_dsl_state_fields(config, mock_api, mock_alerter, mo
     saved_data = sm.bot._saved_positions["2"]
     assert saved_data["dsl"]["side"] == "short"
     assert saved_data["dsl"]["entry_price"] == 3000.0
-    assert saved_data["dsl"]["effective_leverage"] == 20.0
+    assert saved_data["dsl"]["leverage"] == 10.0
     assert saved_data["dsl"]["high_water_roe"] == 8.0
     assert saved_data["dsl"]["current_tier_trigger"] == 7
     assert saved_data["dsl"]["breach_count"] == 1
@@ -269,14 +265,15 @@ def test_load_state_missing_file_no_crash(config, mock_api, mock_alerter, mock_b
     sm = _make_sm(config, mock_api, mock_alerter, mock_bot, tmp_state_dir)
 
     original_ts = sm._last_ai_decision_ts
+    original_closed = dict(sm._recently_closed)
 
-    # _load_state checks Path.exists() first and returns early if file missing.
-    # The path resolves to a non-existent location, so this should be a no-op.
-    sm._load_state()
+    # Patch Path.exists to simulate missing state file
+    with patch("core.state_manager.Path.exists", return_value=False):
+        sm._load_state()
 
     # State should be unchanged
     assert sm._last_ai_decision_ts == original_ts
-    assert sm._recently_closed == {}
+    assert sm._recently_closed == original_closed
 
 
 def test_load_state_corrupted_json_no_crash_logs_warning(config, mock_api, mock_alerter, mock_bot, tmp_state_dir, caplog):
@@ -319,7 +316,7 @@ def test_restore_dsl_state_valid_dict_fields_correct(config, mock_api, mock_aler
     tier2.trigger_pct = 12
     sm.tracker.dsl_cfg.tiers = [tier1, tier2]
 
-    dsl = DSLState(side="long", entry_price=100.0, leverage=10.0, effective_leverage=10.0)
+    dsl = DSLState(side="long", entry_price=100.0, leverage=10.0)
     pos = TrackedPosition(
         market_id=1, symbol="BTC", side="long",
         entry_price=100.0, size=0.1, high_water_mark=100.0,
@@ -336,7 +333,7 @@ def test_restore_dsl_state_valid_dict_fields_correct(config, mock_api, mock_aler
         "locked_floor_roe": 10.0,
         "stagnation_active": True,
         "stagnation_started": "2024-06-15T10:30:00+00:00",
-        "effective_leverage": 15.0,
+        "leverage": 15.0,
     }
 
     import asyncio
@@ -347,7 +344,7 @@ def test_restore_dsl_state_valid_dict_fields_correct(config, mock_api, mock_aler
     assert pos.dsl_state.breach_count == 2
     assert pos.dsl_state.locked_floor_roe == 10.0
     assert pos.dsl_state.stagnation_active is True
-    assert pos.dsl_state.effective_leverage == 15.0
+    assert pos.dsl_state.leverage == 15.0
     assert pos.dsl_state.current_tier == tier2
 
 
@@ -359,7 +356,7 @@ def test_restore_dsl_state_missing_fields_uses_defaults(config, mock_api, mock_a
     sm.tracker.dsl_cfg.tiers = [tier]
 
     dsl = DSLState(
-        side="long", entry_price=100.0, leverage=10.0, effective_leverage=10.0,
+        side="long", entry_price=100.0, leverage=10.0,
         high_water_roe=5.0, breach_count=3,
     )
     pos = TrackedPosition(
@@ -376,7 +373,7 @@ def test_restore_dsl_state_missing_fields_uses_defaults(config, mock_api, mock_a
     assert pos.dsl_state.high_water_price == 0.0
     assert pos.dsl_state.breach_count == 0
     assert pos.dsl_state.stagnation_active is False
-    assert pos.dsl_state.effective_leverage == 10.0
+    assert pos.dsl_state.leverage == 10.0
 
 
 # ── _reconcile_state_with_exchange() ─────────────────────────────────

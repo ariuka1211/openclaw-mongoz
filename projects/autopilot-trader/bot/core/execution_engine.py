@@ -90,12 +90,7 @@ class ExecutionEngine:
                 new_balance = await self.bot._get_balance()
                 if new_balance > 0:
                     self.tracker.account_equity = new_balance
-                    # Recalculate effective leverage for all positions (cross margin reality)
-                    for _mid, _pos in self.tracker.positions.items():
-                        if _pos.dsl_state:
-                            _notional = abs(_pos.size * _pos.entry_price)
-                            if _notional > 0 and new_balance > 0:
-                                _pos.dsl_state.effective_leverage = _notional / new_balance
+                    # Leverage is set on exchange via set_leverage() — no recalculation needed
             except Exception as e:
                 logging.debug(f"Equity refresh failed (using cached): {e}")
 
@@ -117,13 +112,8 @@ class ExecutionEngine:
                     existing.entry_price = pos["entry_price"]
                     existing.size = pos["size"]
                     if existing.dsl_state:
-                        # Recalculate effective leverage from current notional/equity
-                        notional = abs(existing.size * existing.entry_price)
-                        if self.tracker.account_equity > 0 and notional > 0:
-                            existing.dsl_state.effective_leverage = notional / self.tracker.account_equity
-                        elif pos.get("leverage"):
-                            existing.dsl_state.effective_leverage = pos["leverage"]
-                        existing.dsl_state.leverage = pos.get("leverage", existing.dsl_state.leverage)
+                        if pos.get("leverage"):
+                            existing.dsl_state.leverage = pos["leverage"]
                     continue
                 if mid in self.tracker.positions:
                     continue  # already tracked
@@ -333,11 +323,8 @@ class ExecutionEngine:
         if mid in self.bot._no_price_ticks:
             del self.bot._no_price_ticks[mid]
 
-        # NOTE: DSL DOES use effective_leverage — both current_roe() (move * self.effective_leverage)
-        # and hard_sl_roe (hard_sl_pct * state.effective_leverage) in dsl.py depend on it for
-        # accurate cross-margin ROE. We intentionally DON'T override pos.dsl_state.leverage here
-        # because the execution engine already refreshes effective_leverage in the equity refresh
-        # block above (lines 89-97), recalculating notional/equity for all positions each tick.
+        # NOTE: DSL uses leverage from exchange IMF (set via set_leverage() before opens).
+        # Both current_roe() and hard_sl_roe in dsl.py use state.leverage.
 
         action = self.tracker.update_price(mid, price)
         is_long = pos.side == "long"

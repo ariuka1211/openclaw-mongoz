@@ -20,7 +20,8 @@ hard_sl_pct: 1.25               # Hard stop loss at -1.25% from entry (DSL: abso
 
 # DSL (Dynamic Stop Loss) — tiered trailing stop loss
 dsl_enabled: true               # false = use legacy flat trailing
-default_leverage: 10.0          # Leverage for ROE calculation
+max_position_usd: 15.0          # Each position notional cap
+dsl_leverage: 10.0              # DSL ROE calc fallback only
 stagnation_roe_pct: 5.0         # Exit if ROE ≥ this but no progress for stagnation_minutes
 stagnation_minutes: 60          # Minutes of stagnation before auto-exit
 

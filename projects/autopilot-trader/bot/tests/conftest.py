@@ -37,7 +37,8 @@ def config():
         ai_trader_dir="/tmp/test_ai_trader",
         ai_mode=True,
         hard_sl_pct=1.25,
-        default_leverage=10.0,
+        max_position_usd=15.0,
+        dsl_leverage=10.0,
         trailing_tp_trigger_pct=3.0,
         trailing_tp_delta_pct=1.0,
         dsl_enabled=True,
@@ -90,7 +91,6 @@ def dsl_state_long():
         side="long",
         entry_price=100.0,
         leverage=10.0,
-        effective_leverage=10.0,
         high_water_price=100.0,
         high_water_time=datetime.now(timezone.utc),
     )
@@ -103,7 +103,6 @@ def dsl_state_short():
         side="short",
         entry_price=100.0,
         leverage=10.0,
-        effective_leverage=10.0,
         high_water_price=100.0,
         high_water_time=datetime.now(timezone.utc),
     )

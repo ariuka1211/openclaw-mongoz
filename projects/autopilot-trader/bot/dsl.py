@@ -48,8 +48,7 @@ class DSLState:
     """Per-position DSL state."""
     side: str                           # "long" or "short"
     entry_price: float
-    leverage: float = 10.0              # Config leverage (for display/reference)
-    effective_leverage: float = 10.0    # Cross margin effective leverage (notional/equity)
+    leverage: float = 10.0              # Exchange-enforced leverage (from IMF)
 
     high_water_roe: float = 0.0         # peak ROE% seen
     high_water_price: float = 0.0       # price at peak ROE
@@ -63,18 +62,16 @@ class DSLState:
     stagnation_started: datetime | None = None
 
     def current_roe(self, price: float) -> float:
-        """Calculate ROE% from price movement and effective leverage.
+        """Calculate ROE% from price movement and leverage.
 
-        Uses effective leverage (notional/equity) which reflects actual cross margin reality,
-        not config leverage. This prevents DSL from being overly aggressive when positions
-        have lower effective leverage than config (common with multiple positions or varying margins).
+        Uses exchange-enforced leverage for ROE calculation.
         """
         if self.entry_price <= 0:
             return 0.0
         move = (price - self.entry_price) / self.entry_price * 100
         if self.side == "short":
             move = -move
-        return move * self.effective_leverage
+        return move * self.leverage
 
     def update_high_water(self, roe: float, price: float, now: datetime):
         if roe > self.high_water_roe:
@@ -101,7 +98,7 @@ def evaluate_dsl(state: DSLState, price: float, cfg: DSLConfig) -> str | None:
 
     # ── Hard SL: absolute floor, always check first ──
     # Small tolerance (0.001%) to handle floating point imprecision
-    hard_sl_roe = -abs(cfg.hard_sl_pct) * state.effective_leverage
+    hard_sl_roe = -abs(cfg.hard_sl_pct) * state.leverage
     if roe <= hard_sl_roe + 0.001:
         return "hard_sl"
 

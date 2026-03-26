@@ -160,16 +160,8 @@ def log_outcome(pos: TrackedPosition, exit_price: float, exit_reason: str,
         pnl_usd = size_usd * pnl_pct / 100
         hold_seconds = int((datetime.now(timezone.utc) - pos.opened_at).total_seconds())
         # ROE = return relative to margin (not notional) = pnl_pct × leverage
-        # For cross margin: effective_leverage = notional / equity
-        # Fall back to DSL state leverage, then config default
-        equity = tracker.account_equity
-        if equity > 0 and size_usd > 0:
-            actual_leverage = size_usd / equity
-        elif pos.dsl_state:
-            actual_leverage = pos.dsl_state.leverage
-        else:
-            actual_leverage = cfg.default_leverage
-        roe_pct = pnl_pct * actual_leverage
+        leverage = pos.dsl_state.leverage if pos.dsl_state else cfg.dsl_leverage
+        roe_pct = pnl_pct * leverage
 
         # Mark as estimated if we haven't verified the fill yet
         reason_tag = f"{exit_reason} (estimated)" if estimated else exit_reason
@@ -190,7 +182,7 @@ def log_outcome(pos: TrackedPosition, exit_price: float, exit_reason: str,
         tag = " (est)" if estimated else ""
         logging.info(
             f"📝 Outcome logged{tag}: {pos.side} {pos.symbol} "
-            f"PnL=${pnl_usd:+.2f} ({roe_pct:+.1f}% ROE @ {actual_leverage:.1f}x) "
+            f"PnL=${pnl_usd:+.2f} ({roe_pct:+.1f}% ROE @ {leverage:.1f}x) "
             f"held={hold_seconds}s reason={exit_reason}"
         )
     except Exception as e:

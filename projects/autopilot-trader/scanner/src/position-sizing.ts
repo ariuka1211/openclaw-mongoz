@@ -74,6 +74,9 @@ export function calculatePosition(market: OrderBookDetail): {
   // Core formula: position = riskAmount / SL_distance
   let positionSizeUsd = riskAmountUsd / (stopLossDistancePct / 100);
 
+  // Hard cap by fixed USD per position
+  positionSizeUsd = Math.min(positionSizeUsd, CONFIG.maxPositionUsd);
+
   // Hard cap: never exceed maxLeverage × equity
   const maxAllowedPosition = accountEquity * maxLeverage;
   positionSizeUsd = Math.min(positionSizeUsd, maxAllowedPosition);

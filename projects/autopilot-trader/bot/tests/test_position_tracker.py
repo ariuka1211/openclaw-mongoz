@@ -261,7 +261,7 @@ class TestUpdatePriceDsl:
             entry_price=50000.0, size=0.1, high_water_mark=50000.0,
             dsl_state=DSLState(
                 side="long", entry_price=50000.0,
-                leverage=10.0, effective_leverage=10.0,
+                leverage=10.0,
                 high_water_price=50000.0,
                 high_water_time=datetime.now(timezone.utc),
             ),
@@ -278,7 +278,7 @@ class TestUpdatePriceDsl:
         tracker = PositionTracker(config)
         dsl_state = DSLState(
             side="long", entry_price=50000.0,
-            leverage=10.0, effective_leverage=10.0,
+            leverage=10.0,
             high_water_price=51000.0,
             high_water_time=datetime.now(timezone.utc),
         )
@@ -312,7 +312,7 @@ class TestUpdatePriceDsl:
         tracker = PositionTracker(config)
         dsl_state = DSLState(
             side="long", entry_price=50000.0,
-            leverage=10.0, effective_leverage=10.0,
+            leverage=10.0,
             high_water_price=52000.0,
             high_water_time=datetime.now(timezone.utc),
         )
@@ -359,22 +359,21 @@ class TestAddPosition:
         assert pos.dsl_state.side == "long"
         assert pos.dsl_state.entry_price == 50000.0
 
-    def test_add_position_effective_leverage_uses_equity(self, config):
-        """Effective leverage uses account_equity when > 0."""
+    def test_add_position_leverage_uses_config(self, config):
+        """Leverage comes from config (not derived from equity)."""
         tracker = PositionTracker(config)
         tracker.account_equity = 1000.0
-        # notional = 0.1 * 50000 = 5000, equity=1000 → eff_lev = 5.0
         tracker.add_position(1, "BTC", "long", 50000.0, 0.1)
         pos = tracker.positions[1]
-        assert pos.dsl_state.effective_leverage == pytest.approx(5.0)
+        assert pos.dsl_state.leverage == config.dsl_leverage
 
-    def test_add_position_effective_leverage_falls_back_to_config(self, config):
+    def test_add_position_leverage_falls_back_to_config(self, config):
         """Falls back to config leverage when equity = 0."""
         tracker = PositionTracker(config)
         tracker.account_equity = 0.0
         tracker.add_position(1, "BTC", "long", 50000.0, 0.1)
         pos = tracker.positions[1]
-        assert pos.dsl_state.effective_leverage == config.default_leverage
+        assert pos.dsl_state.leverage == config.dsl_leverage
 
     def test_add_position_per_position_sl_pct_stored(self, config_no_dsl):
         """Per-position sl_pct stored."""

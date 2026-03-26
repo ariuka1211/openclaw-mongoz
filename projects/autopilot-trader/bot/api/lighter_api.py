@@ -181,12 +181,12 @@ class LighterAPI:
                         symbol = await self._get_symbol(market_id)
                         # Extract unrealized_pnl for mark price derivation
                         unrealized_pnl = float(pos.unrealized_pnl) if hasattr(pos, 'unrealized_pnl') and pos.unrealized_pnl else 0.0
-                        # Extract initial_margin_fraction and compute effective leverage
+                        # Extract initial_margin_fraction and compute leverage from exchange
                         margin_fraction = float(pos.initial_margin_fraction) if hasattr(pos, 'initial_margin_fraction') and pos.initial_margin_fraction else 0
                         if margin_fraction > 0:
-                            effective_leverage = round(min(100.0 / margin_fraction, self.cfg.default_leverage), 1)
+                            pos_leverage = round(min(100.0 / margin_fraction, self.cfg.dsl_leverage), 1)
                         else:
-                            effective_leverage = self.cfg.default_leverage
+                            pos_leverage = self.cfg.dsl_leverage
                         sign = int(pos.sign) if hasattr(pos, 'sign') else 1
                         side = "long" if sign > 0 else "short"
                         positions.append({
@@ -196,7 +196,7 @@ class LighterAPI:
                             "side": side,
                             "entry_price": entry,
                             "unrealized_pnl": unrealized_pnl,
-                            "leverage": effective_leverage,
+                            "leverage": pos_leverage,
                         })
             return positions
         except Exception as e:
@@ -414,6 +414,53 @@ class LighterAPI:
             return True
         except Exception as e:
             logging.error(f"Failed to execute TP: {e}")
+            return False
+
+    async def set_leverage(self, market_id: int, leverage: float) -> bool:
+        """Set leverage cap on the exchange via IMF. Best-effort — may not work on all markets.
+
+        Args:
+            market_id: Market to set leverage for
+            leverage: Desired leverage (e.g., 10.0 for 10x)
+
+        Returns:
+            True if set succeeds, False on unexpected failure. Exchange enforces
+            its own market limits regardless.
+        """
+        await self._ensure_signer()
+        from lighter.signer_client import SignerClient
+        try:
+            tx_info, api_response, error = await self._signer.update_leverage(
+                market_index=market_id,
+                margin_mode=SignerClient.CROSS_MARGIN_MODE,
+                leverage=leverage,
+            )
+            if error:
+                logging.warning(f"⚠️ set_leverage({market_id}, {leverage}x): {error}")
+                return True  # Proceed — exchange enforces its own limits on orders
+
+            # Log quota impact
+            if api_response:
+                quota_val, _ = self._extract_quota_from_response(api_response)
+                if quota_val is not None:
+                    self._update_quota_cache(quota_val)
+
+            logging.info(f"✅ Leverage set: {leverage}x for market {market_id} (quota={self._volume_quota_remaining})")
+            return True
+        except Exception as e:
+            logging.error(f"❌ set_leverage({market_id}, {leverage}x) exception: {e}")
+            return False  # Network/auth error — don't proceed
+
+            # Log quota impact
+            if api_response:
+                quota_val, _ = self._extract_quota_from_response(api_response)
+                if quota_val is not None:
+                    self._update_quota_cache(quota_val)
+
+            logging.info(f"✅ Leverage set: {leverage}x for market {market_id} (quota={self._volume_quota_remaining})")
+            return True
+        except Exception as e:
+            logging.error(f"❌ set_leverage({market_id}, {leverage}x) exception: {e}")
             return False
 
     async def open_position(self, market_id: int, size_usd: float, is_long: bool, current_price: float) -> bool:

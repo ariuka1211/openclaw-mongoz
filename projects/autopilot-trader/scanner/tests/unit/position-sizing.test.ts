@@ -32,21 +32,21 @@ describe("calculatePosition", () => {
     expect(result.reason).toMatch(/zero volatility/i);
   });
 
-  it("normal case: positionSize = riskAmount / (volatility * multiple)", () => {
-    // Using a larger market to avoid leverage cap
+  it("normal case: positionSize = min(riskAmount / SL, maxPositionUsd)", () => {
     // dailyVolatility = (105 - 95) / 100 = 0.10
     // SL distance = 0.10 * 1.0 = 0.10 = 10%
     // riskAmount = 60 * 0.05 = $3
-    // positionSize = 3 / 0.10 = $30
+    // positionSize (risk-based) = 3 / 0.10 = $30
+    // Capped by maxPositionUsd = min(30, 15) = 15
     // maxLeverage = min(20, 10000/500) = min(20, 20) = 20
     // maxAllowedPosition = 60 * 20 = 1200
-    // positionSize = min(30, 1200) = 30
+    // positionSize = min(15, 1200) = 15
     const market = mockOrderBookDetail();
     const result = calculatePosition(market, 80);
     expect(result.pass).toBe(true);
     expect(result.riskAmountUsd).toBeCloseTo(3, 2);
-    expect(result.positionSizeUsd).toBeCloseTo(30, 2);
-    expect(result.actualLeverage).toBeCloseTo(0.5, 2);
+    expect(result.positionSizeUsd).toBeCloseTo(15, 2);
+    expect(result.actualLeverage).toBeCloseTo(0.25, 2);
     expect(result.maxLeverage).toBe(20);
   });
 
@@ -73,45 +73,29 @@ describe("calculatePosition", () => {
     // Need: liqDistPct < safetyMultiple * stopLossDistancePct
     // liqDistPct = (1/leverage - maintMarginRate) * 100
     //
-    // Use low exchange max leverage to force high leverage:
-    // default_initial_margin_fraction = 5000 → exchangeMax = 2
-    // With large dailyVolatility:
-    // dailyVolatility = (200-10)/100 = 1.9
-    // SL dist = 1.9 * 1.0 = 190%
-    // riskAmount = 3
-    // position = 3/1.9 = 1.58 (capped by exchange max: 60*2 = 120)
-    // actualLeverage = 1.58/60 = 0.026
-    // liqDistPct = (1/0.026 - 0.012)*100 = (38.46 - 0.012)*100 = 3845%
-    // safety threshold = 190%*2 = 380%
-    // 3845 >= 380 → PASSES
-    //
-    // Let me try a different approach: use a very small SL but high leverage
-    // Actually, the issue is position gets capped. Let me force actualLeverage high.
-    //
-    // Use: default_initial_margin_fraction = 2000 → exchangeMax = 5
+    // With maxPositionUsd = 15:
     // dailyVolatility = (102-100)/100 = 0.02
     // SL dist = 0.02 * 1.0 = 2%
     // riskAmount = 3
-    // position = 3/0.02 = 150
-    // maxAllowedPosition = 60*5 = 300
-    // positionSize = min(150, 300) = 150
-    // actualLeverage = 150/60 = 2.5
-    // liqDistPct = (1/2.5 - 0.012)*100 = (0.4 - 0.012)*100 = 38.8%
-    // safety threshold = 2%*2 = 4%
-    // 38.8 >= 4 → PASSES
-    //
-    // Hmm, this is hard to fail. Let me use maintenance_margin_fraction = 5000 (50%)
+    // position (risk-based) = 3/0.02 = 150
+    // Capped by maxPositionUsd: min(150, 15) = 15
+    // maxLeverage = min(20, 10000/2000) = 5
+    // maxAllowedPosition = 60 * 5 = 300
+    // positionSize = min(15, 300) = 15
+    // actualLeverage = 15/60 = 0.25
+    // liqDistPct = (1/0.25 - maintMarginRate)*100 = (4 - maintMarginRate)*100
+    // safety threshold = 2% * 2 = 4%
+    // Need liqDistPct < 4%:
+    // (4 - maintMarginRate)*100 < 4
+    // 4 - maintMarginRate < 0.04
+    // maintMarginRate > 3.96
+    // maintenance_margin_fraction = 39700 (397%) → maintMarginRate = 3.97
     // default_initial_margin_fraction = 2000 (5x max)
-    // With maintenance_margin_fraction = 5000:
-    // maintMarginRate = 0.5
-    // liqDistPct = (1/2.5 - 0.5)*100 = (0.4 - 0.5)*100 = -10%
-    // safety threshold = 4%
-    // -10 < 4 → FAILS!
     const market = mockOrderBookDetail({
       daily_price_low: 100,
       daily_price_high: 102,
       default_initial_margin_fraction: 2000, // 5x
-      maintenance_margin_fraction: 5000,     // 50% margin rate
+      maintenance_margin_fraction: 39700,    // 397% → maintMarginRate = 3.97
     });
     const result = calculatePosition(market, 80);
     expect(result.pass).toBe(false);

@@ -166,7 +166,7 @@ class LighterCopilot:
         logging.info(f"   Account: {self.cfg.account_index}")
         if self.cfg.dsl_enabled:
             logging.info(f"   Mode: DSL (Dynamic Stop Loss)")
-            logging.info(f"   Leverage: {self.cfg.default_leverage}x")
+            logging.info(f"   Leverage: {self.cfg.dsl_leverage}x")
             logging.info(f"   Hard SL: {self.cfg.hard_sl_pct}% from entry")
             logging.info(f"   Stagnation: {self.cfg.stagnation_roe_pct}% ROE, {self.cfg.stagnation_minutes}min")
             for t in self.tracker.dsl_cfg.tiers:

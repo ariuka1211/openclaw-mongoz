@@ -409,3 +409,79 @@ class TestSOCKS5Proxy:
 
         api = LighterAPI(config)
         assert api.cfg.proxy_url == ""
+
+
+# ── set_leverage ──────────────────────────────────────────────────────
+
+class TestSetLeverage:
+    """Tests for set_leverage()."""
+
+    @pytest.mark.asyncio
+    async def test_set_leverage_success_returns_true(self, api):
+        """Successful update_leverage returns True."""
+        mock_signer = MagicMock()
+        mock_signer.update_leverage = AsyncMock(return_value=(None, None, None))
+        api._signer = mock_signer
+        api._volume_quota_remaining = 100
+
+        result = await api.set_leverage(market_id=1, leverage=10.0)
+        assert result is True
+        mock_signer.update_leverage.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_set_leverage_market_limit_returns_true(self, api):
+        """update_leverage with market limit error returns True (exchange enforces its own cap)."""
+        mock_signer = MagicMock()
+        mock_signer.update_leverage = AsyncMock(return_value=(None, None, "max leverage exceeded for this market"))
+        api._signer = mock_signer
+
+        result = await api.set_leverage(market_id=1, leverage=10.0)
+        assert result is True  # Market limit — safe to proceed
+
+    @pytest.mark.asyncio
+    async def test_set_leverage_network_error_returns_false(self, api):
+        """update_leverage with real error (not market limit) returns False."""
+        mock_signer = MagicMock()
+        mock_signer.update_leverage = AsyncMock(return_value=(None, None, "connection timeout"))
+        api._signer = mock_signer
+
+        result = await api.set_leverage(market_id=1, leverage=10.0)
+        assert result is False  # Real error — abort
+
+    @pytest.mark.asyncio
+    async def test_set_leverage_exception_returns_false(self, api):
+        """update_leverage raising exception returns False."""
+        mock_signer = MagicMock()
+        mock_signer.update_leverage = AsyncMock(side_effect=Exception("network error"))
+        api._signer = mock_signer
+
+        result = await api.set_leverage(market_id=1, leverage=10.0)
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_open_position_calls_set_leverage_first(self, config, api):
+        """open_position calls set_leverage before placing order."""
+        # Make set_leverage fail
+        api.set_leverage = AsyncMock(return_value=False)
+        api._ensure_decimals = AsyncMock(return_value=(4, 2))
+
+        result = await api.open_position(market_id=1, size_usd=100.0, is_long=True, current_price=50000.0)
+        assert result is False
+        api.set_leverage.assert_called_once_with(1, config.dsl_leverage)
+
+    @pytest.mark.asyncio
+    async def test_open_position_proceeds_when_set_leverage_succeeds(self, config, api):
+        """open_position proceeds with order placement when set_leverage succeeds."""
+        api.set_leverage = AsyncMock(return_value=True)
+        api._ensure_decimals = AsyncMock(return_value=(4, 2))
+        api._ensure_signer = AsyncMock()
+        api._signer = MagicMock()
+        api._signer.get_best_price = AsyncMock(return_value=500000000)
+        api._signer.create_market_order = AsyncMock(return_value=(MagicMock(), MagicMock(), None))
+        api._extract_quota_from_response = MagicMock(return_value=(None, ""))
+        api._next_client_order_index = MagicMock(return_value=1)
+
+        result = await api.open_position(market_id=1, size_usd=100.0, is_long=True, current_price=50000.0)
+        assert result is True
+        api.set_leverage.assert_called_once_with(1, config.dsl_leverage)
+        api._signer.create_market_order.assert_called_once()

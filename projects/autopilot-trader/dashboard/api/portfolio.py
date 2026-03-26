@@ -33,7 +33,7 @@ def _compute_unrealized_pnl(position: dict, current_price: float) -> float:
     entry = position["entry_price"]
     size = position["size"]
     leverage = position.get("leverage", 1.0)
-    size_usd = entry * size * leverage
+    size_usd = entry * size  # Notional = position value. Leverage is for display only.
 
     if entry == 0:
         return 0.0
@@ -69,7 +69,7 @@ async def get_portfolio():
         entry = pos["entry_price"]
         size = pos["size"]
         leverage = pos.get("leverage", 1.0)
-        size_usd = entry * size * leverage
+        size_usd = entry * size
 
         unrealized_pnl = _compute_unrealized_pnl(pos, current_price) if current_price else 0.0
         roe_pct = (unrealized_pnl / size_usd * 100) if size_usd > 0 else 0.0
@@ -121,7 +121,7 @@ async def get_portfolio_summary():
             entry = pos.get("entry_price", 0)
             size = pos.get("size", 0)
             leverage = pos.get("leverage", 1.0)
-            total_exposure += entry * size * leverage
+            total_exposure += entry * size  # Notional
 
     max_concurrent = 3
     if signals and "config" in signals:

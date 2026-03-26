@@ -497,7 +497,3 @@ startPolling("portfolio", "/api/portfolio", 5000);
 
 ### Error handling
 Each API endpoint should catch file-not-found and JSON decode errors, returning a `{"error": "..."}` response rather than 500. The frontend should show "—" for missing data.
- trades detected, skip redundant fetches.
-
-### Error handling
-Each API endpoint should catch file-not-found and JSON decode errors, returning a `{"error": "..."}` response rather than 500. The frontend should show "—" for missing data.

@@ -1,35 +1,19 @@
-# Session Handoff — 2026-03-25 18:58 MDT
+# Session Handoff — 2026-03-25 19:21 MDT
 
 ## What Happened
-- **Scanner Modularization**: Split `opportunity-scanner.ts` (1120 lines) into 13 focused modules in `scanner/src/`
-- **Test Suite**: 74 tests, 213 assertions — 7 unit + 1 integration, all passing in ~1s
-- **Bug Fixes**: `../types` → `./types` import, `signals/` gitignore scope
-- **Integration test hardened**: fails hard if signals.json not captured (was silently passing)
+- **Cross-margin bug fix**: `execution_engine.py:90` — `self._get_balance()` → `self.bot._get_balance()`. Was throwing AttributeError every tick, `account_equity` never refreshed (stayed 0.0), effective_leverage always fell back to config default (10x) instead of true cross-margin value.
+- **Wrong comment fixed**: execution_engine.py lines 337-341 claimed DSL uses config leverage — replaced with accurate comment (DSL DOES use effective_leverage).
+- **Trailing TP re-enabled**: Added trailing TP evaluation inside DSL block in `position_tracker.py`. Previously the legacy trailing TP code was unreachable when DSL was enabled. Config changed to `trailing_tp_trigger_pct: 1.0`.
+- **Full cross-margin audit**: Verified all 12+ code paths using effective_leverage — all correct.
 
 ## Current State
-- **Branch**: `main` — scanner modularization + tests merged
-- **Services**: bot (active), scanner (active), ai-decisions (active)
-- **Tests**: 251 bot + 59 ai-decisions + 74 scanner = 384 total
+- **Branch**: `fix/cross-margin-trailing-tp` pushed (commit 51153e2), not merged yet
+- **Config change**: `trailing_tp_trigger_pct: 1.0` — local only (config.yml is gitignored)
+- **Services**: bot (active, restarted), scanner (active), ai-decisions (active)
+- **Bot**: 7 positions running, trailing TP confirmed working (ENA already activated)
 
-## Scanner Layout
-```
-scanner/src/
-├── main.ts                            # entry point, orchestration
-├── types.ts                           # all interfaces
-├── config.ts                          # constants + settings
-├── api/lighter.ts, okx.ts             # Lighter + OKX API
-├── signals/funding-spread.ts, price-momentum.ts, moving-average-alignment.ts, order-block.ts, oi-trend.ts
-├── position-sizing.ts                 # risk-based sizing + safety
-├── direction-vote.ts                  # long/short majority vote
-└── output.ts                          # console display + signal.json write
-```
-
-## All Services Modularized
-- ✅ bot/ — modularized (earlier sessions)
-- ✅ ai-decisions/ — modularized (earlier sessions)
-- ✅ scanner/ — modularized (this session)
-
-## Next Session
-- Update docs (cheatsheet.md, autopilot-trader.md) with new scanner file layout
-- Consider backtesting (triple barrier method) — still pending from earlier sessions
-- Monitor services after merge
+## Pending
+- PR + merge `fix/cross-margin-trailing-tp`
+- Consider tuning DSL tiers if still feels aggressive now that effective leverage is correct
+- Bot modularization docs update (cheatsheet.md, autopilot-trader.md)
+- Backtesting (triple barrier) — still pending

@@ -1,45 +1,47 @@
-# Session Handoff — 2026-03-25 22:17 MDT
+# Session Handoff — 2026-03-26 09:03 MDT
 
 ## What Happened
-- **Full audit of all 3 services** — ai-decisions/, scanner/, bot/ for dead code, logic bugs, unfound issues
-- **Verified every finding** against actual code before fixing (subagents over-report)
-- **Added INTENTIONAL comments** to prevent future false-positive audits on intentional patterns
+- **Leverage audit** — traced full leverage flow across all 3 services + exchange
+- **Root cause found:** bot never calls `update_leverage()` on Lighter. Cross margin auto-calculates leverage as `notional/equity`. Result: 50× BTC position opened with no enforcement.
+- **Designed unified leverage architecture** — one config value, enforced on exchange, used everywhere
+- **Comprehensive plan written** with 6 phases, 10 edge cases, rollback strategy
+- **No code changes** — plan only, implementation deferred to next session
 
-## Changes Made (commit 9b6c922)
+## Key Discovery
+- `set_leverage()` via `SignerClient.update_leverage(market_id, CROSS_MARGIN_MODE(0), leverage)` must be called BEFORE `create_market_order()` in `open_position()`
+- SDK: `imf = int(10_000 / leverage)` — sets Initial Margin Fraction on exchange
+- Current saved state has poisoned leverage values (0.096x = notional/equity, not real leverage)
+- Dashboard exposure calc is pre-existing broken (`entry * size * leverage` with leverage=0.1 = 10% of real)
+- LLM prompts (`prompts/system.txt`, `prompts/decision.txt`) still tell AI to output leverage — must update
 
-### ai-decisions/
-- Fixed config drift: `ai_trader.py` was reading `max_rejection_halt_count` / `rejection_halt_window_minutes` from `config["safety"]` but keys are at top level. Always got default 15/30.
-- Added 6 INTENTIONAL comments: VACUUM outside lock, close() inside lock, hardcoded 600s staleness, close_all missing from template, hardcoded prompt values, informational positions field
+## Files Created
+- `docs/plans/leverage-unification-plan.md` — 6-phase implementation plan (24 files, 10 edge cases)
+- `docs/plans/leverage-unification-handoff.md` — quick-reference for next session
 
-### scanner/
-- Fixed no-op test assertion: `typeof result.positionSizeUsd === "number"` was bare expression, not `expect()`
-- Removed unused `compositeScore` parameter from `calculatePosition()` + updated call site
+## Plan Summary
+| Phase | What | Risk | Files |
+|-------|------|------|-------|
+| 4C (FIRST) | Update LLM prompts — remove leverage from schema | Low | 2 |
+| 1 | Exchange enforcement — `set_leverage()` before every open | Medium | 2 |
+| 4A-B | Remove leverage from AI safety/IPC/bot execution | Medium | 4 |
+| 2 | Unify DSLState — one `leverage` field (no `effective_leverage`) | HIGH | 6 |
+| 3 | Unify ROE — one formula everywhere | Medium | 3 |
+| 5 | Clean up scanner leverage refs | Low | 2 |
+| 6 | Config/docs/dashboard fix | Low | 5 |
 
-### bot/
-- Fixed rate-limiting bug: `_last_quota_emergency_warn` read from `self` (always 0), wrote to `self.bot` — now reads from `self.bot`
-- Fixed `trailing_sl_level or` edge case: explicit `is not None` check
-- Removed dead duplicate methods from OrderManager (`_should_pace_orders`, `_should_skip_open_for_quota`)
-- Updated 3 test files to use standalone functions from shared_utils
-- Removed duplicate `import aiohttp` in telegram.py
-
-## Audit Results Summary
-| Service | Findings | Real Bugs | Fixed |
-|---------|----------|-----------|-------|
-| ai-decisions | 6 medium, 4 low | 1 config drift | ✅ |
-| scanner | 3 logic, 3 unfound | 1 no-op test, 1 dead param | ✅ |
-| bot | 3 critical, 9 medium | 2 bugs (rate-limiting, or edge case), 1 dead code | ✅ |
-
-## Key Lessons
-- **Subagents over-report.** Always verify findings against actual code. Config locations, intentional patterns, and design choices get flagged as bugs.
-- **"INTENTIONAL:" comments** prevent future false alarms. Label intentional patterns that look suspicious.
-- **Read the config.json** to verify where keys actually live. Subagent claimed keys were under "safety" when they were at top level.
+## Edge Cases Found
+- **EC-1:** Saved state has `leverage: 0.096` (was `effective_leverage = notional/equity`). Need backward-compat load with `<1.0` guard.
+- **EC-2:** Dashboard exposure calc broken pre-existing (`entry*size*leverage` with levy=0.1). Fix: use `entry*size`.
+- **EC-5:** Execution engine tick loop recalculates `effective_leverage = notional/equity` per tick. Must switch to reading exchange IMF.
+- **EC-8:** `lighter_api.py:187` has `min(100/imf, default_leverage)` cap. Keep as safety net.
+- Others: EC-3 (quota), EC-4 (state serialization), EC-6 (unverified positions), EC-7 (cold start adoption), EC-9 (multi-position same market), EC-10 (quota extraction)
 
 ## Open Items
-- Backtesting implementation (triple barrier) — not started
-- Bot modularization PR (fix/cross-margin-trailing-tp) — still not merged to main
-- Dashboard planned features — not built
-- Docs (cheatsheet.md, autopilot-trader.md) need updating with new module layouts
+- **Leverage unification implementation** — plan ready, needs next session
+- **Existing 50× BTC position** — stays at 50× until closed, `set_leverage()` only affects future opens
+- **Dashboard bug** — exposure shows 10% of real size (plan fixes in Phase 6)
+- **Other uncommitted changes from 2026-03-25** — docs cleanup, config rename, dead code fixes
 
 ## Services Status
 - All 3 services running: bot, scanner, ai-decisions
-- No restarts needed (config drift fix only affects init)
+- No restarts needed (no code changes this session)

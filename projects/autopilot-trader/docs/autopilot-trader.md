@@ -146,6 +146,7 @@ Thin coordinator — init, daemon loop, calls `cycle_runner.run_cycle()`. All lo
 | `llm/parser.py` | Parse and validate LLM JSON responses |
 | `context/data_reader.py` | Read signals + positions from files, DB fallback |
 | `context/pattern_engine.py` | Learned pattern rules with decay/reinforcement |
+| `context/outcome_analyzer.py` | Extracts patterns from trade outcomes → reinforces pattern engine |
 | `context/stats_formatter.py` | Performance stats + hold regret formatting |
 | `context/prompt_builder.py` | LLM prompt assembly with token budget |
 | `context/sanitizer.py` | Prompt injection detection |
@@ -320,6 +321,7 @@ projects/autopilot-trader/
 │   ├── context/
 │   │   ├── data_reader.py    # Read signals + positions
 │   │   ├── pattern_engine.py # Learned pattern rules
+│   │   ├── outcome_analyzer.py# Pattern extraction from outcomes
 │   │   ├── stats_formatter.py# Performance stats + regret
 │   │   ├── prompt_builder.py # Prompt assembly w/ token budget
 │   │   ├── sanitizer.py      # Prompt injection detection
@@ -362,12 +364,17 @@ projects/autopilot-trader/
 │   ├── scanner/              # Archived: correlation-guard, funding-monitor, cleanup scripts
 │   └── docs/                 # Completed modularization plans + test plans
 ├── docs/
-│   ├── autopilot-trader.md   # This file
-│   ├── cheatsheet.md         # Quick file map + patterns
-│   ├── lighter-api.md        # Lighter API endpoints + SDK reference
-│   ├── pocket-ideas.md       # Feature ideas backlog
-│   ├── unified-dashboard-plan.md
-│   └── lighter-quota-research.md
+│   ├── autopilot-trader.md   # Main architecture
+│   ├── cheatsheet.md         # Quick file map
+│   ├── reference/
+│   │   ├── lighter-api.md    # Lighter API endpoints + SDK reference
+│   │   └── lighter-quota-research.md
+│   ├── ideas/
+│   │   └── pocket-ideas.md   # Feature ideas backlog
+│   ├── plans/
+│   │   └── pattern-learning-completion.md
+│   └── archive/
+│       └── unified-dashboard-plan.md
 └── signals/
     └── signals.json          # Scanner output (live)
 ```

@@ -14,6 +14,7 @@ import uuid
 from pathlib import Path
 
 from context.data_reader import DataReader
+from context.outcome_analyzer import OutcomeAnalyzer
 from context.pattern_engine import PatternEngine
 from context.stats_formatter import StatsFormatter
 from context.prompt_builder import PromptBuilder
@@ -52,6 +53,7 @@ class AITrader:
 
         self.data_reader = DataReader(self)
         self.pattern_engine = PatternEngine(self)
+        self.outcome_analyzer = OutcomeAnalyzer(self)
         self.stats_formatter = StatsFormatter(self)
         self.prompt_builder = PromptBuilder(self)
 

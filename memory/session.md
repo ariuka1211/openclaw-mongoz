@@ -2,35 +2,38 @@
 
 ## What We Did
 
-### Stagnation Alert Fix (Complete ✅)
-Investigated and fixed repeated "DSL STAGNATION TIMER STARTED" alerts caused by bot restarts.
+### 1. Stagnation Alert Spam Fix (Complete ✅)
+Bot was restarting every ~40s (exec tool killing it). Each restart created fresh TrackedPosition objects — in-memory `_stagnation_alerted` flags reset, alerts re-fired.
 
-**Root cause:** Bot was being killed/restarted every ~40s by OpenClaw exec tool (previous session launched bot via exec instead of systemd). Each restart created fresh `TrackedPosition` objects with reset in-memory `_stagnation_alerted` flags.
+**Fixes applied:**
+- Made `stagnation_alerted` + `tier_lock_alerted` persistent in saved state (3 files changed)
+- Killed duplicate bot process
+- Bot stable under systemd since 11:25
+- Added rule #8 to AGENTS.md: never use exec for services
 
-**Fix 1 — Persistent alert flags (code change):**
-- Added `stagnation_alerted` and `tier_lock_alerted` as proper dataclass fields on `TrackedPosition`
-- Save/restore both flags in `state_manager.py`
-- Replaced `getattr(pos, '_stagnation_alerted', False)` with direct field access in `position_tracker.py`
-- 219/219 tests pass
+**Status:** Code on branch `fix/stagnation-alert-persistence` (PR pending). Memory + docs pushed to main.
 
-**Files changed:**
-- `bot/core/models.py` — 2 new fields
-- `bot/core/position_tracker.py` — 4 lines swapped (getattr → field access)
-- `bot/core/state_manager.py` — save + restore both flags
+### 2. Minor Bug Triage (Complete ✅)
+Investigated 3 issues found in logs:
+- **Quota tracking stale** — not a bug, working as designed (no standalone quota API on Lighter)
+- **Invalid nonce** — one-time transient, SDK self-healed
+- **LLM parser truncation** — real bug, max_tokens=1024 too low
 
-**Fix 2 — Kill duplicate process:** Two bot processes were running. Killed the manual one, kept systemd-managed one.
+### 3. LLM Truncation Fix (Complete ✅)
+- Changed `max_tokens` default from 1024 → 5000 in `ai-decisions/llm_client.py`
+- Restarted ai-decisions via systemctl
+- 53 truncation events included 12 lost opens + 2 lost closes
 
-**Fix 3 — Silent restarts:** Investigated — no code bug. Caused by exec tool killing processes on session end. Bot has been stable since.
-
-**Rule added to AGENTS.md:** Rule #8 — never use exec for services, always `systemctl restart`.
+**Status:** Not yet committed to branch.
 
 ## Current State
-- Bot running stably under systemd, no restarts
-- Stagnation alerts now fire once per position (persist across restarts)
-- All tests passing
-- Changes not yet committed/pushed
+- All 3 services running: bot (32min+ uptime), scanner, ai-decisions
+- No duplicate processes
+- Bot stable, no restarts since 11:25
+- AGENTS.md updated with rule #8
 
 ## What To Do Next
-- Monitor bot for continued stability
-- Changes need to be committed to a branch + PR
-- No immediate action needed
+- Commit `llm_client.py` max_tokens change to branch + PR
+- Monitor for truncation events (should drop to zero)
+- Monitor bot stability
+- Merge pending PR `fix/stagnation-alert-persistence`

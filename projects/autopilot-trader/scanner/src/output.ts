@@ -36,7 +36,7 @@ export function displayResults(
   console.log("  LIGHTER.OPPORTUNITY SCANNER");
   console.log(`  ${new Date().toISOString()}`);
   console.log(`  Equity: $${CONFIG.accountEquity} | Risk/trade: ${(CONFIG.riskPct * 100).toFixed(0)}% ($${(CONFIG.accountEquity * CONFIG.riskPct).toFixed(0)}) | SL multiple: ${CONFIG.stopLossMultiple}× daily vol`);
-  console.log(`  Max positions: ${CONFIG.maxConcurrentPositions} | Max leverage: ${CONFIG.maxLeverageCap}× | Min score: ${CONFIG.minConfidenceScore}`);
+  console.log(`  Max positions: ${CONFIG.maxConcurrentPositions} | Min score: ${CONFIG.minConfidenceScore}`);
   console.log(`  Scanned: ${liquidMarkets} liquid markets | Qualified: ${qualified.length} | Safety passed: ${allPassedSafety.length} | Selected: ${passedSafety.length}`);
   console.log("═══════════════════════════════════════════════════════════════════════════════════════════════════════════════");
 
@@ -49,7 +49,7 @@ export function displayResults(
     const COL = {
       sym: 10, dir: 5, score: 6, fund: 10, spread: 10, oiTr: 8, mom: 6,
       ma: 10, ob: 14,
-      risk: 8, slPct: 8, slAbs: 10, posSize: 10, lev: 6, liqD: 8,
+      risk: 8, slPct: 8, slAbs: 10, posSize: 10,
     };
 
     const header =
@@ -65,9 +65,7 @@ export function displayResults(
       padL("RISK $", COL.risk) +
       padL("SL %", COL.slPct) +
       padL("SL $", COL.slAbs) +
-      padL("POS USD", COL.posSize) +
-      padL("LEV×", COL.lev) +
-      padL("LIQ D", COL.liqD);
+      padL("POS USD", COL.posSize);
 
     console.log(`  ${header}`);
     console.log(`  ${"─".repeat(header.length)}`);
@@ -91,9 +89,7 @@ export function displayResults(
         padL(fmtUsd(o.riskAmountUsd), COL.risk) +
         padL(`${o.stopLossDistancePct.toFixed(2)}%`, COL.slPct) +
         padL(fmtUsd(o.stopLossDistanceAbs), COL.slAbs) +
-        padL(fmtUsd(o.positionSizeUsd), COL.posSize) +
-        padL(`${o.actualLeverage.toFixed(1)}×`, COL.lev) +
-        padL(`${o.liquidationDistancePct.toFixed(1)}%`, COL.liqD)
+        padL(fmtUsd(o.positionSizeUsd), COL.posSize)
       );
     }
 
@@ -115,7 +111,7 @@ export function displayResults(
     console.log("");
     console.log(`  ⚠️  ${truncatedByCap} more positions available but capped at ${CONFIG.maxConcurrentPositions} (--max-positions)`);
     for (const o of allPassedSafety.slice(CONFIG.maxConcurrentPositions)) {
-      console.log(`     ${o.direction === "long" ? "L" : "S"} ${o.symbol} score=${o.compositeScore} pos=${fmtUsd(o.positionSizeUsd)} lev=${o.actualLeverage.toFixed(1)}×`);
+      console.log(`     ${o.direction === "long" ? "L" : "S"} ${o.symbol} score=${o.compositeScore} pos=${fmtUsd(o.positionSizeUsd)}`);
     }
   }
 
@@ -128,7 +124,6 @@ export function displayResults(
     for (const o of failedSafety.slice(0, 10)) {
       console.log(
         `  ${o.direction === "long" ? "L" : "S"} ${pad(o.symbol, 10)} score=${o.compositeScore}  ` +
-        `liq=${o.liquidationDistancePct.toFixed(1)}%  ` +
         `sl=${o.stopLossDistancePct.toFixed(1)}%  ` +
         `→ ${o.safetyReason}`
       );
@@ -159,7 +154,7 @@ export function displayResults(
 
   console.log("");
   console.log("  Signal weights: Funding 35% | MA Alignment 25% | Order Block 15% | Momentum 15% | OI Trend 10%");
-  console.log("  Sizing: risk-based (equity × riskPct / SL distance) | Max 20× leverage | Liq ≥ 2× SL");
+  console.log("  Sizing: risk-based (equity × riskPct / SL distance) | Max $15 per position");
 
   console.log("═══════════════════════════════════════════════════════════════════════════════════════════════════════════════");
 }
@@ -207,10 +202,8 @@ export async function writeSignalsJson(opportunities: MarketOpportunity[]): Prom
       obPrice: o.obPrice,
       direction: o.direction,
       positionSizeUsd: o.positionSizeUsd,
-      actualLeverage: o.actualLeverage,
       riskAmountUsd: o.riskAmountUsd,
       stopLossDistancePct: o.stopLossDistancePct,
-      liquidationDistancePct: o.liquidationDistancePct,
       safetyPass: o.safetyPass,
       safetyReason: o.safetyReason,
       detectedAt: o.detectedAt,

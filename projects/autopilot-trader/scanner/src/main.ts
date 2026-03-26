@@ -15,7 +15,7 @@
  *   positionSizeUsd = (equity × riskPct) / stopLossDistance
  *   stopLossDistance = lastPrice × dailyVolatility × stopLossMultiple
  *
- * Safety rules: liq distance ≥ 2× SL, max leverage cap, NaN guards.
+ * Safety rules: NaN guards, max position capped at fixed USD.
  *
  * Usage: bun run src/main.ts [--equity 1000] [--min-score 60] [--max-positions 3]
  */
@@ -211,13 +211,10 @@ async function main(): Promise<void> {
       obDistancePct: obDistPct,
       obPrice,
       direction,
-      maxLeverage: pos.maxLeverage,
       positionSizeUsd: pos.positionSizeUsd,
-      actualLeverage: pos.actualLeverage,
       riskAmountUsd: pos.riskAmountUsd,
       stopLossDistanceAbs: pos.stopLossDistanceAbs,
       stopLossDistancePct: pos.stopLossDistancePct,
-      liquidationDistancePct: pos.liqDistPct,
       safetyPass: pos.pass,
       safetyReason: pos.reason,
       detectedAt: new Date().toISOString(),

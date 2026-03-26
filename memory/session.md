@@ -1,53 +1,48 @@
-# Session Handoff — 2026-03-25 17:36 MDT
+# Session Handoff — 2026-03-25 18:26 MDT
 
-## What Happened
-- **AI Decisions Modularization**: Fully executed the 11-phase plan from `docs/plans/ai-decisions-modularization-plan.md`
-- Split `ai_trader.py` (625 lines) and `context_builder.py` (611 lines) into 14 focused modules
-- Deleted `context_builder.py` entirely — managers wired directly on AITrader
-- Wrote 59 tests across 7 test files, all passing
-- Ran sanity check (10-point audit) — no bugs found
-- Restarted ai-decisions service — 19 cycles verified clean in production
-- Updated docs (cheatsheet.md, autopilot-trader.md)
+## What Happened (This Session)
+- **Bot Signal Processor Modularization**: Split `signal_processor.py` (1031 lines) into 6 focused modules
+- Created new modules: `signal_handler.py`, `decision_handler.py`, `executor.py`, `verifier.py`, `result_writer.py`, `shared_utils.py`
+- `signal_processor.py` → thin compatibility wrapper (109 lines) maintaining backward compatibility
+- **State Manager Cleanup**: Removed dead `state_dir`/`state_file`/`equity_file` attributes
+- **Deleted stale** `bot/state/` directory (active state is `bot/core/state/`)
+- **Fixed critical bug**: 4 wrong sys.path references (`parent.parent` → `parent.parent.parent`)
+- **Verified**: All 251 tests pass, both services running after merge
+- **Merged**: PR #8 to main, cleaned up branches
 
 ## Current State
-- **Branch**: `refactor/ai-decisions-modularization` (pushed, PR ready to merge)
-- **main**: untouched, service running new code from the branch
-- **Services**: ai-decisions (active, running), bot (active, running), scanner (check separately)
-- **Tests**: 59 passing
-- **ai_trader.py**: 194 lines (was 625)
+- **Branch**: `main` (both refactors merged)
+- **Services**: ai-decisions (active), bot (active), scanner (check separately)
+- **Tests**: 251 bot tests + 59 ai-decisions tests = 310 total
+- **File Layout**: See project documentation
 
-## New File Layout
+## Bot Core Layout (After Modularization)
 ```
-ai-decisions/
-├── ai_trader.py           (194 lines — thin coordinator)
-├── cycle_runner.py        (182 lines — cycle orchestration)
-├── db.py                  (629 lines — unchanged)
-├── llm_client.py          (186 lines — unchanged)
-├── safety.py              (252 lines — unchanged)
-├── llm/
-│   ├── __init__.py
-│   └── parser.py          (47 lines — parse LLM JSON)
-├── context/
-│   ├── __init__.py
-│   ├── data_reader.py     (148 lines — signals + positions)
-│   ├── pattern_engine.py  (83 lines — pattern rules with decay)
-│   ├── prompt_builder.py  (239 lines — prompt assembly + token budget)
-│   ├── sanitizer.py       (60 lines — injection detection)
-│   ├── stats_formatter.py (75 lines — performance stats)
-│   └── token_estimator.py (23 lines — token counting)
-├── ipc/
-│   ├── __init__.py
-│   └── bot_protocol.py    (227 lines — send/check/halt)
-└── tests/                 (59 tests, 7 files)
+bot/core/
+├── signal_processor.py   (109 lines — thin compatibility wrapper)
+├── signal_handler.py     (207 lines — scanner signal processing)
+├── decision_handler.py   (147 lines — AI decision validation + dispatch)
+├── executor.py           (335 lines — AI open/close/close_all execution)
+├── verifier.py           (132 lines — position verification + fill polling)
+├── result_writer.py      (100 lines — AI result IPC writing)
+├── shared_utils.py       (197 lines — pacing, quota, market ID, outcome logging)
+├── execution_engine.py   (576 lines — unchanged)
+├── state_manager.py      (432 lines — dead attrs removed)
+├── position_tracker.py   (234 lines — unchanged)
+├── order_manager.py      (123 lines — unchanged)
+├── models.py             (67 lines — unchanged)
+└── state/
+    └── bot_state.json    (active state file)
 ```
 
 ## Key Lessons
-- Subagents are fast but need verification — Phase 6 timed out but still completed correctly
-- Sanity check caught 1 stale comment (cosmetic only) — the refactor was clean
-- LLM returning malformed JSON (unmatched braces) handled gracefully by parser fallback
-- Bot 30s timeout handled correctly by BUG 7 fix (executed=False)
+- **Path bugs are silent in tests**: Tests mock `ipc_utils` via `sys.modules`, so wrong paths pass until runtime
+- **Compatibility wrappers are smart**: Kept `signal_processor.py` as thin wrapper → zero changes to `execution_engine.py`
+- **Parallel subagents work well**: Refactor subagent + verification subagent caught the path bugs
+- **Subagents need explicit path instructions**: Always specify exact `parent.parent.parent` for cross-directory imports
 
 ## Next Session
-- Merge the PR on GitHub
-- Consider: bot tests (251 passing) are separate from ai-decisions tests (59)
-- Future: could add integration tests for full cycle with mocked LLM
+- Update docs (cheatsheet.md, autopilot-trader.md) with new bot file layout
+- Consider removing compatibility wrapper later and calling modules directly
+- Monitor services after merge for any runtime issues
+- Future: integration tests for full signal→AI→execution cycle with mocked APIs

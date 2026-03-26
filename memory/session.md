@@ -2,57 +2,35 @@
 
 ## What We Did
 
-### Position Sizing Implementation (Complete ✅)
-Replaced leverage-based safety with fixed USD position sizing across all 3 services.
+### Stagnation Alert Fix (Complete ✅)
+Investigated and fixed repeated "DSL STAGNATION TIMER STARTED" alerts caused by bot restarts.
 
-**Key Changes:**
-- `default_leverage` → `max_position_usd: 15.0` + `dsl_leverage: 10.0` (config.py, config.yml)
-- Signal handler & AI executor both cap at $15 notional per position
-- `set_leverage()` call removed from `open_position()` (method preserved)
-- Exchange leverage passed to DSL via `verified_pos["leverage"]` (actual IMF-based)
-- Scanner caps at $15 in position-sizing.ts
-- 219/219 bot tests pass, scanner tests pass
+**Root cause:** Bot was being killed/restarted every ~40s by OpenClaw exec tool (previous session launched bot via exec instead of systemd). Each restart created fresh `TrackedPosition` objects with reset in-memory `_stagnation_alerted` flags.
 
-**Files Changed:**
-- `bot/config.py` — new fields, validation
-- `bot/config.yml` — new fields
-- `bot/config.example.yml` — same
-- `bot/core/signal_handler.py` — position cap + leverage pass-through
-- `bot/core/executor.py` — position cap + leverage pass-through
-- `bot/core/position_tracker.py` — `default_leverage` → `dsl_leverage`
-- `bot/core/result_writer.py` — same rename
-- `bot/core/state_manager.py` — same rename
-- `bot/core/shared_utils.py` — same rename
-- `bot/bot.py` — same rename
-- `bot/api/lighter_api.py` — same rename + removed set_leverage call
-- `scanner/src/config.ts` — added `maxPositionUsd: 15`
-- `scanner/src/position-sizing.ts` — added `Math.min(size, CONFIG.maxPositionUsd)`
+**Fix 1 — Persistent alert flags (code change):**
+- Added `stagnation_alerted` and `tier_lock_alerted` as proper dataclass fields on `TrackedPosition`
+- Save/restore both flags in `state_manager.py`
+- Replaced `getattr(pos, '_stagnation_alerted', False)` with direct field access in `position_tracker.py`
+- 219/219 tests pass
 
-**DSL Math (unchanged behavior):**
-- `ROE% = price_move% × exchange_leverage`
-- Lower leverage → more margin → wider stops before hard SL
-- `hard_sl_pct = 1.25%` × leverage → -12.5% ROE at 10x
+**Files changed:**
+- `bot/core/models.py` — 2 new fields
+- `bot/core/position_tracker.py` — 4 lines swapped (getattr → field access)
+- `bot/core/state_manager.py` — save + restore both flags
+
+**Fix 2 — Kill duplicate process:** Two bot processes were running. Killed the manual one, kept systemd-managed one.
+
+**Fix 3 — Silent restarts:** Investigated — no code bug. Caused by exec tool killing processes on session end. Bot has been stable since.
+
+**Rule added to AGENTS.md:** Rule #8 — never use exec for services, always `systemctl restart`.
 
 ## Current State
-- Bot running, no errors, all positions tracked
-- Scanner producing $15 capped signals
-- No `default_leverage` in production code
+- Bot running stably under systemd, no restarts
+- Stagnation alerts now fire once per position (persist across restarts)
 - All tests passing
+- Changes not yet committed/pushed
 
 ## What To Do Next
-- Monitor for position sizing issues in live trading
-- Consider adjusting `max_position_usd` if needed
-- Watch for DSL stop-loss behavior with variable exchange leverage
-- No immediate action needed — system is stable
-
-## How To Verify
-```bash
-# Bot tests
-cd bot && ./venv/bin/python -m pytest tests/ -q -k "not lighter"
-
-# Check config
-./venv/bin/python -c "from config import BotConfig; cfg = BotConfig.from_yaml('config.yml'); print(f'max_usd={cfg.max_position_usd}, dsl_lev={cfg.dsl_leverage}')"
-
-# Monitor live
-tail -f bot.log | grep -E "cap|error|position"
-```
+- Monitor bot for continued stability
+- Changes need to be committed to a branch + PR
+- No immediate action needed

@@ -50,6 +50,7 @@
 5. 🚨 **When John says stop, stop.** Immediately.
 6. 🚨 **Agents never push to main.** Branch + PR only.
 7. 🚨 **Never destroy or leak data.** No secrets in git. `trash` > `rm`. Don't exfiltrate private data. Never commit runtime files (`signals/`, `state/`, `*.log`, `*.db`, `*.jsonl`).
+8. 🚨 **Never use exec for services.** Always `systemctl restart bot|scanner|ai-decisions`. Exec processes die when the session ends, triggering a kill-restart loop.
 
 ---
 

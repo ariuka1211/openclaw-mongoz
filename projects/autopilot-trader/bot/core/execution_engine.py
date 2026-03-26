@@ -8,6 +8,7 @@ Contains the core event loop (_tick) and position-level processing
 import asyncio
 import logging
 import time
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 from config import BotConfig
@@ -33,6 +34,35 @@ class ExecutionEngine:
         self.tracker = tracker
         self.alerter = alerter
         self.bot = bot
+
+    @staticmethod
+    def _pnl_info(pos: TrackedPosition, price: float) -> dict:
+        """Calculate PnL USD, ROE%, and leverage for a position at a given price.
+
+        pos.size is in base units (e.g., BTC), notional_usd = size * entry_price.
+        Returns dict with: pnl_usd, roe_pct, leverage, notional_usd.
+        """
+        if pos.entry_price <= 0 or pos.size <= 0:
+            return {"pnl_usd": 0.0, "roe_pct": 0.0, "leverage": 10.0, "notional_usd": 0.0}
+        notional_usd = pos.size * pos.entry_price
+        if pos.side == "long":
+            pnl_usd = pos.size * (price - pos.entry_price)
+        else:
+            pnl_usd = pos.size * (pos.entry_price - price)
+        pnl_pct = (pnl_usd / notional_usd * 100) if notional_usd > 0 else 0.0
+        leverage = pos.dsl_state.leverage if pos.dsl_state else 10.0
+        roe_pct = pnl_pct * leverage
+        return {"pnl_usd": pnl_usd, "roe_pct": roe_pct, "leverage": leverage, "notional_usd": notional_usd}
+
+    @staticmethod
+    def _fmt_mt(dt: datetime | None) -> str:
+        """Format a UTC datetime as Mountain Time (MDT/MST)."""
+        if dt is None:
+            return "?"
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        mt = datetime.fromtimestamp(dt.timestamp())  # local = Mountain on this server
+        return mt.strftime("%H:%M")
 
     async def _tick(self):
         """One cycle: sync positions, update prices, check triggers."""
@@ -175,6 +205,7 @@ class ExecutionEngine:
                     pos.active_sl_order_id = None  # MED-18
                     self.bot.bot_managed_market_ids.discard(mid)
                     self.tracker.remove_position(mid)
+                    self.bot._opened_signals.discard(mid)
 
             # CRITICAL-2: Handle unverified positions not in live_mids
             # Increment tick count; alert and remove after 3 consecutive absent ticks
@@ -198,6 +229,7 @@ class ExecutionEngine:
                     pos.active_sl_order_id = None  # MED-18
                     self.bot.bot_managed_market_ids.discard(mid)
                     self.tracker.remove_position(mid)
+                    self.bot._opened_signals.discard(mid)
 
         # Fix #17: Quota staleness warning — alert if no quota update for 10+ minutes
         if self.api and self.api._last_known_quota is not None and self.api._last_quota_time > 0:
@@ -330,6 +362,31 @@ class ExecutionEngine:
         is_long = pos.side == "long"
 
         if not action:
+            # Periodic stagnation status alert (every 15 minutes)
+            if (pos.dsl_state and pos.dsl_state.stagnation_active
+                    and pos.dsl_state.high_water_time):
+                elapsed_min = (datetime.now(timezone.utc) - pos.dsl_state.high_water_time).total_seconds() / 60
+                remaining_min = self.cfg.stagnation_minutes - elapsed_min
+                if remaining_min > 0:
+                    last_status = self.bot._stagnation_last_status.get(mid, 0)
+                    if time.monotonic() - last_status >= 900:  # 15 minutes
+                        self.bot._stagnation_last_status[mid] = time.monotonic()
+                        pnl = self._pnl_info(pos, price)
+                        hw = pos.dsl_state.high_water_roe
+                        logging.info(
+                            f"⏳ {pos.symbol}: stagnation {elapsed_min:.0f}min / "
+                            f"{self.cfg.stagnation_minutes}min ({remaining_min:.0f}min remaining), "
+                            f"PnL=${pnl['pnl_usd']:+.2f}, ROE={pnl['roe_pct']:+.1f}%, HW={hw:+.1f}%"
+                        )
+                        await self.alerter.send(
+                            f"⏳ *STAGNATION STATUS*\n"
+                            f"Symbol: {pos.symbol}\n"
+                            f"Side: {pos.side}\n"
+                            f"PnL: ${pnl['pnl_usd']:+.2f} ({pnl['roe_pct']:+.1f}% ROE @ {pnl['leverage']:.0f}x)\n"
+                            f"HW Peak: {hw:+.1f}% ROE\n"
+                            f"Timer: {elapsed_min:.0f}min / {self.cfg.stagnation_minutes}min "
+                            f"({remaining_min:.0f}min remaining)"
+                        )
             return
 
         # Unpack tuple actions (action_name, details_dict)
@@ -340,24 +397,25 @@ class ExecutionEngine:
 
         # Informational alerts (no trade execution)
         if action == "trailing_activated":
+            pnl = self._pnl_info(pos, details['price'])
             msg = (
                 f"🎯 *TRAILING TP ACTIVE*\n"
                 f"Symbol: {pos.symbol}\n"
                 f"Side: {pos.side}\n"
                 f"Price: ${details['price']:,.2f}\n"
-                f"ROE: {details['roe']:+.1f}%\n"
-                f"P&L: {details['pnl']:+.2f}%"
+                f"PnL: ${pnl['pnl_usd']:+.2f} ({pnl['roe_pct']:+.1f}% ROE @ {pnl['leverage']:.0f}x)"
             )
             logging.info(msg)
             await self.alerter.send(msg)
             return
 
         if action == "dsl_tier_lock":
+            pnl = self._pnl_info(pos, price)
             msg = (
                 f"🔒 *DSL TIER LOCKED*\n"
                 f"Symbol: {pos.symbol}\n"
                 f"Side: {pos.side}\n"
-                f"ROE (at trigger): {details['roe']:+.1f}%\n"
+                f"PnL: ${pnl['pnl_usd']:+.2f} ({pnl['roe_pct']:+.1f}% ROE @ {pnl['leverage']:.0f}x)\n"
                 f"Lock floor: {details['floor_roe']:+.1f}% ROE (~${details['floor_price']:,.2f})\n"
                 f"Tier: +{details['tier']}% ({details['breaches']}x)"
             )
@@ -366,33 +424,40 @@ class ExecutionEngine:
             return
 
         if action == "dsl_stagnation_timer":
+            pnl = self._pnl_info(pos, price)
+            since = details.get("since")
+            since_str = self._fmt_mt(since)
+            exit_at = since + timedelta(minutes=self.cfg.stagnation_minutes) if since else None
+            exit_str = self._fmt_mt(exit_at)
             msg = (
                 f"⏳ *DSL STAGNATION TIMER STARTED*\n"
                 f"Symbol: {pos.symbol}\n"
                 f"Side: {pos.side}\n"
-                f"ROE: {details['roe']:+.1f}%\n"
-                f"Will exit if no new high within {self.cfg.stagnation_minutes}min"
+                f"PnL: ${pnl['pnl_usd']:+.2f} ({pnl['roe_pct']:+.1f}% ROE @ {pnl['leverage']:.0f}x)\n"
+                f"Timer: {self.cfg.stagnation_minutes}min (started {since_str} MT → exits {exit_str} MT if no new high)"
             )
             logging.info(msg)
             await self.alerter.send(msg)
+            self.bot._stagnation_last_status[mid] = time.monotonic()
             return
 
         # Exit actions (DSL)
         if action in ("tier_lock", "stagnation", "hard_sl"):
-            roe = pos.dsl_state.current_roe(price) if pos.dsl_state else 0
+            pnl = self._pnl_info(pos, price)
             labels = {
                 "tier_lock": "🔒 DSL TIER LOCK BREACH",
                 "stagnation": "⏸️ DSL STAGNATION EXIT",
                 "hard_sl": "🛑 HARD STOP LOSS",
             }
-            hw_str = f"HW Peak: {pos.dsl_state.high_water_roe:+.1f}%" if pos.dsl_state else ""
+            hw_pnl = self._pnl_info(pos, pos.dsl_state.high_water_price) if pos.dsl_state and pos.dsl_state.high_water_price else None
+            hw_str = f"HW Peak: ${hw_pnl['pnl_usd']:+.2f} ({pos.dsl_state.high_water_roe:+.1f}% ROE)" if hw_pnl else ""
             msg = (
                 f"{labels.get(action, action)}\n"
                 f"Symbol: {pos.symbol}\n"
                 f"Side: {pos.side}\n"
                 f"Trigger: ${price:,.2f}\n"
                 f"Entry: ${pos.entry_price:,.2f}\n"
-                f"ROE: {roe:+.1f}%\n"
+                f"PnL: ${pnl['pnl_usd']:+.2f} ({pnl['roe_pct']:+.1f}% ROE @ {pnl['leverage']:.0f}x)\n"
                 f"{hw_str}"
             )
             logging.info(msg)
@@ -429,7 +494,7 @@ class ExecutionEngine:
                         await self.alerter.send(
                             f"🚨 *DSL CLOSE FAILED ×{attempts}*\n"
                             f"{pos.side.upper()} {pos.symbol}\n"
-                            f"ROE: {roe:+.1f}%\n"
+                            f"PnL: ${pnl['pnl_usd']:+.2f} ({pnl['roe_pct']:+.1f}% ROE @ {pnl['leverage']:.0f}x)\n"
                             f"Action: {labels.get(action, action)}\n"
                             f"Order submitted but NOT filled after {attempts} attempts.\n"
                             f"Cooldown: {self.bot._close_cooldown_seconds // 60}min — MANUAL INTERVENTION REQUIRED."
@@ -454,7 +519,7 @@ class ExecutionEngine:
                     await self.alerter.send(
                         f"🚨 *DSL SL FAILED ×{attempts}*\n"
                         f"{pos.side.upper()} {pos.symbol}\n"
-                        f"ROE: {roe:+.1f}%\n"
+                        f"PnL: ${pnl['pnl_usd']:+.2f} ({pnl['roe_pct']:+.1f}% ROE @ {pnl['leverage']:.0f}x)\n"
                         f"Action: {labels.get(action, action)}\n"
                         f"Retry delays exhausted. Next retry in 15min.\n"
                         f"MANUAL INTERVENTION may be needed."
@@ -468,14 +533,22 @@ class ExecutionEngine:
             pos.active_sl_order_id = None  # MED-18
             self.bot.bot_managed_market_ids.discard(mid)
             self.tracker.remove_position(mid)
+            self.bot._opened_signals.discard(mid)
             # Post-close completion alert
-            roe_pct = ((exit_price - pos.entry_price) / pos.entry_price * 100) if is_long else ((pos.entry_price - exit_price) / pos.entry_price * 100)
+            if is_long:
+                pnl_usd = pos.size * (exit_price - pos.entry_price)
+            else:
+                pnl_usd = pos.size * (pos.entry_price - exit_price)
+            notional = pos.size * pos.entry_price
+            pnl_pct_val = (pnl_usd / notional * 100) if notional > 0 else 0.0
+            leverage = pos.dsl_state.leverage if pos.dsl_state else 10.0
+            roe_pct = pnl_pct_val * leverage
             await self.alerter.send(
                 f"✅ *DSL → CLOSED*\n"
                 f"{pos.side.upper()} {pos.symbol}\n"
                 f"Entry: ${pos.entry_price:,.2f}\n"
                 f"Exit: ${exit_price:,.2f}\n"
-                f"ROE: {roe_pct:+.1f}%\n"
+                f"PnL: ${pnl_usd:+.2f} ({roe_pct:+.1f}% ROE @ {leverage:.0f}x)\n"
                 f"Reason: {labels.get(action, action)}"
             )
             return
@@ -538,11 +611,11 @@ class ExecutionEngine:
                 logging.warning(f"⚠️ {pos.symbol}: SL order rejected (attempt {attempts}, retry in {retry_delay}s)")
 
                 if attempts >= 4:
-                    roe_pct = ((price - pos.entry_price) / pos.entry_price * 100) if is_long else ((pos.entry_price - price) / pos.entry_price * 100)
+                    pnl = self._pnl_info(pos, price)
                     await self.alerter.send(
                         f"🚨 *SL FAILED ×{attempts}*\n"
                         f"{pos.side.upper()} {pos.symbol}\n"
-                        f"ROE: {roe_pct:+.1f}%\n"
+                        f"PnL: ${pnl['pnl_usd']:+.2f} ({pnl['roe_pct']:+.1f}% ROE @ {pnl['leverage']:.0f}x)\n"
                         f"Action: {action.replace('_', ' ').upper()}\n"
                         f"Retry delays exhausted. Next retry in 15min.\n"
                         f"MANUAL INTERVENTION may be needed."
@@ -552,6 +625,7 @@ class ExecutionEngine:
         pos.active_sl_order_id = None  # MED-18
         self.bot.bot_managed_market_ids.discard(mid)
         self.tracker.remove_position(mid)
+        self.bot._opened_signals.discard(mid)
 
     # ── Delegation methods for signal_processor ───────────────────
     def _save_state(self):

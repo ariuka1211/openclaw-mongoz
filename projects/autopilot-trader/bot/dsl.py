@@ -109,16 +109,14 @@ def evaluate_dsl(state: DSLState, price: float, cfg: DSLConfig) -> str | None:
             best_tier = tier
             break
 
-    # ── Activate stagnation timer: when HW first reaches minimum tier trigger ──
-    # No longer gated behind tier lock — starts tracking as soon as position is profitable
-    # enough to qualify for the first tier. This catches positions that sit at +3-5% ROE
-    # for hours without ever breaching the tier floor enough times to lock.
-    if not state.stagnation_active and cfg.tiers:
-        min_trigger = min(t.trigger_pct for t in cfg.tiers)
-        if state.high_water_roe >= min_trigger:
-            state.stagnation_active = True
-            state.stagnation_started = now
-            state.high_water_time = now
+    # ── Activate stagnation timer: when HW first reaches stagnation_roe_pct ──
+    # Aligned with exit check — both use the same threshold so there's no dead zone
+    # where the timer runs but can never fire. Position must reach "decent profit"
+    # (stagnation_roe_pct) to start the clock.
+    if not state.stagnation_active and state.high_water_roe >= cfg.stagnation_roe_pct:
+        state.stagnation_active = True
+        state.stagnation_started = now
+        state.high_water_time = now
 
     # ── Tier transition: reset breach counter ──
     if best_tier and (state.current_tier is None or best_tier.trigger_pct != state.current_tier.trigger_pct):

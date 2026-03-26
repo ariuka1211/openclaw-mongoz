@@ -140,6 +140,7 @@ class LighterCopilot:
         self.bot_managed_market_ids: set[int] = set()
         # Orphaned position detection — track consecutive no-price ticks per market
         self._no_price_ticks: dict[int, int] = {}  # market_id → consecutive no-price tick count
+        self._stagnation_last_status: dict[int, float] = {}  # market_id → monotonic time of last stagnation status alert
         self._no_price_alert_threshold: int = 3  # alert after N consecutive no-price ticks
         # Position sync failure tracking (EDGE-03)
         self._position_sync_failures: int = 0  # consecutive failures

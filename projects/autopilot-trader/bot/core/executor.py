@@ -136,6 +136,7 @@ async def execute_ai_open(bot, cfg, api, tracker, alerter, decision: dict) -> bo
             logging.error(f"❌ AI open: {symbol} — no price after 3 attempts, removing orphaned position")
             tracker.remove_position(market_id)
             bot._pending_sync.discard(market_id)
+            bot._opened_signals.discard(market_id)
             await alerter.send(
                 f"❌ *AI OPEN FAILED*\n"
                 f"{direction.upper()} {symbol}\n"
@@ -247,6 +248,7 @@ async def execute_ai_close(bot, cfg, api, tracker, alerter, decision: dict) -> b
     pos.active_sl_order_id = None  # MED-18
     bot.bot_managed_market_ids.discard(mid_to_close)
     tracker.remove_position(mid_to_close)
+    bot._opened_signals.discard(mid_to_close)
 
     roe = ((exit_price - pos.entry_price) / pos.entry_price * 100) if is_long \
         else ((pos.entry_price - exit_price) / pos.entry_price * 100)
@@ -317,6 +319,7 @@ async def execute_ai_close_all(bot, cfg, api, tracker, alerter, decision: dict) 
             pos.active_sl_order_id = None  # MED-18
             bot.bot_managed_market_ids.discard(mid)
             tracker.remove_position(mid)
+            bot._opened_signals.discard(mid)
             await alerter.send(
                 f"✅ *CLOSE ALL → {pos.side.upper()} {pos.symbol}* closed"
             )

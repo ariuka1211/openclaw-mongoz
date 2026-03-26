@@ -451,18 +451,6 @@ class LighterAPI:
             logging.error(f"❌ set_leverage({market_id}, {leverage}x) exception: {e}")
             return False  # Network/auth error — don't proceed
 
-            # Log quota impact
-            if api_response:
-                quota_val, _ = self._extract_quota_from_response(api_response)
-                if quota_val is not None:
-                    self._update_quota_cache(quota_val)
-
-            logging.info(f"✅ Leverage set: {leverage}x for market {market_id} (quota={self._volume_quota_remaining})")
-            return True
-        except Exception as e:
-            logging.error(f"❌ set_leverage({market_id}, {leverage}x) exception: {e}")
-            return False
-
     async def open_position(self, market_id: int, size_usd: float, is_long: bool, current_price: float) -> bool:
         """Open a market position."""
         try:

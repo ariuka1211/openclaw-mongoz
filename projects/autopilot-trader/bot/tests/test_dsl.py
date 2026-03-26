@@ -326,25 +326,31 @@ class TestFloorLocking:
 
 class TestStagnation:
 
-    def test_hw_reaches_min_trigger_stagnation_timer_starts(self, dsl_config):
-        """HW reaches min tier trigger → stagnation timer starts."""
+    def test_hw_reaches_stagnation_roe_pct_timer_starts(self, dsl_config):
+        """HW reaches stagnation_roe_pct → stagnation timer starts."""
         state = DSLState(side="long", entry_price=100.0, leverage=10.0)
         assert not state.stagnation_active
 
-        # Push HW to min trigger (3%)
-        evaluate_dsl(state, 100.31, dsl_config)  # ROE ~ 3.1%
+        # Below stagnation_roe_pct (8%) → no activation
+        evaluate_dsl(state, 100.31, dsl_config)  # ROE ~ 3.1% < 8%
+        assert not state.stagnation_active
+
+        # At stagnation_roe_pct (8%) → activates
+        # ROE = 8% at lev=10 → move = 0.8% → price = 100.81
+        evaluate_dsl(state, 100.81, dsl_config)  # ROE ~ 8.1%
         assert state.stagnation_active
 
     def test_new_high_water_resets_timer(self, dsl_config):
         """New high water → stagnation timer resets."""
         state = DSLState(side="long", entry_price=100.0, leverage=10.0)
 
-        # Reach tier → starts stagnation
-        evaluate_dsl(state, 100.31, dsl_config)  # ROE~3%, stagnation starts
+        # Reach stagnation_roe_pct → starts stagnation timer
+        # ROE ~8.1% at lev=10 → price = 100.81
+        evaluate_dsl(state, 100.81, dsl_config)  # ROE~8.1%, stagnation starts
         first_time = state.high_water_time
 
-        # New high resets timer
-        evaluate_dsl(state, 100.5, dsl_config)  # ROE=5%, new HW
+        # New high resets timer (101.0 → ROE=10%)
+        evaluate_dsl(state, 101.0, dsl_config)
         assert state.high_water_time != first_time
 
     def test_elapsed_exceeds_stagnation_minutes_returns_stagnation(self, dsl_config):

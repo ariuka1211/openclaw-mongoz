@@ -191,6 +191,7 @@ async def process_signals(bot, cfg, api, tracker, alerter):
                 if not price_ok:
                     logging.error(f"❌ Signal open: {symbol} — no price after 3 attempts, removing orphaned position")
                     tracker.remove_position(mid)
+                    bot._opened_signals.discard(mid)
                     await alerter.send(
                         f"❌ *SIGNAL OPEN FAILED*\n"
                         f"{direction.upper()} {symbol}\n"

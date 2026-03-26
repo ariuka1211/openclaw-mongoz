@@ -2,6 +2,6 @@ __pycache__/
 *.pyc
 *.log
 .env
-signals/
+ipc/signals/
 state/
 bot/.coverage

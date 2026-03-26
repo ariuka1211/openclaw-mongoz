@@ -2,41 +2,39 @@
 
 ## What We Did
 
-### 1. Pattern Learning Feedback Loop (Complete ✅)
-- **Problem:** `PatternEngine` had decay + display wired, but `reinforce_pattern()` was never called. `patterns.json` permanently empty since March 24.
-- **Root cause:** Outcome analyzer was never built. The old `reflection.py` was removed March 25 assuming the new system replaced it, but only half was wired.
-- **Fix:** Created `OutcomeAnalyzer` class that extracts features from trade outcomes (session, symbol, direction, hold time, confidence bracket), counts wins/losses per bucket, reinforces via `PatternEngine` when win rate ≥60% with ≥3 samples.
-- **Verification:** First cycle after restart immediately reinforced 4 patterns from 10 existing outcomes. `patterns=48` tokens in prompt (was 0).
-- **Files:** `ai-decisions/context/outcome_analyzer.py` (new), `ai_trader.py` (+2 lines), `cycle_runner.py` (+1 line), `tests/test_outcome_analyzer.py` (9 tests)
-- **Tests:** 73/73 passing
+### 1. Leverage Decoupling — Final Cleanup (Complete ✅)
+- **Problem:** Position sizing used `max_position_usd: $15` but leverage was still scattered across codebase. Scanner had full leverage math as dead code. DSL used inconsistent leverage values between verified/unverified paths.
+- **Fix:**
+  - `signal_handler.py` + `executor.py`: all 4 `add_position()` calls now use `cfg.dsl_leverage` consistently
+  - `parser.py`: strips stale `leverage` field from LLM JSON output
+  - Scanner (5 files): removed `maxLeverageCap`, `exchangeMaxLeverage`, `actualLeverage`, `liqDistPct`, `safetyMultiple` — all dead code
+  - 8 files changed, 19 insertions, 73 deletions
+- **Verification:** 198/198 bot tests pass (6 pre-existing lighter import failures), 73/73 ai-decisions tests pass, scanner `bun build` clean, `grep -rn leverage scanner/src/` returns 0 results
+- **PR #9** merged to main, branch deleted
+- **Services:** all 3 restarted and active
 
-### 2. Docs Reorganization (Complete ✅)
-- `docs/reference/`: lighter-api.md, lighter-quota-research.md
-- `docs/ideas/`: pocket-ideas.md
-- `docs/plans/`: pattern-learning-completion.md
-- `docs/archive/`: unified-dashboard-plan.md (dashboard is live)
-- Updated tree in autopilot-trader.md + outcome_analyzer in file maps
-
-### 3. Pushed to Main
-- Branch `feat/pattern-learning-feedback` merged to main, deleted
-- Commit `a9cadd7` (merge), `42c97d5` + `65db3bc` (squashed via merge)
+### 2. Position Sizing Review
+- Confirmed system is fully decoupled from leverage in the decision path
+- AI decides % equity → bot caps at $15 USD → order placed. No leverage math.
+- DSL uses fixed `dsl_leverage: 10.0` for ROE calibration (intentional, not exchange-derived)
 
 ## Current State
 - All 3 services running (bot, scanner, ai-decisions)
-- Pattern learning active — 4 patterns learned on first cycle
-- 73 ai-decisions tests passing
-- Docs reorganized into subfolders
+- Position sizing fully leverage-free
+- 198 bot tests + 73 ai-decisions tests passing
+- Pattern learning active
 
 ## Files Changed
-- `ai-decisions/context/outcome_analyzer.py` — NEW
-- `ai-decisions/tests/test_outcome_analyzer.py` — NEW (9 tests)
-- `ai-decisions/ai_trader.py` — import + init
-- `ai-decisions/cycle_runner.py` — analyze_and_update() call
-- `docs/autopilot-trader.md` — tree + file map updated
-- `docs/cheatsheet.md` — file map updated
-- `docs/` reorganized into reference/, ideas/, plans/, archive/
+- `ai-decisions/llm/parser.py` — strip leverage from LLM JSON
+- `bot/core/executor.py` — use cfg.dsl_leverage consistently
+- `bot/core/signal_handler.py` — use cfg.dsl_leverage consistently
+- `scanner/src/config.ts` — removed maxLeverageCap, safetyMultiple
+- `scanner/src/main.ts` — removed leverage fields from output
+- `scanner/src/output.ts` — removed leverage display columns
+- `scanner/src/position-sizing.ts` — removed all leverage math
+- `scanner/src/types.ts` — removed leverage types
 
 ## What To Do Next
-- Monitor pattern accumulation as more outcomes close
-- Consider Phase 2: LLM pattern suggestions (optional `learned_rule` field in decision JSON)
-- Leverage unification plan still pending
+- Monitor leverage-free trading in production
+- Consider Phase 6 from leverage-unification-plan (config/docs cleanup)
+- Pattern learning accumulating — monitor as more outcomes close

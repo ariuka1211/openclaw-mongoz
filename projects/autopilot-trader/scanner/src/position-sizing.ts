@@ -1,4 +1,4 @@
-import type { OrderBookDetail } from "../types";
+import type { OrderBookDetail } from "./types";
 import { CONFIG } from "./config";
 
 /**

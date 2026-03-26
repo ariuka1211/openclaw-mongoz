@@ -57,6 +57,7 @@ tail -f projects/autopilot-trader/scanner/scanner.log
 | `ai-decisions/llm/parser.py` | Parse LLM JSON responses |
 | `ai-decisions/context/data_reader.py` | Read signals + positions from files, DB fallback |
 | `ai-decisions/context/pattern_engine.py` | Learned pattern rules with decay/reinforcement |
+| `ai-decisions/context/outcome_analyzer.py` | Extracts patterns from trade outcomes → reinforces pattern engine |
 | `ai-decisions/context/stats_formatter.py` | Performance stats + hold regret formatting |
 | `ai-decisions/context/prompt_builder.py` | LLM prompt assembly with token budget |
 | `ai-decisions/context/sanitizer.py` | Prompt injection detection |

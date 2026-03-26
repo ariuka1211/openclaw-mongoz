@@ -96,6 +96,9 @@ class CycleRunner:
             if ts and (self.ai_trader._last_processed_outcome_ts is None or ts > self.ai_trader._last_processed_outcome_ts):
                 self.ai_trader._last_processed_outcome_ts = ts
 
+        # Analyze outcomes → update pattern engine
+        self.ai_trader.outcome_analyzer.analyze_and_update(outcomes, history)
+
         equity = signals_config.get("accountEquity", 1000)
 
         # 2. Build prompt

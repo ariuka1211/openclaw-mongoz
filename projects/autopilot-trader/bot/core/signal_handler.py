@@ -126,6 +126,9 @@ async def process_signals(bot, cfg, api, tracker, alerter):
 
         # Scale position size to actual balance
         size_usd = opp.get("positionSizeUsd", 0) * scale
+        if size_usd > cfg.max_position_usd:
+            size_usd = cfg.max_position_usd
+            logging.info(f"📐 Capped position to ${cfg.max_position_usd:.2f}")
         if size_usd <= 0:
             logging.warning(f"⚠️ {symbol}: invalid position size, skipping")
             continue
@@ -148,7 +151,7 @@ async def process_signals(bot, cfg, api, tracker, alerter):
                 if verified_pos is None:
                     # CRITICAL-2: Don't discard — add as unverified so we can re-verify on next ticks
                     logging.error(f"❌ Signal open: {symbol} verification failed — tracking as unverified (will re-verify)")
-                    tracker.add_position(mid, symbol, direction, current_price, expected_size, leverage=min(cfg.default_leverage, 10))
+                    tracker.add_position(mid, symbol, direction, current_price, expected_size, leverage=cfg.dsl_leverage)
                     pos = tracker.positions.get(mid)
                     if pos:
                         pos.unverified_at = time.time()
@@ -166,7 +169,7 @@ async def process_signals(bot, cfg, api, tracker, alerter):
                 bot._opened_signals.add(mid)
                 # Use actual filled size from exchange (handles partial fills)
                 actual_size = verified_pos["size"]
-                tracker.add_position(mid, symbol, direction, current_price, actual_size, leverage=min(cfg.default_leverage, 10))
+                tracker.add_position(mid, symbol, direction, current_price, actual_size, leverage=verified_pos.get("leverage"))
 
                 # NOTE: DSL uses config leverage from add_position, NOT exchange-reported leverage.
                 # Exchange leverage can vary for cross margin and would break DSL tier calibration.

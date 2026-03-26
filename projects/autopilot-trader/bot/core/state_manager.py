@@ -42,7 +42,6 @@ class StateManager:
             "side": dsl.side,
             "entry_price": dsl.entry_price,
             "leverage": dsl.leverage,
-            "effective_leverage": dsl.effective_leverage,
             "high_water_roe": dsl.high_water_roe,
             "high_water_price": dsl.high_water_price,
             "high_water_time": dsl.high_water_time.isoformat() if dsl.high_water_time else None,
@@ -80,7 +79,7 @@ class StateManager:
                     "side": pos.side,
                     "entry_price": pos.entry_price,
                     "size": pos.size,
-                    "leverage": pos.dsl_state.effective_leverage if pos.dsl_state else self.cfg.default_leverage,
+                    "leverage": pos.dsl_state.leverage if pos.dsl_state else self.cfg.dsl_leverage,
                     "sl_pct": pos.sl_pct,
                     "high_water_mark": pos.high_water_mark,
                     "trailing_active": pos.trailing_active,
@@ -344,8 +343,11 @@ class StateManager:
             pos.dsl_state.locked_floor_roe = dsl_data.get("locked_floor_roe")
             pos.dsl_state.stagnation_active = dsl_data.get("stagnation_active", False)
             pos.dsl_state.stagnation_started = stag_time
-            # Restore effective_leverage (backwards compat: fall back to leverage if not saved)
-            pos.dsl_state.effective_leverage = dsl_data.get("effective_leverage", dsl_data.get("leverage", pos.dsl_state.effective_leverage))
+            # Backward compat: old state files may have effective_leverage (≈0.1) — ignore if < 1.0
+            saved_lev = dsl_data.get("leverage", self.cfg.dsl_leverage)
+            if saved_lev < 1.0:
+                saved_lev = self.cfg.dsl_leverage
+            pos.dsl_state.leverage = saved_lev
 
             logging.info(
                 f"🔄 Restored DSL state for {pos.symbol}: "
@@ -413,6 +415,10 @@ class StateManager:
 
         # Clear after reconciliation (one-time operation per restart)
         self.bot._saved_positions = None
+
+
+
+
 
 
 

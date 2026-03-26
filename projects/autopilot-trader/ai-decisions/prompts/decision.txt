@@ -9,7 +9,6 @@ Note: "close_all" is NOT listed here — it's triggered by the safety layer only
   "symbol": "TOKEN" | null,
   "direction": "long" | "short" | null,
   "size_pct_equity": 0.0-10.0,
-  "leverage": 1.0-20.0,
   "stop_loss_pct": 0.5-15.0,
   "reasoning": "why you chose this — be specific, reference scores, funding, win rate",
   "confidence": 0.0-1.0

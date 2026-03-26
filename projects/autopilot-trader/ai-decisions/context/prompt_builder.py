@@ -230,11 +230,11 @@ class PromptBuilder:
         raw = (current - entry) / entry * 100
         if side == "short":
             raw = -raw
-        # Cross margin ROE: effective_leverage = notional / equity
+        # Cross margin: use notional/equity when available
         notional = position.get("position_size_usd", position.get("size_usd", 0))
         if equity > 0 and notional > 0:
             effective_lev = notional / equity
             return raw * effective_lev
-        # Fallback: isolated margin
+        # Fallback: isolated margin (leverage from position data)
         leverage = position.get("leverage", 1.0)
         return raw * leverage

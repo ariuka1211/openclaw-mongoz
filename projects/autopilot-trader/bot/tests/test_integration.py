@@ -288,7 +288,7 @@ class TestStateRoundtrip:
                     "side": pos.side,
                     "entry_price": pos.entry_price,
                     "size": pos.size,
-                    "leverage": pos.dsl_state.effective_leverage if pos.dsl_state else config.default_leverage,
+                    "leverage": pos.dsl_state.leverage if pos.dsl_state else config.dsl_leverage,
                     "sl_pct": pos.sl_pct,
                     "high_water_mark": pos.high_water_mark,
                     "trailing_active": pos.trailing_active,

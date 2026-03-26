@@ -29,7 +29,7 @@ class TestFromYaml:
             "hard_sl_pct: 2.0\n"
             "trailing_tp_trigger_pct: 4.0\n"
             "trailing_tp_delta_pct: 1.5\n"
-            "default_leverage: 20.0\n"
+            "dsl_leverage: 20.0\n"
             "price_poll_interval: 30\n"
             "dsl_enabled: false\n"
         )
@@ -42,7 +42,7 @@ class TestFromYaml:
         assert cfg.hard_sl_pct == 2.0
         assert cfg.trailing_tp_trigger_pct == 4.0
         assert cfg.trailing_tp_delta_pct == 1.5
-        assert cfg.default_leverage == 20.0
+        assert cfg.dsl_leverage == 20.0
         assert cfg.price_poll_interval == 30
         assert cfg.dsl_enabled is False
 
@@ -191,11 +191,11 @@ class TestValidate:
         errors = config.validate()
         assert any("price_poll_interval" in e for e in errors)
 
-    def test_validate_default_leverage_zero(self, config):
-        """default_leverage = 0 → error (must be >= 1)."""
-        config.default_leverage = 0
+    def test_validate_dsl_leverage_zero(self, config):
+        """dsl_leverage = 0 → error (must be >= 1)."""
+        config.dsl_leverage = 0
         errors = config.validate()
-        assert any("default_leverage" in e for e in errors)
+        assert any("dsl_leverage" in e for e in errors)
 
     def test_validate_dsl_enabled_empty_tiers(self, config):
         """dsl_enabled=True, dsl_tiers=[] → error (need at least one tier)."""
@@ -247,8 +247,8 @@ class TestDefaults:
     def test_defaults_hard_sl_pct(self):
         assert BotConfig().hard_sl_pct == 1.25
 
-    def test_default_leverage(self):
-        assert BotConfig().default_leverage == 10.0
+    def test_defaults_dsl_leverage(self):
+        assert BotConfig().dsl_leverage == 10.0
 
     def test_default_trailing_tp_trigger_pct(self):
         assert BotConfig().trailing_tp_trigger_pct == 3.0

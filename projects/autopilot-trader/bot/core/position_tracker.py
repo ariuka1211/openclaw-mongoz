@@ -97,9 +97,9 @@ class PositionTracker:
             # Alert on tier lock
             if pos.dsl_state.locked_floor_roe is not None and not getattr(pos, '_tier_lock_alerted', False):
                 pos._tier_lock_alerted = True
-                effective_lev = pos.dsl_state.effective_leverage if pos.dsl_state else self.cfg.default_leverage
-                floor_price = pos.entry_price * (1 + pos.dsl_state.locked_floor_roe / 100 / effective_lev) if pos.side == "long" \
-                    else pos.entry_price * (1 - pos.dsl_state.locked_floor_roe / 100 / effective_lev)
+                lev = pos.dsl_state.leverage if pos.dsl_state else self.cfg.dsl_leverage
+                floor_price = pos.entry_price * (1 + pos.dsl_state.locked_floor_roe / 100 / lev) if pos.side == "long" \
+                    else pos.entry_price * (1 - pos.dsl_state.locked_floor_roe / 100 / lev)
                 return ("dsl_tier_lock", {
                     "roe": roe,
                     "floor_roe": pos.dsl_state.locked_floor_roe,
@@ -196,15 +196,9 @@ class PositionTracker:
         if trailing_just_activated:
             pnl_pct = ((price - pos.entry_price) / pos.entry_price * 100) if pos.side == "long" \
                 else ((pos.entry_price - price) / pos.entry_price * 100)
-            # Cross margin ROE: effective_leverage = notional / equity
-            notional = abs(pos.size * pos.entry_price)
-            if self.account_equity > 0 and notional > 0:
-                effective_lev = notional / self.account_equity
-            else:
-                effective_lev = self.cfg.default_leverage
             return ("trailing_activated", {
                 "price": price,
-                "roe": pnl_pct * effective_lev,
+                "roe": pnl_pct * self.cfg.dsl_leverage,
                 "pnl": pnl_pct,
             })
 
@@ -228,21 +222,13 @@ class PositionTracker:
         return None
 
     def add_position(self, market_id: int, symbol: str, side: str, entry: float, size: float, leverage: float = None, sl_pct: float = None):
-        lev = leverage or self.cfg.default_leverage
-        # Calculate effective leverage for cross margin ROE accuracy
-        # effective_leverage = notional / equity (accounts for shared margin across positions)
-        notional = abs(size * entry)
-        if self.account_equity > 0 and notional > 0:
-            eff_lev = notional / self.account_equity
-        else:
-            eff_lev = lev  # Fall back to config leverage if equity unknown
+        lev = leverage or self.cfg.dsl_leverage
         dsl_state = None
         if self.cfg.dsl_enabled:
             dsl_state = DSLState(
                 side=side,
                 entry_price=entry,
                 leverage=lev,
-                effective_leverage=eff_lev,
                 high_water_price=entry,
                 high_water_time=datetime.now(timezone.utc),
             )

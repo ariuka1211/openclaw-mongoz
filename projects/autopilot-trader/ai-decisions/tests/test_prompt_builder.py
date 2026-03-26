@@ -59,12 +59,11 @@ class TestCalcRoe:
             "current_price": 110.0,
             "side": "long",
             "position_size_usd": 0,
-            "leverage": 5.0,
         }
         roe = PromptBuilder._calc_roe(position, equity=0)
-        # raw = 10%, notional=0 so falls through to isolated margin
-        # roe = 10 * 5.0 = 50.0%
-        assert roe == pytest.approx(50.0, abs=0.01)
+        # raw = 10%, position_size_usd=0 so falls through to isolated margin
+        # roe = 10 * 1.0 = 10.0% (default leverage)
+        assert roe == pytest.approx(10.0, abs=0.01)
 
     def test_isolated_margin_fallback_no_equity_using_size_usd(self):
         """Test fallback to size_usd field when position_size_usd not set."""

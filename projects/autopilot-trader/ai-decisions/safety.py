@@ -16,7 +16,7 @@ log = logging.getLogger("ai-trader.safety")
 
 class SafetyLayer:
     __slots__ = (
-        'max_positions', 'max_leverage', 'max_size_pct_equity',
+        'max_positions', 'max_size_pct_equity',
         'max_daily_drawdown_pct', 'max_total_exposure_pct',
         'min_confidence', 'min_scanner_score', 'required_stop_loss',
         'min_stop_loss_pct', 'max_orders_per_hour', 'cooldown_after_loss_seconds',
@@ -28,7 +28,6 @@ class SafetyLayer:
     def __init__(self, config: dict, db: DecisionDB):
         cfg = config.get("safety", {})
         self.max_positions = cfg.get("max_positions", 3)
-        self.max_leverage = cfg.get("max_leverage", 20.0)
         self.max_size_pct_equity = cfg.get("max_size_pct_equity", 5.0)
         self.max_daily_drawdown_pct = cfg.get("max_daily_drawdown_pct", 10.0)
         self.max_total_exposure_pct = cfg.get("max_total_exposure_pct", 15.0)
@@ -95,7 +94,7 @@ class SafetyLayer:
             errors.append(f"invalid action: {action}")
 
         if action == "open":
-            open_required = ["symbol", "direction", "size_pct_equity", "leverage", "stop_loss_pct"]
+            open_required = ["symbol", "direction", "size_pct_equity", "stop_loss_pct"]
             for key in open_required:
                 if key not in decision:
                     errors.append(f"missing open field: {key}")
@@ -109,7 +108,6 @@ class SafetyLayer:
     def _validate_open(self, decision: dict, positions: list, signals: list, equity: float, reasons: list) -> tuple[bool, list[str]]:
         """Validate open position decision."""
         symbol = decision.get("symbol", "")
-        leverage = decision.get("leverage", 0)
         size_pct = decision.get("size_pct_equity", 0)
         sl_pct = decision.get("stop_loss_pct")
         direction = decision.get("direction", "")
@@ -122,12 +120,6 @@ class SafetyLayer:
         if any(p.get("symbol") == symbol for p in positions):
             reasons.append(f"already have position in {symbol}")
 
-        # Rule 2: Max 20x leverage (must be positive)
-        if leverage <= 0:
-            reasons.append(f"leverage {leverage}x must be positive")
-        elif leverage > self.max_leverage:
-            reasons.append(f"leverage {leverage}x > max {self.max_leverage}x")
-
         # Rule 3: Max 5% equity per position (must be positive)
         if size_pct <= 0:
             reasons.append(f"size {size_pct}% must be positive")
@@ -137,17 +129,6 @@ class SafetyLayer:
         # Rule 12: All positions need stop losses
         if self.required_stop_loss and (not sl_pct or sl_pct < self.min_stop_loss_pct):
             reasons.append(f"stop loss {sl_pct}% invalid (min {self.min_stop_loss_pct}%)")
-
-        # Rule 8: Liquidation distance ≥ 2x stop-loss distance
-        # For safety: max_leverage * sl_pct must leave margin
-        # Simple check: at given leverage, sl_pct must be <= 100/max_leverage/2
-        if leverage > 0 and sl_pct is not None:
-            max_safe_sl = 100.0 / leverage / 2.0
-            if sl_pct > max_safe_sl:
-                reasons.append(
-                    f"sl {sl_pct}% with {leverage}x lev — liquidation at {100/leverage:.1f}%, "
-                    f"need SL < {max_safe_sl:.1f}%"
-                )
 
         # Rule 4: Max 15% total exposure
         current_exposure = sum(

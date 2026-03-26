@@ -35,13 +35,10 @@ async def execute_ai_open(bot, cfg, api, tracker, alerter, decision: dict) -> bo
         logging.warning(f"AI open: invalid decision fields")
         return False
 
-    # Cap size_usd at 10x equity
-    balance = await bot._get_balance()
-    if balance > 0:
-        max_size = balance * 10
-        if size_usd > max_size:
-            logging.warning(f"⚠️ AI open: size_usd=${size_usd:.2f} capped to ${max_size:.2f} (10x equity)")
-            size_usd = max_size
+    # Cap size_usd at max position notional
+    if size_usd > cfg.max_position_usd:
+        logging.warning(f"⚠️ AI open: size_usd=${size_usd:.2f} capped to ${cfg.max_position_usd:.2f} (max position)")
+        size_usd = cfg.max_position_usd
 
     # Resolve market ID
     market_id = resolve_market_id(bot, tracker, symbol)
@@ -99,8 +96,7 @@ async def execute_ai_open(bot, cfg, api, tracker, alerter, decision: dict) -> bo
             # Position may be on exchange but API is slow to reflect it
             logging.error(f"❌ AI open: {symbol} verification failed — tracking as unverified (will re-verify)")
             ai_sl_pct = decision.get("stop_loss_pct")
-            ai_leverage = min(float(decision.get("leverage", cfg.default_leverage)), 10)
-            tracker.add_position(market_id, symbol, direction, current_price, expected_size, leverage=ai_leverage, sl_pct=ai_sl_pct)
+            tracker.add_position(market_id, symbol, direction, current_price, expected_size, leverage=cfg.dsl_leverage, sl_pct=ai_sl_pct)
             pos = tracker.positions.get(market_id)
             if pos:
                 pos.unverified_at = time.time()
@@ -116,8 +112,7 @@ async def execute_ai_open(bot, cfg, api, tracker, alerter, decision: dict) -> bo
         # Use actual filled size from exchange (handles partial fills)
         actual_size = verified_pos["size"]
         ai_sl_pct = decision.get("stop_loss_pct")
-        ai_leverage = min(float(decision.get("leverage", cfg.default_leverage)), 10)
-        tracker.add_position(market_id, symbol, direction, current_price, actual_size, leverage=ai_leverage, sl_pct=ai_sl_pct)
+        tracker.add_position(market_id, symbol, direction, current_price, actual_size, leverage=verified_pos.get("leverage"), sl_pct=ai_sl_pct)
 
         # NOTE: DSL uses config leverage from add_position, NOT exchange-reported leverage.
         # Exchange leverage can vary for cross margin and would break DSL tier calibration.

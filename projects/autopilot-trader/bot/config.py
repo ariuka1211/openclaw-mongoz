@@ -44,7 +44,8 @@ class BotConfig:
 
     # DSL (Dynamic Stop Loss)
     dsl_enabled: bool = True
-    default_leverage: float = 10.0
+    max_position_usd: float = 15.0    # Hard cap per position notional
+    dsl_leverage: float = 10.0        # DSL ROE calc fallback only
     stagnation_roe_pct: float = 8.0
     stagnation_minutes: int = 60
     dsl_tiers: list = field(default_factory=list)
@@ -82,8 +83,11 @@ class BotConfig:
         if not isinstance(self.price_poll_interval, (int, float)) or self.price_poll_interval < 1:
             errors.append(f"'price_poll_interval' must be >= 1, got {self.price_poll_interval}")
 
-        if not isinstance(self.default_leverage, (int, float)) or self.default_leverage < 1:
-            errors.append(f"'default_leverage' must be >= 1, got {self.default_leverage}")
+        if not isinstance(self.max_position_usd, (int, float)) or self.max_position_usd <= 0:
+            errors.append(f"'max_position_usd' must be a positive number, got {self.max_position_usd}")
+
+        if not isinstance(self.dsl_leverage, (int, float)) or self.dsl_leverage < 1:
+            errors.append(f"'dsl_leverage' must be >= 1, got {self.dsl_leverage}")
 
         # DSL tier validation
         if self.dsl_enabled:
@@ -133,7 +137,7 @@ class BotConfig:
                 else:
                     filtered[key] = int(filtered[key])
         for key in ("trailing_tp_trigger_pct", "trailing_tp_delta_pct", "hard_sl_pct",
-                     "default_leverage", "stagnation_roe_pct", "price_call_delay"):
+                     "dsl_leverage", "max_position_usd", "stagnation_roe_pct", "price_call_delay"):
             if key in filtered and isinstance(filtered[key], str):
                 filtered[key] = float(filtered[key])
         # Coerce nested dsl_tiers numeric fields (may be strings from env var expansion)

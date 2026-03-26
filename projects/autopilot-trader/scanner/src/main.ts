@@ -11,18 +11,12 @@
  *   D. MA Alignment            — 50/99/200 MA structure
  *   E. Order Block             — nearest S/R order block
  *
- * Position sizing uses risk-based formula:
- *   positionSizeUsd = (equity × riskPct) / stopLossDistance
- *   stopLossDistance = lastPrice × dailyVolatility × stopLossMultiple
- *
- * Safety rules: NaN guards, max position capped at fixed USD.
- *
- * Usage: bun run src/main.ts [--equity 1000] [--min-score 60] [--max-positions 3]
+ * Usage: bun run src/main.ts [--min-score 60]
  */
 
 import type { MarketOpportunity, OiSnapshot } from "./types";
 import { CONFIG } from "./config";
-import { fetchBalance, fetchOrderBookDetails, fetchFundingRates } from "./api/lighter";
+import { fetchOrderBookDetails, fetchFundingRates } from "./api/lighter";
 import { fetchOkxKlines, klinesCache } from "./api/okx";
 import { getOkxInstId } from "./config";
 import { scoreFunding } from "./signals/funding-spread";
@@ -30,44 +24,13 @@ import { scoreMomentum } from "./signals/price-momentum";
 import { scoreMA } from "./signals/moving-average-alignment";
 import { scoreOrderBlock } from "./signals/order-block";
 import { loadOiSnapshot, saveOiSnapshot, scoreOiTrend } from "./signals/oi-trend";
-import { calculatePosition } from "./position-sizing";
 import { computeDirection } from "./direction-vote";
 import { displayResults, writeSignalsJson } from "./output";
 
 async function main(): Promise<void> {
-  // Parse CLI args for overrides
-  const args = process.argv.slice(2);
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--equity" && args[i + 1]) CONFIG.accountEquity = parseFloat(args[++i]);
-    if (args[i] === "--min-score" && args[i + 1]) CONFIG.minConfidenceScore = parseFloat(args[++i]);
-    if (args[i] === "--max-positions" && args[i + 1]) {
-      const val = parseInt(args[++i], 10);
-      if (Number.isFinite(val) && val >= 1 && val <= 5) {
-        CONFIG.maxConcurrentPositions = val;
-      } else {
-        console.error("❌ --max-positions must be 1-5");
-        process.exit(1);
-      }
-    }
-  }
-
-  if (!Number.isFinite(CONFIG.accountEquity) || CONFIG.accountEquity <= 0) {
-    console.error("❌ Invalid account equity:", CONFIG.accountEquity);
-    process.exit(1);
-  }
-
   // Load previous OI snapshot for trend comparison
   const prevOiSnapshot = await loadOiSnapshot();
   console.log(`  OI snapshot: ${Object.keys(prevOiSnapshot).length} markets loaded`);
-
-  // Fetch actual balance from Lighter API
-  const liveBalance = await fetchBalance();
-  if (liveBalance > 0) {
-    CONFIG.accountEquity = liveBalance;
-    console.log(`  Live balance: $${liveBalance.toFixed(2)} (fetched from Lighter API)`);
-  } else {
-    console.log(`  Using fallback equity: $${CONFIG.accountEquity}`);
-  }
 
   console.log("Fetching Lighter market data...");
   const [markets, fundingRates] = await Promise.all([
@@ -183,8 +146,8 @@ async function main(): Promise<void> {
       funding.score * 0.35 + maScore * 0.25 + obScore * 0.15 + momScore * 0.15 + oiResult.score * 0.10
     );
 
-    // Position sizing + safety check
-    const pos = calculatePosition(m);
+    // Volatility
+    const dailyVolatility = (m.daily_price_high - m.daily_price_low) / m.last_trade_price;
 
     // Direction: majority vote of MA + OB + funding spread
     const direction = computeDirection(maDir, obType, funding.spread8h);
@@ -211,12 +174,7 @@ async function main(): Promise<void> {
       obDistancePct: obDistPct,
       obPrice,
       direction,
-      positionSizeUsd: pos.positionSizeUsd,
-      riskAmountUsd: pos.riskAmountUsd,
-      stopLossDistanceAbs: pos.stopLossDistanceAbs,
-      stopLossDistancePct: pos.stopLossDistancePct,
-      safetyPass: pos.pass,
-      safetyReason: pos.reason,
+      dailyVolatility,
       detectedAt: new Date().toISOString(),
     });
   }
@@ -230,21 +188,9 @@ async function main(): Promise<void> {
 
   // Filter to minimum score
   const qualified = opportunities.filter((o) => o.compositeScore >= CONFIG.minConfidenceScore);
-  const allPassedSafety = qualified.filter((o) => o.safetyPass);
-  const failedSafety = qualified.filter((o) => !o.safetyPass);
-
-  // Apply max concurrent positions cap — take only top N
-  const passedSafety = allPassedSafety.slice(0, CONFIG.maxConcurrentPositions);
 
   // Display results
-  displayResults(
-    liquidMarkets.length,
-    opportunities,
-    passedSafety,
-    allPassedSafety,
-    qualified,
-    failedSafety,
-  );
+  displayResults(liquidMarkets.length, opportunities, qualified);
 
   // Write signals.json
   await writeSignalsJson(opportunities);

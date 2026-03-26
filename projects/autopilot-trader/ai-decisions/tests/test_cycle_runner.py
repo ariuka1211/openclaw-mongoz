@@ -31,6 +31,7 @@ def _make_ai_trader(tmp_path):
     trader._last_sent_decision_id = "test123"
     trader._last_processed_outcome_ts = None
     trader.result_file = tmp_path / "result.json"
+    trader.data_reader.read_equity.return_value = 1000.0
 
     return trader
 
@@ -59,7 +60,7 @@ class TestCycleRunnerNoSignals:
         signals_file = trader.data_reader.signals_file
         # Write signals data
         signals_data = [{"symbol": "BTC-USDT", "compositeScore": 80, "direction": "long"}]
-        trader.data_reader.read_signals.return_value = (signals_data, {"accountEquity": 1000})
+        trader.data_reader.read_signals.return_value = (signals_data, {})
         # Set signals file mtime to 700 seconds ago (stale > 600s)
         old_time = time.time() - 700
         os.utime(str(signals_file), (old_time, old_time))
@@ -71,7 +72,7 @@ class TestCycleRunnerStateHash:
     @pytest.mark.asyncio
     async def test_state_unchanged_skips_llm(self, runner, trader):
         signals_data = [{"symbol": "BTC-USDT", "compositeScore": 80, "direction": "long"}]
-        trader.data_reader.read_signals.return_value = (signals_data, {"accountEquity": 1000})
+        trader.data_reader.read_signals.return_value = (signals_data, {})
         trader.data_reader.read_positions.return_value = []
         trader.db.get_recent_decisions.return_value = []
         trader.db.get_recent_outcomes.return_value = []
@@ -92,7 +93,7 @@ class TestCycleRunnerStateHash:
     @pytest.mark.asyncio
     async def test_state_changed_calls_llm(self, runner, trader):
         signals_data = [{"symbol": "BTC-USDT", "compositeScore": 85, "direction": "long"}]
-        trader.data_reader.read_signals.return_value = (signals_data, {"accountEquity": 1000})
+        trader.data_reader.read_signals.return_value = (signals_data, {})
         trader.data_reader.read_positions.return_value = []
         trader.db.get_recent_decisions.return_value = []
         trader.db.get_recent_outcomes.return_value = []

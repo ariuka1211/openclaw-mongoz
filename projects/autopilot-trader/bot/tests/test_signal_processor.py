@@ -387,9 +387,9 @@ class TestKillSwitch:
             "timestamp": "2025-01-01T00:00:00Z",
             "opportunities": [
                 {"marketId": 1, "symbol": "BTC", "compositeScore": 80,
-                 "positionSizeUsd": 100, "direction": "long", "safetyPass": True},
+                 "direction": "long", "dailyVolatility": 0.03},
             ],
-            "config": {"accountEquity": 1000},
+            "config": {},
         }))
 
         mock_bot._signals_file = str(signals_file)
@@ -427,9 +427,9 @@ class TestKillSwitch:
             "timestamp": "2025-01-01T00:00:01Z",
             "opportunities": [
                 {"marketId": 1, "symbol": "BTC", "compositeScore": 80,
-                 "positionSizeUsd": 100, "direction": "long", "safetyPass": True},
+                 "direction": "long", "dailyVolatility": 0.03},
             ],
-            "config": {"accountEquity": 1000},
+            "config": {},
         }))
 
         mock_bot._signals_file = str(signals_file)
@@ -465,8 +465,8 @@ class TestSignalHashDedup:
         signals_data = {
             "timestamp": "2025-01-01T00:00:00Z",
             "opportunities": [{"symbol": "BTC", "marketId": 1, "compositeScore": 80,
-                               "positionSizeUsd": 100, "direction": "long", "safetyPass": True}],
-            "config": {"accountEquity": 1000},
+                               "direction": "long", "dailyVolatility": 0.03}],
+            "config": {},
         }
         signals_file.write_text(json.dumps(signals_data))
 
@@ -510,8 +510,8 @@ class TestSignalHashDedup:
         signals_file.write_text(json.dumps({
             "timestamp": "2025-01-01T00:00:02Z",
             "opportunities": [{"symbol": "ETH", "marketId": 2, "compositeScore": 80,
-                               "positionSizeUsd": 200, "direction": "short", "safetyPass": True}],
-            "config": {"accountEquity": 1000},
+                               "direction": "short", "dailyVolatility": 0.03}],
+            "config": {},
         }))
 
         mock_bot._signals_file = str(signals_file)
@@ -548,11 +548,11 @@ class TestMinScoreFilter:
             "timestamp": "2025-01-01T00:00:03Z",
             "opportunities": [
                 {"marketId": 1, "symbol": "BTC", "compositeScore": 50,  # below min
-                 "positionSizeUsd": 100, "direction": "long", "safetyPass": True},
+                 "direction": "long", "dailyVolatility": 0.03},
                 {"marketId": 2, "symbol": "ETH", "compositeScore": 80,  # above min
-                 "positionSizeUsd": 200, "direction": "long", "safetyPass": True},
+                 "direction": "long", "dailyVolatility": 0.03},
             ],
-            "config": {"accountEquity": 1000},
+            "config": {},
         }))
 
         mock_bot._signals_file = str(signals_file)
@@ -596,9 +596,9 @@ class TestMinScoreFilter:
             "timestamp": "2025-01-01T00:00:04Z",
             "opportunities": [
                 {"marketId": 1, "symbol": "BTC", "compositeScore": 70,
-                 "positionSizeUsd": 100, "direction": "long", "safetyPass": True},
+                 "direction": "long", "dailyVolatility": 0.03},
             ],
-            "config": {"accountEquity": 1000},
+            "config": {},
         }))
 
         mock_api.open_position = AsyncMock(return_value=True)

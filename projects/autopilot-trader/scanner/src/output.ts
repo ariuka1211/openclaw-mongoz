@@ -26,30 +26,25 @@ export function padL(s: string, len: number): string {
 export function displayResults(
   liquidMarkets: number,
   opportunities: MarketOpportunity[],
-  passedSafety: MarketOpportunity[],
-  allPassedSafety: MarketOpportunity[],
   qualified: MarketOpportunity[],
-  failedSafety: MarketOpportunity[],
 ): void {
   console.log("");
   console.log("═══════════════════════════════════════════════════════════════════════════════════════════════════════════════");
   console.log("  LIGHTER.OPPORTUNITY SCANNER");
   console.log(`  ${new Date().toISOString()}`);
-  console.log(`  Equity: $${CONFIG.accountEquity} | Risk/trade: ${(CONFIG.riskPct * 100).toFixed(0)}% ($${(CONFIG.accountEquity * CONFIG.riskPct).toFixed(0)}) | SL multiple: ${CONFIG.stopLossMultiple}× daily vol`);
-  console.log(`  Max positions: ${CONFIG.maxConcurrentPositions} | Min score: ${CONFIG.minConfidenceScore}`);
-  console.log(`  Scanned: ${liquidMarkets} liquid markets | Qualified: ${qualified.length} | Safety passed: ${allPassedSafety.length} | Selected: ${passedSafety.length}`);
+  console.log(`  Min score: ${CONFIG.minConfidenceScore}`);
+  console.log(`  Scanned: ${liquidMarkets} liquid markets | Qualified: ${qualified.length}`);
   console.log("═══════════════════════════════════════════════════════════════════════════════════════════════════════════════");
 
-  // --- Opportunities that passed safety (capped by max positions) ---
-  if (passedSafety.length > 0) {
+  // --- Qualified opportunities ---
+  if (qualified.length > 0) {
     console.log("");
-    console.log("  ✅ SELECTED POSITIONS (risk-based sizing)");
+    console.log("  ✅ QUALIFIED OPPORTUNITIES");
     console.log("");
 
     const COL = {
       sym: 10, dir: 5, score: 6, fund: 10, spread: 10, oiTr: 8, mom: 6,
-      ma: 10, ob: 14,
-      risk: 8, slPct: 8, slAbs: 10, posSize: 10,
+      ma: 10, ob: 14, vol: 10,
     };
 
     const header =
@@ -62,15 +57,12 @@ export function displayResults(
       padL("CHG%", COL.mom) +
       padL("MA", COL.ma) +
       padL("OB", COL.ob) +
-      padL("RISK $", COL.risk) +
-      padL("SL %", COL.slPct) +
-      padL("SL $", COL.slAbs) +
-      padL("POS USD", COL.posSize);
+      padL("DAILYVOL", COL.vol);
 
     console.log(`  ${header}`);
     console.log(`  ${"─".repeat(header.length)}`);
 
-    for (const o of passedSafety) {
+    for (const o of qualified) {
       const maStr = `${o.maDirection}${o.maAlignmentScore}`;
       const obDistStr = o.obDistancePct !== null ? `${o.obDistancePct.toFixed(1)}%` : "—";
       const obStr = o.obType !== "none" ? `${o.obType === "support" ? "S" : "R"} ${obDistStr}` : "none";
@@ -86,51 +78,12 @@ export function displayResults(
         padL(fmtPct(o.dailyPriceChange, 1), COL.mom) +
         padL(maStr, COL.ma) +
         padL(obStr, COL.ob) +
-        padL(fmtUsd(o.riskAmountUsd), COL.risk) +
-        padL(`${o.stopLossDistancePct.toFixed(2)}%`, COL.slPct) +
-        padL(fmtUsd(o.stopLossDistanceAbs), COL.slAbs) +
-        padL(fmtUsd(o.positionSizeUsd), COL.posSize)
+        padL(fmtPct(o.dailyVolatility * 100, 2), COL.vol)
       );
     }
-
-    // Total risk exposure
-    const totalRiskUsd = passedSafety.reduce((s, o) => s + o.riskAmountUsd, 0);
-    const totalRiskPct = (totalRiskUsd / CONFIG.accountEquity) * 100;
-    const totalExposureUsd = passedSafety.reduce((s, o) => s + o.positionSizeUsd, 0);
-    console.log("");
-    console.log(`  📊 Total risk exposure: ${fmtUsd(totalRiskUsd)} (${totalRiskPct.toFixed(1)}% of equity across ${passedSafety.length} positions)`);
-    console.log(`  📊 Total position exposure: ${fmtUsd(totalExposureUsd)} (${(totalExposureUsd / CONFIG.accountEquity * 100).toFixed(1)}% of equity)`);
   } else {
     console.log("");
-    console.log("  No opportunities passed safety checks.");
-  }
-
-  // Show truncated positions if any were cut by max-positions cap
-  const truncatedByCap = allPassedSafety.length - passedSafety.length;
-  if (truncatedByCap > 0) {
-    console.log("");
-    console.log(`  ⚠️  ${truncatedByCap} more positions available but capped at ${CONFIG.maxConcurrentPositions} (--max-positions)`);
-    for (const o of allPassedSafety.slice(CONFIG.maxConcurrentPositions)) {
-      console.log(`     ${o.direction === "long" ? "L" : "S"} ${o.symbol} score=${o.compositeScore} pos=${fmtUsd(o.positionSizeUsd)}`);
-    }
-  }
-
-  // --- Opportunities that failed safety ---
-  if (failedSafety.length > 0) {
-    console.log("");
-    console.log("  ❌ QUALIFIED BUT FAILED SAFETY CHECK");
-    console.log("");
-
-    for (const o of failedSafety.slice(0, 10)) {
-      console.log(
-        `  ${o.direction === "long" ? "L" : "S"} ${pad(o.symbol, 10)} score=${o.compositeScore}  ` +
-        `sl=${o.stopLossDistancePct.toFixed(1)}%  ` +
-        `→ ${o.safetyReason}`
-      );
-    }
-    if (failedSafety.length > 10) {
-      console.log(`  ... and ${failedSafety.length - 10} more`);
-    }
+    console.log("  No opportunities qualified (below min score).");
   }
 
   // --- Summary ---
@@ -139,22 +92,10 @@ export function displayResults(
   console.log("  SUMMARY");
   console.log(`  Total markets scanned:       ${liquidMarkets}`);
   console.log(`  Score ≥ ${CONFIG.minConfidenceScore} (qualified):    ${qualified.length}`);
-  console.log(`  Passed safety:               ${allPassedSafety.length}`);
-  console.log(`  Selected (max ${CONFIG.maxConcurrentPositions}):              ${passedSafety.length}`);
-  console.log(`  Failed safety:               ${failedSafety.length}`);
   console.log(`  Below score threshold:       ${opportunities.length - qualified.length}`);
-
-  if (passedSafety.length > 0) {
-    const totalRiskUsd = passedSafety.reduce((s, o) => s + o.riskAmountUsd, 0);
-    const totalExposure = passedSafety.reduce((s, o) => s + o.positionSizeUsd, 0);
-    console.log(`  Risk per trade:              ${fmtUsd(CONFIG.accountEquity * CONFIG.riskPct)} (${(CONFIG.riskPct * 100).toFixed(0)}% of equity)`);
-    console.log(`  Total risk (all positions):  ${fmtUsd(totalRiskUsd)} (${(totalRiskUsd / CONFIG.accountEquity * 100).toFixed(1)}% of equity)`);
-    console.log(`  Total exposure:              ${fmtUsd(totalExposure)} (${(totalExposure / CONFIG.accountEquity * 100).toFixed(1)}% of equity)`);
-  }
 
   console.log("");
   console.log("  Signal weights: Funding 35% | MA Alignment 25% | Order Block 15% | Momentum 15% | OI Trend 10%");
-  console.log("  Sizing: risk-based (equity × riskPct / SL distance) | Max $15 per position");
 
   console.log("═══════════════════════════════════════════════════════════════════════════════════════════════════════════════");
 }
@@ -176,7 +117,10 @@ export async function writeSignalsJson(opportunities: MarketOpportunity[]): Prom
   // Write signals.json with fresh opportunities only
   const signalsOutput = {
     timestamp: new Date().toISOString(),
-    config: { ...CONFIG },
+    config: {
+      minConfidenceScore: CONFIG.minConfidenceScore,
+      minDailyVolume: CONFIG.minDailyVolume,
+    },
     opportunities: freshOpportunities.map(o => ({
       symbol: o.symbol,
       marketId: o.marketId,
@@ -201,11 +145,7 @@ export async function writeSignalsJson(opportunities: MarketOpportunity[]): Prom
       obDistancePct: o.obDistancePct,
       obPrice: o.obPrice,
       direction: o.direction,
-      positionSizeUsd: o.positionSizeUsd,
-      riskAmountUsd: o.riskAmountUsd,
-      stopLossDistancePct: o.stopLossDistancePct,
-      safetyPass: o.safetyPass,
-      safetyReason: o.safetyReason,
+      dailyVolatility: o.dailyVolatility,
       detectedAt: o.detectedAt,
     })),
   };

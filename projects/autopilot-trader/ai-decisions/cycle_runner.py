@@ -99,7 +99,9 @@ class CycleRunner:
         # Analyze outcomes → update pattern engine
         self.ai_trader.outcome_analyzer.analyze_and_update(outcomes, history)
 
-        equity = signals_config.get("accountEquity", 1000)
+        equity = self.ai_trader.data_reader.read_equity()
+        if equity <= 0:
+            equity = signals_config.get("accountEquity", 1000)  # fallback
 
         # 2. Build prompt
         context = self.ai_trader.prompt_builder.build_prompt(

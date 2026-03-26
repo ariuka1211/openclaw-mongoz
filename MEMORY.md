@@ -6,9 +6,7 @@
 - **Watchdog** — `watchdog-daemon.sh start|stop|status`. Monitors gateway, OpenRouter, sub-agents.
 
 ## Rules
-See **AGENTS.md** for all hard rules and session flow. Key red lines:
-- Ask before acting. Never guess financial data. Never debug in main session.
-- Account 719758, L1: 0x1D73456fA182B669783c5adaaB965AbB1A373bEE
+See **AGENTS.md** — 7 safety rules, session flow, code flow. Key: ask before acting, spawn subagents, verify work, no polling loops, stop = stop.
 
 
 <!-- promoted from memory/2026-03-21.md on 2026-03-25 -->

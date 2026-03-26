@@ -3,11 +3,6 @@ import type { OiSnapshot } from "./types";
 // --- Config ---
 
 export const CONFIG = {
-  accountEquity: 60,                // USD — updated to actual account balance
-  riskPct: 0.05,                    // 5% of equity risked per trade
-  stopLossMultiple: 1.0,            // SL = dailyVolatility × this multiple
-  maxPositionUsd: 15,               // Fixed USD cap per position
-  maxConcurrentPositions: 3,        // max simultaneous positions (1-5)
   minDailyVolume: 100000,           // $100k minimum daily volume
   minConfidenceScore: 60,          // only show opportunities above this score
 };

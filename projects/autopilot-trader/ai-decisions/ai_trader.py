@@ -133,7 +133,9 @@ class AITrader:
                 break
 
             signals, signals_config = self.data_reader.read_signals()
-            equity = signals_config.get("accountEquity", 0)
+            equity = self.data_reader.read_equity()
+            if equity <= 0:
+                equity = signals_config.get("accountEquity", 0)  # fallback
             kill_triggers = self.safety.check_kill_switch(
                 self.consecutive_failures,
                 self.db.count_recent_rejections(self.rejection_halt_window_minutes),

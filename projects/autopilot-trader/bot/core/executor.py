@@ -35,10 +35,6 @@ async def execute_ai_open(bot, cfg, api, tracker, alerter, decision: dict) -> bo
         logging.warning(f"AI open: invalid decision fields")
         return False
 
-    # Cap size_usd at max position notional
-    if size_usd > cfg.max_position_usd:
-        logging.warning(f"⚠️ AI open: size_usd=${size_usd:.2f} capped to ${cfg.max_position_usd:.2f} (max position)")
-        size_usd = cfg.max_position_usd
 
     # Resolve market ID
     market_id = resolve_market_id(bot, tracker, symbol)

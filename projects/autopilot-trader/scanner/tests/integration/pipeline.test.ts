@@ -130,10 +130,6 @@ describe("Full scan pipeline", () => {
     globalThis.fetch = originalFetch;
     (Bun as any).write = origWrite;
 
-    // Reset CONFIG.accountEquity (modified by main() when fetching balance)
-    const { CONFIG } = await import("../../src/config");
-    CONFIG.accountEquity = 60;
-
     // --- Verify signals.json was captured ---
     expect(capturedSignals).not.toBeNull();
     expect(capturedSignals).toBeTruthy();
@@ -142,9 +138,8 @@ describe("Full scan pipeline", () => {
     expect(typeof capturedSignals.timestamp).toBe("string");
     expect(capturedSignals.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/);
 
-    // Has config with accountEquity matching mock
+    // Has config object
     expect(typeof capturedSignals.config).toBe("object");
-    expect(capturedSignals.config.accountEquity).toBe(10000);
 
     // Has opportunities array
     expect(Array.isArray(capturedSignals.opportunities)).toBe(true);
@@ -165,10 +160,7 @@ describe("Full scan pipeline", () => {
       expect(typeof opp.maAlignmentScore).toBe("number");
       expect(typeof opp.orderBlockScore).toBe("number");
       expect(typeof opp.oiTrendScore).toBe("number");
-      expect(typeof opp.positionSizeUsd).toBe("number");
-      expect(typeof opp.actualLeverage).toBe("number");
-      expect(typeof opp.riskAmountUsd).toBe("number");
-      expect(typeof opp.safetyPass).toBe("boolean");
+      expect(typeof opp.dailyVolatility).toBe("number");
       expect(typeof opp.detectedAt).toBe("string");
       // Detected timestamp should be recent ISO
       expect(opp.detectedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
@@ -176,7 +168,7 @@ describe("Full scan pipeline", () => {
 
     // Pipeline made expected API calls
     const callCount = (fetchMock as any).mock?.calls?.length ?? 0;
-    expect(callCount).toBeGreaterThanOrEqual(4); // account + orderBookDetails + funding-rates + okx candles
+    expect(callCount).toBeGreaterThanOrEqual(3); // orderBookDetails + funding-rates + okx candles
 
     console.log(`  Pipeline: ${callCount} API calls, signals captured: ${capturedSignals ? "yes" : "no"}`);
   }, 15000);

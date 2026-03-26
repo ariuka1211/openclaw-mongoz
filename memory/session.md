@@ -1,40 +1,31 @@
 # Session Handoff — 2026-03-26
 
-## What We Did
+## What Happened
+Completed **position sizing refactor** across all 3 services (scanner, bot, ai-decisions). 4 phases executed via subagents with manual verification.
 
-### 1. Leverage Decoupling — Final Cleanup (Complete ✅)
-- **Problem:** Position sizing used `max_position_usd: $15` but leverage was still scattered across codebase. Scanner had full leverage math as dead code. DSL used inconsistent leverage values between verified/unverified paths.
-- **Fix:**
-  - `signal_handler.py` + `executor.py`: all 4 `add_position()` calls now use `cfg.dsl_leverage` consistently
-  - `parser.py`: strips stale `leverage` field from LLM JSON output
-  - Scanner (5 files): removed `maxLeverageCap`, `exchangeMaxLeverage`, `actualLeverage`, `liqDistPct`, `safetyMultiple` — all dead code
-  - 8 files changed, 19 insertions, 73 deletions
-- **Verification:** 198/198 bot tests pass (6 pre-existing lighter import failures), 73/73 ai-decisions tests pass, scanner `bun build` clean, `grep -rn leverage scanner/src/` returns 0 results
-- **PR #9** merged to main, branch deleted
-- **Services:** all 3 restarted and active
+## Architecture Change
+- **Scanner** → pure signal scoring only (removed equity fetch, position sizing, safety checks)
+- **Bot** → new `PositionSizer` class, dynamic equity-based sizing (2% risk, 15% margin, 1.5 R:R)
+- **AI** → reads equity from `ai-decisions/state/equity.json` instead of signals config
+- Config: `max_position_usd: 15` replaced with `max_risk_pct`, `max_margin_pct`, `min_risk_reward`, `max_concurrent_signals`
 
-### 2. Position Sizing Review
-- Confirmed system is fully decoupled from leverage in the decision path
-- AI decides % equity → bot caps at $15 USD → order placed. No leverage math.
-- DSL uses fixed `dsl_leverage: 10.0` for ROE calibration (intentional, not exchange-derived)
-
-## Current State
-- All 3 services running (bot, scanner, ai-decisions)
-- Position sizing fully leverage-free
-- 198 bot tests + 73 ai-decisions tests passing
-- Pattern learning active
+## Key Numbers
+- On $60 equity: BTC=$25.53 notional, $1.20 risk (2%) — was $15 with 0.31% risk
+- Scales dynamically: $500 equity → $212 BTC positions
+- R:R filter rejects bad setups (e.g. WIF at 12.4% vol, 0.2:1 R:R)
 
 ## Files Changed
-- `ai-decisions/llm/parser.py` — strip leverage from LLM JSON
-- `bot/core/executor.py` — use cfg.dsl_leverage consistently
-- `bot/core/signal_handler.py` — use cfg.dsl_leverage consistently
-- `scanner/src/config.ts` — removed maxLeverageCap, safetyMultiple
-- `scanner/src/main.ts` — removed leverage fields from output
-- `scanner/src/output.ts` — removed leverage display columns
-- `scanner/src/position-sizing.ts` — removed all leverage math
-- `scanner/src/types.ts` — removed leverage types
+- **Scanner (5 modified, 2 deleted):** config.ts, types.ts, main.ts, output.ts, pipeline.test.ts; deleted position-sizing.ts + its test
+- **Bot (7 changed):** NEW position_sizer.py; modified config.py, config.yml, signal_handler.py, executor.py, conftest.py, test_signal_processor.py
+- **AI (5 modified):** data_reader.py (added read_equity), prompt_builder.py, safety.py, cycle_runner.py, ai_trader.py + 2 test files
 
-## What To Do Next
-- Monitor leverage-free trading in production
-- Consider Phase 6 from leverage-unification-plan (config/docs cleanup)
-- Pattern learning accumulating — monitor as more outcomes close
+## Services Status
+All 3 running clean after restart. Scanner producing new format signals. AI making decisions with new equity source. Bot tracking 4 positions at $62.38 equity.
+
+## Not Yet Committed
+All changes on working tree. Need: branch, commit, PR, merge.
+
+## Next Steps
+- Commit + PR for position sizing refactor
+- Monitor first trades with new sizing (expect larger positions)
+- Consider: should min_risk_reward be 1.5 or lower? Currently rejects many high-vol signals

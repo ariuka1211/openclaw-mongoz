@@ -31,7 +31,9 @@ class PromptBuilder:
         section_tokens = {}
 
         # Resolve equity early — needed by positions ROE calc below
-        equity = signals_config.get("accountEquity", 1000)
+        equity = self.ai_trader.data_reader.read_equity()
+        if equity <= 0:
+            equity = signals_config.get("accountEquity", 1000)  # fallback for tests
 
         # 1. Current positions (compressed)
         if positions:
@@ -56,7 +58,6 @@ class PromptBuilder:
         if top_signals:
             sig_lines = []
             for s in top_signals:
-                safe_emoji = "✅" if s.get("safetyPass") else "❌"
                 direction = s.get("direction", "?")
                 score = s.get("compositeScore", 0)
                 funding = s.get("fundingSpread8h", 0)
@@ -72,7 +73,7 @@ class PromptBuilder:
                 sig_lines.append(
                     f"- {s['symbol']}: score={score} dir={direction} "
                     f"funding={funding:+.3f}% ({funding_note}) vol=${vol/1000:.0f}K "
-                    f"mom={mom:+.1f}% {safe_emoji}"
+                    f"mom={mom:+.1f}%"
                 )
             sig_section = "## Market Opportunities (Top 10)\n" + "\n".join(sig_lines)
         else:

@@ -24,6 +24,7 @@ from core.shared_utils import (
     write_equity_file,
 )
 from core.verifier import verify_position_opened
+from core.position_sizer import PositionSizer
 
 
 async def process_signals(bot, cfg, api, tracker, alerter):
@@ -53,15 +54,14 @@ async def process_signals(bot, cfg, api, tracker, alerter):
     bot._last_signal_timestamp = data.get("timestamp")
     bot._signal_processed_this_tick = True
 
-    # Auto-detect balance and scale positions proportionally
+    # Get live equity for position sizing
     balance = await bot._get_balance()
-    scanner_equity = data.get("config", {}).get("accountEquity", balance)
     if balance <= 0:
         logging.warning("⚠️ Zero or negative balance, cannot open positions")
         return
-    scale = balance / scanner_equity
-    if abs(scale - 1.0) > 0.01:
-        logging.info(f"📐 Scaling positions: balance=${balance:.2f} / scanner_equity=${scanner_equity:.2f} = {scale:.4f}×")
+
+    # Initialize position sizer
+    sizer = PositionSizer(cfg)
 
     # HIGH-12: Write equity to shared state file for dashboard
     write_equity_file(bot, balance)
@@ -76,15 +76,11 @@ async def process_signals(bot, cfg, api, tracker, alerter):
         if score < bot._min_score:
             continue
 
-        # Only open if safety checks passed
-        if not opp.get("safetyPass", False):
-            logging.debug(f"⚠️ {symbol}: safety check failed — {opp.get('safetyReason', 'unknown')}")
-            continue
 
         # Cap concurrent positions from signals
         signal_positions = sum(1 for m in tracker.positions.keys() if m in bot._opened_signals)
-        if signal_positions >= 3:
-            logging.info(f"🛑 Max concurrent signal positions (3) reached, stopping")
+        if signal_positions >= sizer.max_concurrent:
+            logging.info(f"🛑 Max concurrent signal positions ({sizer.max_concurrent}) reached, stopping")
             break
 
         # Skip if already have position in this market
@@ -124,14 +120,12 @@ async def process_signals(bot, cfg, api, tracker, alerter):
             logging.warning(f"⚠️ {symbol}: no live price available, skipping")
             continue
 
-        # Scale position size to actual balance
-        size_usd = opp.get("positionSizeUsd", 0) * scale
-        if size_usd > cfg.max_position_usd:
-            size_usd = cfg.max_position_usd
-            logging.info(f"📐 Capped position to ${cfg.max_position_usd:.2f}")
+        # Calculate position size from equity and signal
+        size_usd, risk_usd, sl_pct, reason = sizer.size_position(balance, opp)
         if size_usd <= 0:
-            logging.warning(f"⚠️ {symbol}: invalid position size, skipping")
+            logging.debug(f"⏭️ {symbol}: sizing rejected — {reason}")
             continue
+        logging.info(f"📐 {symbol}: sized ${size_usd:.2f} (risk=${risk_usd:.2f}, SL={sl_pct*100:.2f}%, {reason})")
 
         # Open the position
         logging.info(f"📡 Signal: {direction.upper()} {symbol} score={opp['compositeScore']} size=${size_usd:.2f}")
@@ -203,6 +197,6 @@ async def process_signals(bot, cfg, api, tracker, alerter):
                     f"{direction.upper()} {symbol}\n"
                     f"Score: {opp['compositeScore']}\n"
                     f"Price: ${current_price:,.2f}\n"
-                    f"Size: ${size_usd:.2f} (scaled {scale:.2f}×)\n"
-                    f"SL dist: {opp.get('stopLossDistancePct', 0):.2f}%"
+                    f"Size: ${size_usd:.2f}\n"
+                    f"Risk: ${risk_usd:.2f} ({sl_pct*100:.2f}% SL)"
                 )

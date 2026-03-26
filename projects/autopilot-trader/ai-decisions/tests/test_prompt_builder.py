@@ -96,16 +96,17 @@ class TestBuildPrompt:
         }
         trader.db.get_daily_pnl.return_value = 100.0
         trader.db.get_recent_decisions.return_value = []
+        trader.data_reader.read_equity.return_value = 1000.0
         return trader
 
     def test_build_prompt_returns_nonempty_string(self, mock_trader):
         builder = PromptBuilder(mock_trader)
         signals = [{"symbol": "BTC-USDT", "compositeScore": 80, "direction": "long",
-                     "safetyPass": True, "fundingSpread8h": 0.01, "dailyVolumeUsd": 500000, "dailyPriceChange": 2.5}]
+                     "fundingSpread8h": 0.01, "dailyVolumeUsd": 500000, "dailyPriceChange": 2.5}]
         positions = []
         history = []
         outcomes = []
-        config = {"accountEquity": 1000}
+        config = {}
         result = builder.build_prompt(signals, positions, history, outcomes, config)
         assert isinstance(result, str)
         assert len(result) > 0
@@ -120,7 +121,7 @@ class TestBuildPrompt:
                        "current_price": 51000, "position_size_usd": 1000}]
         history = []
         outcomes = []
-        config = {"accountEquity": 1000}
+        config = {}
         result = builder.build_prompt(signals, positions, history, outcomes, config)
         assert "BTC-USDT" in result
         assert "LONG" in result

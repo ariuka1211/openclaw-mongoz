@@ -57,13 +57,8 @@ export interface MarketOpportunity {
   obPrice: number | null;         // OB price level
   // Direction (long/short) from majority vote of MA + OB + funding spread
   direction: "long" | "short";
-  // Risk-based position sizing
-  positionSizeUsd: number;
-  riskAmountUsd: number;          // $ risked on this trade
-  stopLossDistanceAbs: number;    // absolute $ distance to SL
-  stopLossDistancePct: number;    // % distance to SL
-  safetyPass: boolean;
-  safetyReason: string;
+  // Volatility
+  dailyVolatility: number;        // (dailyHigh - dailyLow) / lastPrice
   detectedAt: string;             // ISO timestamp when opportunity was detected
 }
 

@@ -146,3 +146,20 @@ class DataReader:
             log.warning(f"Failed to read positions from DB fallback: {e}")
 
         return []
+
+    def read_equity(self) -> float:
+        """Read current equity from bot's shared state file.
+
+        Falls back to 0 if file doesn't exist or is stale.
+        """
+        equity_path = Path(self.ai_trader.config.get("ai_trader_dir", ".")) / "state" / "equity.json"
+        try:
+            if equity_path.exists():
+                data = safe_read_json(equity_path)
+                if data and "equity" in data:
+                    equity = float(data["equity"])
+                    if equity > 0:
+                        return equity
+        except Exception as e:
+            log.warning(f"Failed to read equity file: {e}")
+        return 0

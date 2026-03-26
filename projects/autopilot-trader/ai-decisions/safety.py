@@ -154,9 +154,6 @@ class SafetyLayer:
         if matching_signal and matching_signal.get("compositeScore", 0) < self.min_scanner_score:
             reasons.append(f"scanner score {matching_signal['compositeScore']} < {self.min_scanner_score}")
 
-        if matching_signal and not matching_signal.get("safetyPass", False):
-            reasons.append(f"scanner safety check failed: {matching_signal.get('safetyReason', '?')}")
-
         # Rule 10: Rate limiting
         if not self._check_rate_limit():
             reasons.append("rate limit exceeded")

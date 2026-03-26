@@ -87,7 +87,7 @@ class ExecutionEngine:
 
             # Refresh account equity for cross margin ROE calculations
             try:
-                new_balance = await self._get_balance()
+                new_balance = await self.bot._get_balance()
                 if new_balance > 0:
                     self.tracker.account_equity = new_balance
                     # Recalculate effective leverage for all positions (cross margin reality)
@@ -333,12 +333,11 @@ class ExecutionEngine:
         if mid in self.bot._no_price_ticks:
             del self.bot._no_price_ticks[mid]
 
-        # NOTE: DSL uses config leverage (5x/10x), NOT effective leverage.
-        # Effective leverage (notional/equity) is only used for:
-        # - AI prompt display (_calc_roe in context_builder.py)
-        # - Outcome logging in bot.py
-        # DO NOT override pos.dsl_state.leverage here — DSL tiers are
-        # calibrated for fixed config leverage values.
+        # NOTE: DSL DOES use effective_leverage — both current_roe() (move * self.effective_leverage)
+        # and hard_sl_roe (hard_sl_pct * state.effective_leverage) in dsl.py depend on it for
+        # accurate cross-margin ROE. We intentionally DON'T override pos.dsl_state.leverage here
+        # because the execution engine already refreshes effective_leverage in the equity refresh
+        # block above (lines 89-97), recalculating notional/equity for all positions each tick.
 
         action = self.tracker.update_price(mid, price)
         is_long = pos.side == "long"

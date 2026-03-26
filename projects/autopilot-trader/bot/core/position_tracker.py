@@ -114,6 +114,35 @@ class PositionTracker:
                     "since": pos.dsl_state.stagnation_started,
                 })
 
+            # ── Trailing TP (works alongside DSL) ──
+            # Sync high_water_mark for compute_tp_price() which uses it
+            if pos.dsl_state.high_water_price > 0:
+                pos.high_water_mark = pos.dsl_state.high_water_price
+
+            # Check trailing TP activation
+            if not pos.trailing_active:
+                if pos.side == "long":
+                    trigger = pos.entry_price * (1 + self.cfg.trailing_tp_trigger_pct / 100)
+                    if pos.high_water_mark >= trigger:
+                        pos.trailing_active = True
+                        logging.info(f"🎯 {pos.symbol} trailing TP ACTIVE at ${pos.high_water_mark:,.2f}")
+                else:
+                    trigger = pos.entry_price * (1 - self.cfg.trailing_tp_trigger_pct / 100)
+                    if pos.high_water_mark <= trigger:
+                        pos.trailing_active = True
+                        logging.info(f"🎯 {pos.symbol} trailing TP ACTIVE at ${pos.high_water_mark:,.2f}")
+
+            # Check trailing TP trigger
+            if pos.trailing_active:
+                tp_price = self.compute_tp_price(pos)
+                if tp_price:
+                    pnl_pct = (price - pos.entry_price) / pos.entry_price * 100 if pos.side == "long" \
+                        else (pos.entry_price - price) / pos.entry_price * 100
+                    if pos.side == "long" and price <= tp_price and pnl_pct > 0:
+                        return "trailing_take_profit"
+                    elif pos.side == "short" and price >= tp_price and pnl_pct > 0:
+                        return "trailing_take_profit"
+
             return None
 
         # ── Legacy mode: flat trailing TP/SL ──

@@ -83,7 +83,8 @@ class AITrader:
         self.result_file = Path(_config_dir) / config.get("result_file", "../ai-result.json")
 
         log.info("AI Trader initialized")
-        log.info(f"  Models: {config['llm']['primary_model']} / {config['llm']['fallback_model']}")
+        provider = config['llm'].get('provider', 'legacy')
+        log.info(f"  LLM provider: {provider}")
         log.info(f"  DB: {config['db_path']}")
         log.info(f"  Decision file: {self.decision_file}")
         log.info(f"  Kill switch: {self.MAX_CONSECUTIVE_FAILURES} failures, {self.max_rejection_halt_count} rejections/{self.rejection_halt_window_minutes}min")

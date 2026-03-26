@@ -58,17 +58,34 @@ class LLMStats:
 
 class LLMClient:
     def __init__(self, config: dict):
-        self.api_base = config["api_base"]
-        self.primary_model = config["primary_model"]
-        self.fallback_model = config["fallback_model"]
+        # Provider resolution — supports both new (provider/providers) and legacy flat config
+        provider = config.get("provider")
+        providers = config.get("providers", {})
+
+        if provider and provider in providers:
+            p = providers[provider]
+            self.api_base = p["api_base"]
+            self.primary_model = p.get("primary_model") or config.get("primary_model", "")
+            self.fallback_model = p.get("fallback_model") or config.get("fallback_model", "")
+            self.max_tokens = p.get("max_tokens", config.get("max_tokens", 1024))
+            api_key_env = p.get("api_key_env", "KILOCODE_API_KEY")
+            self.api_key = os.environ.get(api_key_env, "")
+            if not self.api_key:
+                raise SystemExit(f"{api_key_env} is not set — cannot start AI trader")
+            log.info(f"LLM provider: {provider} ({self.api_base}), max_tokens={self.max_tokens}")
+        else:
+            # Legacy flat config fallback
+            self.api_base = config["api_base"]
+            self.primary_model = config["primary_model"]
+            self.fallback_model = config["fallback_model"]
+            self.api_key = os.environ.get("KILOCODE_API_KEY", "")
+            if not self.api_key:
+                raise SystemExit("KILOCODE_API_KEY is not set — cannot start AI trader")
+
         self.timeout_seconds = config.get("timeout_seconds", 30)
         self.max_retries = config.get("max_retries", 2)
-        self.api_key = os.environ.get("KILOCODE_API_KEY", "")
         self.stats = LLMStats()
         self._session: aiohttp.ClientSession | None = None
-
-        if not self.api_key:
-            raise SystemExit("KILOCODE_API_KEY is not set — cannot start AI trader")
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """Return a reusable aiohttp session, creating it on first use."""
@@ -83,10 +100,11 @@ class LLMClient:
         user_prompt: str,
         model: str | None = None,
         temperature: float = 0.3,
-        max_tokens: int = 1024,
+        max_tokens: int | None = None,
     ) -> CallResult:
         """Call LLM with retry + fallback. Returns CallResult with content + token counts."""
         model = model or self.primary_model
+        max_tokens = max_tokens or self.max_tokens
         last_error = None
 
         for attempt in range(1, self.max_retries + 1):
@@ -131,7 +149,7 @@ class LLMClient:
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
-            "HTTP-Referer": "https://signals.local",
+            "HTTP-Referer": "https://openclaw.ai",
             "X-Title": "AI Trader",
         }
         payload = {

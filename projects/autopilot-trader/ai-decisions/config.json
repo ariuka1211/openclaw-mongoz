@@ -12,9 +12,25 @@
   "rejection_halt_window_minutes": 30,
 
   "llm": {
-    "primary_model": "minimax/minimax-m2.5",
-    "fallback_model": "openrouter/deepseek/deepseek-chat",
-    "api_base": "https://api.kilo.ai/api/gateway",
+    "provider": "openrouter",
+    "primary_model": "xiaomi/mimo-v2-pro",
+    "fallback_model": "deepseek/deepseek-chat",
+    "providers": {
+      "kilo": {
+        "api_base": "https://api.kilo.ai/api/gateway",
+        "api_key_env": "KILOCODE_API_KEY",
+        "primary_model": "xiaomi/mimo-v2-pro",
+        "fallback_model": "deepseek/deepseek-chat",
+        "max_tokens": 8000
+      },
+      "openrouter": {
+        "api_base": "https://openrouter.ai/api/v1",
+        "api_key_env": "OPENROUTER_API_KEY",
+        "primary_model": "xiaomi/mimo-v2-pro",
+        "fallback_model": "deepseek/deepseek-chat",
+        "max_tokens": 15000
+      }
+    },
     "timeout_seconds": 60,
     "max_retries": 2
   },

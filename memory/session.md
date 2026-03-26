@@ -1,4 +1,4 @@
-# Session Handoff — 2026-03-25 18:26 MDT
+# Session Handoff — 2026-03-25 18:29 MDT
 
 ## What Happened (This Session)
 - **Bot Signal Processor Modularization**: Split `signal_processor.py` (1031 lines) into 6 focused modules
@@ -7,14 +7,16 @@
 - **State Manager Cleanup**: Removed dead `state_dir`/`state_file`/`equity_file` attributes
 - **Deleted stale** `bot/state/` directory (active state is `bot/core/state/`)
 - **Fixed critical bug**: 4 wrong sys.path references (`parent.parent` → `parent.parent.parent`)
+- **Git hygiene**: Removed runtime `oi-snapshot.json` from tracking (was in .gitignore but still tracked)
 - **Verified**: All 251 tests pass, both services running after merge
 - **Merged**: PR #8 to main, cleaned up branches
+- **Services restarted**: Both running latest modularized code cleanly
 
 ## Current State
-- **Branch**: `main` (both refactors merged)
+- **Branch**: `main` (both refactors merged and verified)
 - **Services**: ai-decisions (active), bot (active), scanner (check separately)
-- **Tests**: 251 bot tests + 59 ai-decisions tests = 310 total
-- **File Layout**: See project documentation
+- **Tests**: 251 bot tests + 59 ai-decisions tests = 310 total passing
+- **Last commit**: `006b311` — removed oi-snapshot.json from tracking
 
 ## Bot Core Layout (After Modularization)
 ```
@@ -40,6 +42,7 @@ bot/core/
 - **Compatibility wrappers are smart**: Kept `signal_processor.py` as thin wrapper → zero changes to `execution_engine.py`
 - **Parallel subagents work well**: Refactor subagent + verification subagent caught the path bugs
 - **Subagents need explicit path instructions**: Always specify exact `parent.parent.parent` for cross-directory imports
+- **Git hygiene**: Runtime data files should be .gitignore'd AND removed from tracking with `git rm --cached`
 
 ## Next Session
 - Update docs (cheatsheet.md, autopilot-trader.md) with new bot file layout

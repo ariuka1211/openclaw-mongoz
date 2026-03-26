@@ -2,49 +2,41 @@
 
 ## What We Did
 
-### 1. Code Audit + Fix (Complete ✅)
-Ran comprehensive code audit across all 3 services. Verified findings against actual code — 4 of 6 "critical" issues were false positives. Fixed the real ones:
+### 1. Pattern Learning Feedback Loop (Complete ✅)
+- **Problem:** `PatternEngine` had decay + display wired, but `reinforce_pattern()` was never called. `patterns.json` permanently empty since March 24.
+- **Root cause:** Outcome analyzer was never built. The old `reflection.py` was removed March 25 assuming the new system replaced it, but only half was wired.
+- **Fix:** Created `OutcomeAnalyzer` class that extracts features from trade outcomes (session, symbol, direction, hold time, confidence bracket), counts wins/losses per bucket, reinforces via `PatternEngine` when win rate ≥60% with ≥3 samples.
+- **Verification:** First cycle after restart immediately reinforced 4 patterns from 10 existing outcomes. `patterns=48` tokens in prompt (was 0).
+- **Files:** `ai-decisions/context/outcome_analyzer.py` (new), `ai_trader.py` (+2 lines), `cycle_runner.py` (+1 line), `tests/test_outcome_analyzer.py` (9 tests)
+- **Tests:** 73/73 passing
 
-**Fixes applied:**
-- **C1:** Removed dead code (duplicate try/except) in `set_leverage()` — `lighter_api.py`
-- **C2:** Added `_opened_signals.discard(mid)` at all 8 position removal points — `execution_engine.py`, `executor.py`, `signal_handler.py`. Prevents permanent signal blocking after failed verifications.
-- **C8:** Fixed stagnation timer misalignment — activation threshold changed from 3% (min tier trigger) to 8% (stagnation_roe_pct). Timer now only activates when position reaches decent profit. All 220 tests pass.
-- **C9:** Left `BotState` dataclass in place (tests depend on it). Dead code but harmless.
+### 2. Docs Reorganization (Complete ✅)
+- `docs/reference/`: lighter-api.md, lighter-quota-research.md
+- `docs/ideas/`: pocket-ideas.md
+- `docs/plans/`: pattern-learning-completion.md
+- `docs/archive/`: unified-dashboard-plan.md (dashboard is live)
+- Updated tree in autopilot-trader.md + outcome_analyzer in file maps
 
-**False positives caught:**
-- C3 (mixed key types) — audit confused different fields
-- C4 (scanner overflow) — cap happens before downstream use
-- C5 (double opening) — signals/AI are if/else, not both
-- C6 (tick timeout) — typical tick is ~6s, plenty of headroom
-
-**Stray artifact fix:** C2 subagent left `te()` calls at end of `execution_engine.py` — caught and cleaned during verification.
-
-### 2. Alert Improvements (Complete ✅)
-- **PnL in USD** — all alerts now show `$PnL (+ROE% ROE @ leverage x)` instead of raw ROE%
-- **Stagnation timer display** — shows start time and exit time in Mountain Time
-- **Periodic status** — every 15 minutes while stagnation timer runs, sends status with elapsed/remaining time
-- **Bug fix:** `pos.size` is in base units (BTC), not USD. PnL calculation fixed: `pnl_usd = size * (price - entry)` for longs
-
-### 3. Stagnation Timer Persistence
-- `high_water_time`, `stagnation_active`, `stagnation_started` are all saved to disk
-- Timer survives restarts — elapsed time calculated correctly from persisted UTC timestamps
-- `_fmt_mt()` helper converts UTC → Mountain Time for display
+### 3. Pushed to Main
+- Branch `feat/pattern-learning-feedback` merged to main, deleted
+- Commit `a9cadd7` (merge), `42c97d5` + `65db3bc` (squashed via merge)
 
 ## Current State
-- Bot running (restarted at 13:29), 220 tests passing
-- Scanner + ai-decisions unchanged this session
-- 6 pre-existing test failures in `TestSetLeverage` (lighter.signer_client import issue in test env, not related to changes)
+- All 3 services running (bot, scanner, ai-decisions)
+- Pattern learning active — 4 patterns learned on first cycle
+- 73 ai-decisions tests passing
+- Docs reorganized into subfolders
 
 ## Files Changed
-- `bot/api/lighter_api.py` — dead code removal in set_leverage()
-- `bot/core/execution_engine.py` — _opened_signals cleanup, PnL helper, alert improvements, stagnation status, datetime import
-- `bot/core/executor.py` — _opened_signals cleanup (3 points)
-- `bot/core/signal_handler.py` — _opened_signals cleanup (1 point)
-- `bot/dsl.py` — stagnation activation threshold (8%)
-- `bot/tests/test_dsl.py` — updated stagnation tests
-- `bot/bot.py` — added _stagnation_last_status dict
+- `ai-decisions/context/outcome_analyzer.py` — NEW
+- `ai-decisions/tests/test_outcome_analyzer.py` — NEW (9 tests)
+- `ai-decisions/ai_trader.py` — import + init
+- `ai-decisions/cycle_runner.py` — analyze_and_update() call
+- `docs/autopilot-trader.md` — tree + file map updated
+- `docs/cheatsheet.md` — file map updated
+- `docs/` reorganized into reference/, ideas/, plans/, archive/
 
 ## What To Do Next
-- Commit all changes to branch + PR (not done yet)
-- Monitor for any issues from the changes
-- The 6 pre-existing TestSetLeverage failures could be fixed separately (lighter SDK test env issue)
+- Monitor pattern accumulation as more outcomes close
+- Consider Phase 2: LLM pattern suggestions (optional `learned_rule` field in decision JSON)
+- Leverage unification plan still pending

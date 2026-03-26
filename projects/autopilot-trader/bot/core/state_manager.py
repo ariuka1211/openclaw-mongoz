@@ -87,6 +87,8 @@ class StateManager:
                     "unverified_at": pos.unverified_at,
                     "unverified_ticks": pos.unverified_ticks,
                     "active_sl_order_id": pos.active_sl_order_id,  # MED-18
+                    "stagnation_alerted": pos.stagnation_alerted,
+                    "tier_lock_alerted": pos.tier_lock_alerted,
                     "dsl": self._serialize_dsl_state(pos.dsl_state) if pos.dsl_state else None,
                 }
                 for mid, pos in self.tracker.positions.items()
@@ -410,6 +412,10 @@ class StateManager:
                 # MED-18: Restore active SL order ID for cancellation
                 if saved_pos.get("active_sl_order_id"):
                     pos.active_sl_order_id = saved_pos["active_sl_order_id"]
+                if saved_pos.get("stagnation_alerted"):
+                    pos.stagnation_alerted = True
+                if saved_pos.get("tier_lock_alerted"):
+                    pos.tier_lock_alerted = True
             elif mid not in live_mids:
                 logging.info(f"🗑️ Saved position {saved_pos.get('symbol', mid)} no longer on exchange — dropped")
 

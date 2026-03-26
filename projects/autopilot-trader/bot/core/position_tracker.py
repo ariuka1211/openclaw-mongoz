@@ -95,8 +95,8 @@ class PositionTracker:
                 )
 
             # Alert on tier lock
-            if pos.dsl_state.locked_floor_roe is not None and not getattr(pos, '_tier_lock_alerted', False):
-                pos._tier_lock_alerted = True
+            if pos.dsl_state.locked_floor_roe is not None and not pos.tier_lock_alerted:
+                pos.tier_lock_alerted = True
                 lev = pos.dsl_state.leverage if pos.dsl_state else self.cfg.dsl_leverage
                 floor_price = pos.entry_price * (1 + pos.dsl_state.locked_floor_roe / 100 / lev) if pos.side == "long" \
                     else pos.entry_price * (1 - pos.dsl_state.locked_floor_roe / 100 / lev)
@@ -109,8 +109,8 @@ class PositionTracker:
                 })
 
             # Alert on stagnation timer start
-            if pos.dsl_state.stagnation_started and not getattr(pos, '_stagnation_alerted', False):
-                pos._stagnation_alerted = True
+            if pos.dsl_state.stagnation_started and not pos.stagnation_alerted:
+                pos.stagnation_alerted = True
                 return ("dsl_stagnation_timer", {
                     "roe": roe,
                     "since": pos.dsl_state.stagnation_started,

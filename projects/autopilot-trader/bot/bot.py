@@ -73,6 +73,13 @@ from alerts.telegram import TelegramAlerter
 from core.models import TrackedPosition
 from core.position_tracker import PositionTracker
 from core.signal_processor import SignalProcessor
+
+# ── Signal Processing (extracted modules) ───────────────────────────
+
+from core.signal_handler import process_signals as _process_signals
+from core.decision_handler import process_ai_decision as _process_ai_decision
+from core.result_writer import refresh_position_context as _refresh_position_context
+from core.shared_utils import log_outcome as _log_outcome, write_equity_file as _write_equity_file
 from core.state_manager import StateManager
 from core.order_manager import OrderManager
 from core.execution_engine import ExecutionEngine

@@ -39,13 +39,12 @@ sys.modules["ipc_utils"].safe_read_json = _real_safe_read_json
 
 from core.signal_processor import SignalProcessor
 
-# Inject missing module-level names that signal_processor.py references
-# but never imports (they're expected to be added later or come from bot.py)
-import core.signal_processor as _sp_mod
-_sp_mod.safe_read_json = _real_safe_read_json
-_sp_mod._db = None  # Will be patched per-test when needed
-_sp_mod.hashlib = real_hashlib
-_sp_mod.asyncio = _asyncio
+# Inject missing module-level names for the modules that now contain the logic
+import core.shared_utils as _su_mod
+_su_mod._db = None  # Will be patched per-test when needed
+
+import core.signal_handler as _sh_mod
+_sh_mod.safe_read_json = _real_safe_read_json
 
 
 # ── Helpers ───────────────────────────────────────────────────────────
@@ -53,7 +52,7 @@ _sp_mod.asyncio = _asyncio
 @pytest.fixture
 def no_sleep():
     """Patch asyncio.sleep to be instant for fast async tests."""
-    with patch("core.signal_processor.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+    with patch("core.signal_handler.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
         mock_sleep.return_value = None
         yield mock_sleep
 
@@ -276,7 +275,7 @@ class TestLogOutcome:
         mock_db = MagicMock()
         sp.tracker.account_equity = 1000.0
 
-        with patch.object(_sp_mod, "_db", mock_db):
+        with patch.object(_su_mod, "_db", mock_db):
             sp._log_outcome(pos, 110.0, "dsl_close")
 
         assert mock_db.log_outcome.called
@@ -303,7 +302,7 @@ class TestLogOutcome:
         mock_db = MagicMock()
         sp.tracker.account_equity = 500.0
 
-        with patch.object(_sp_mod, "_db", mock_db):
+        with patch.object(_su_mod, "_db", mock_db):
             sp._log_outcome(pos, 110.0, "ai_close")
 
         assert mock_db.log_outcome.called
@@ -329,7 +328,7 @@ class TestLogOutcome:
         mock_db = MagicMock()
         sp.tracker.account_equity = 1000.0
 
-        with patch.object(_sp_mod, "_db", mock_db):
+        with patch.object(_su_mod, "_db", mock_db):
             sp._log_outcome(pos, 105.0, "ai_close", estimated=True)
 
         call_args = mock_db.log_outcome.call_args[0][0]

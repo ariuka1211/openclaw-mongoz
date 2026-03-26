@@ -169,10 +169,7 @@ async def process_signals(bot, cfg, api, tracker, alerter):
                 bot._opened_signals.add(mid)
                 # Use actual filled size from exchange (handles partial fills)
                 actual_size = verified_pos["size"]
-                tracker.add_position(mid, symbol, direction, current_price, actual_size, leverage=verified_pos.get("leverage"))
-
-                # NOTE: DSL uses config leverage from add_position, NOT exchange-reported leverage.
-                # Exchange leverage can vary for cross margin and would break DSL tier calibration.
+                tracker.add_position(mid, symbol, direction, current_price, actual_size, leverage=cfg.dsl_leverage)
 
                 # Persist state immediately after opening to prevent crash data loss
                 bot._save_state()

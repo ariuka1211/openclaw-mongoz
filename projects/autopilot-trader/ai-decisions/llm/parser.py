@@ -41,6 +41,7 @@ def parse_decision_json(raw: str) -> dict:
 
     try:
         decision = json.loads(json_text)
+        decision.pop("leverage", None)  # Strip stale field — position sizing is USD-based now
         return decision
     except json.JSONDecodeError as e:
         log.error(f"Failed to parse LLM JSON: {e}\nRaw: {raw[:500]}")

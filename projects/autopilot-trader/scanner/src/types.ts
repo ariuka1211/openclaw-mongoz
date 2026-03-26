@@ -58,13 +58,10 @@ export interface MarketOpportunity {
   // Direction (long/short) from majority vote of MA + OB + funding spread
   direction: "long" | "short";
   // Risk-based position sizing
-  maxLeverage: number;
   positionSizeUsd: number;
-  actualLeverage: number;
   riskAmountUsd: number;          // $ risked on this trade
   stopLossDistanceAbs: number;    // absolute $ distance to SL
   stopLossDistancePct: number;    // % distance to SL
-  liquidationDistancePct: number; // % from entry to liquidation
   safetyPass: boolean;
   safetyReason: string;
   detectedAt: string;             // ISO timestamp when opportunity was detected

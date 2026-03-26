@@ -167,7 +167,7 @@ class LighterCopilot:
         if self.cfg.dsl_enabled:
             logging.info(f"   Mode: DSL (Dynamic Stop Loss)")
             logging.info(f"   Leverage: {self.cfg.default_leverage}x")
-            logging.info(f"   Hard SL: {self.cfg.sl_pct}% from entry")
+            logging.info(f"   Hard SL: {self.cfg.hard_sl_pct}% from entry")
             logging.info(f"   Stagnation: {self.cfg.stagnation_roe_pct}% ROE, {self.cfg.stagnation_minutes}min")
             for t in self.tracker.dsl_cfg.tiers:
                 logging.info(f"   Tier: +{t.trigger_pct}% → lock {t.lock_hw_pct}% HW ({t.consecutive_breaches} breaches)")
@@ -175,7 +175,7 @@ class LighterCopilot:
             logging.info(f"   Mode: Legacy trailing")
             logging.info(f"   TP trigger: +{self.cfg.trailing_tp_trigger_pct}%")
             logging.info(f"   TP delta: {self.cfg.trailing_tp_delta_pct}%")
-            logging.info(f"   SL: trailing {self.cfg.sl_pct}%")
+            logging.info(f"   SL: trailing {self.cfg.hard_sl_pct}%")
 
         logging.info("🔗 Initializing Lighter API...")
         self.api = LighterAPI(self.cfg)
@@ -225,7 +225,7 @@ class LighterCopilot:
             if balance > 0:
                 self.tracker.account_equity = balance
                 logging.info(f"   Balance: ${balance:,.2f} USDC")
-                self.state_manager._write_equity_file(balance)
+                _write_equity_file(self, balance)
             else:
                 logging.warning(f"   Balance fetch returned 0 — using default leverage for ROE")
         except Exception as e:
@@ -235,7 +235,7 @@ class LighterCopilot:
             "🟢 *Lighter Copilot* started\n"
             f"Account: {self.cfg.account_index}\n"
             f"TP: trail {self.cfg.trailing_tp_delta_pct}% after +{self.cfg.trailing_tp_trigger_pct}%\n"
-            f"SL: trailing {self.cfg.sl_pct}%"
+            f"SL: trailing {self.cfg.hard_sl_pct}%"
         )
 
         # Restore ephemeral state from disk

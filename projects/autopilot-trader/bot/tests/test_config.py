@@ -26,7 +26,7 @@ class TestFromYaml:
             "account_index: 5\n"
             "api_key_index: 2\n"
             "api_key_private: my_secret\n"
-            "sl_pct: 2.0\n"
+            "hard_sl_pct: 2.0\n"
             "trailing_tp_trigger_pct: 4.0\n"
             "trailing_tp_delta_pct: 1.5\n"
             "default_leverage: 20.0\n"
@@ -39,7 +39,7 @@ class TestFromYaml:
         assert cfg.account_index == 5
         assert cfg.api_key_index == 2
         assert cfg.api_key_private == "my_secret"
-        assert cfg.sl_pct == 2.0
+        assert cfg.hard_sl_pct == 2.0
         assert cfg.trailing_tp_trigger_pct == 4.0
         assert cfg.trailing_tp_delta_pct == 1.5
         assert cfg.default_leverage == 20.0
@@ -70,15 +70,15 @@ class TestFromYaml:
         cfg_file = tmp_path / "coerce.yaml"
         cfg_file.write_text(
             'account_index: "${TEST_ACCT}"\n'
-            'sl_pct: "${TEST_SL}"\n'
+            'hard_sl_pct: "${TEST_SL}"\n'
             'price_poll_interval: "${TEST_POLL}"\n'
         )
         cfg = BotConfig.from_yaml(str(cfg_file))
 
         assert cfg.account_index == 7
         assert isinstance(cfg.account_index, int)
-        assert cfg.sl_pct == 1.75
-        assert isinstance(cfg.sl_pct, float)
+        assert cfg.hard_sl_pct == 1.75
+        assert isinstance(cfg.hard_sl_pct, float)
         assert cfg.price_poll_interval == 15
         assert isinstance(cfg.price_poll_interval, int)
 
@@ -168,16 +168,16 @@ class TestValidate:
         assert any("account_index" in e for e in errors)
 
     def test_validate_sl_pct_zero(self, config):
-        """sl_pct = 0 → error (must be positive)."""
-        config.sl_pct = 0
+        """hard_sl_pct = 0 → error (must be positive)."""
+        config.hard_sl_pct = 0
         errors = config.validate()
-        assert any("sl_pct" in e for e in errors)
+        assert any("hard_sl_pct" in e for e in errors)
 
     def test_validate_sl_pct_negative(self, config):
-        """sl_pct = -1 → error."""
-        config.sl_pct = -1
+        """hard_sl_pct = -1 → error."""
+        config.hard_sl_pct = -1
         errors = config.validate()
-        assert any("sl_pct" in e for e in errors)
+        assert any("hard_sl_pct" in e for e in errors)
 
     def test_validate_trailing_tp_trigger_pct_negative(self, config):
         """trailing_tp_trigger_pct = -1 → error."""
@@ -244,8 +244,8 @@ class TestValidate:
 class TestDefaults:
     """Default values match expected."""
 
-    def test_defaults_sl_pct(self):
-        assert BotConfig().sl_pct == 1.25
+    def test_defaults_hard_sl_pct(self):
+        assert BotConfig().hard_sl_pct == 1.25
 
     def test_default_leverage(self):
         assert BotConfig().default_leverage == 10.0

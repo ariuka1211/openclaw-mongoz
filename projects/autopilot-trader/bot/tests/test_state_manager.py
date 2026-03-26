@@ -452,17 +452,4 @@ def test_reconcile_both_have_same_no_change(config, mock_api, mock_alerter, mock
     assert 1 in sm.bot.bot_managed_market_ids
 
 
-# ── _write_equity_file() ────────────────────────────────────────────
 
-def test_write_equity_file_writes_correct_structure(config, mock_api, mock_alerter, mock_bot, tmp_state_dir):
-    sm = _make_sm(config, mock_api, mock_alerter, mock_bot, tmp_state_dir)
-    sm._ai_trader_dir = str(tmp_state_dir)
-
-    sm._write_equity_file(12345.67)
-
-    equity_file = tmp_state_dir / "state" / "equity.json"
-    assert equity_file.exists()
-    data = json.loads(equity_file.read_text())
-    assert data["equity"] == 12345.67
-    assert "timestamp" in data
-    assert "T" in data["timestamp"]

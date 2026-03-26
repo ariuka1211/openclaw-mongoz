@@ -21,7 +21,7 @@ class PositionTracker:
         self.dsl_cfg = DSLConfig(
             stagnation_roe_pct=cfg.stagnation_roe_pct,
             stagnation_minutes=cfg.stagnation_minutes,
-            hard_sl_pct=cfg.sl_pct,
+            hard_sl_pct=cfg.hard_sl_pct,
         )
         # Parse custom tiers from config if present
         if cfg.dsl_tiers:
@@ -60,7 +60,7 @@ class PositionTracker:
 
     def _get_sl_pct(self, pos: TrackedPosition) -> float:
         """Get effective stop loss % — per-position (AI) or config default."""
-        return pos.sl_pct if pos.sl_pct is not None else self.cfg.sl_pct
+        return pos.sl_pct if pos.sl_pct is not None else self.cfg.hard_sl_pct
 
     def update_price(self, market_id: int, price: float) -> str | None:
         pos = self.positions.get(market_id)
@@ -255,7 +255,7 @@ class PositionTracker:
             sl_pct=sl_pct,
         )
         self.positions[market_id] = pos
-        sl_source = f"AI={sl_pct}%" if sl_pct is not None else f"config={self.cfg.sl_pct}%"
+        sl_source = f"AI={sl_pct}%" if sl_pct is not None else f"config={self.cfg.hard_sl_pct}%"
         mode = f"DSL (lev={lev}x)" if self.cfg.dsl_enabled else "legacy trailing"
         logging.info(f"📌 Tracking: {side.upper()} {symbol} @ ${entry:,.2f}, size={size}, mode={mode}, SL={sl_source}")
 

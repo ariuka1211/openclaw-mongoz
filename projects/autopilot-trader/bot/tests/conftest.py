@@ -36,7 +36,7 @@ def config():
         ai_result_file="/tmp/test_ai_result.json",
         ai_trader_dir="/tmp/test_ai_trader",
         ai_mode=True,
-        sl_pct=1.25,
+        hard_sl_pct=1.25,
         default_leverage=10.0,
         trailing_tp_trigger_pct=3.0,
         trailing_tp_delta_pct=1.0,

@@ -16,7 +16,7 @@ trailing_tp_trigger_pct: 0.0    # 0 = trailing SL starts immediately from peak
 trailing_tp_delta_pct: 1.0      # Trail by 1% from peak
 
 # Stop loss
-sl_pct: 1.25                    # Hard stop loss at -1.25% from entry (DSL: absolute floor)
+hard_sl_pct: 1.25               # Hard stop loss at -1.25% from entry (DSL: absolute floor)
 
 # DSL (Dynamic Stop Loss) — tiered trailing stop loss
 dsl_enabled: true               # false = use legacy flat trailing

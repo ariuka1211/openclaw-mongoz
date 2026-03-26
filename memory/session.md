@@ -1,26 +1,40 @@
-# Session Handoff — 2026-03-25 20:32 MDT
+# Session Handoff — 2026-03-25 21:32 MDT
 
 ## What Happened
-- **Docs cleanup session** — audited all autopilot-trader docs, removed stale info, updated to match current modularized code
+- **Bot audit session** — analyzed bot folder for dead code, logic bugs, unfound issues
+- **Config rename** — `BotConfig.sl_pct` → `hard_sl_pct` for consistency with `DSLConfig`
+- **Dead code fix** — removed broken `StateManager._write_equity_file` (used uninitialized `self._ai_trader_dir`)
+- **Branch cleanup** — deleted 72 stale branches (>10h old), kept 4 newer ones
+- **Test fixes** — updated test_config.py, test_position_tracker.py, test_state_manager.py
 
 ## Changes Made
-1. **Archived 6 completed plan files** → `archives/docs/` (bot/ai/scanner modularization + test plans)
-2. **Deleted empty** `docs/plans/` directory
-3. **Cleaned duplicate text** from `unified-dashboard-plan.md`
-4. **Updated `autopilot-trader.md`** — 13+ edits: bot/scanner module tables, config values (sl_pct 1.25, trailing_tp 1.0, stagnation 5.0), service names (ai-decisions), removed stale known issues, renumbered issues, fixed env file ref, updated last-updated date
-5. **Updated `cheatsheet.md`** — fixed log path, service name, scanner command, replaced file map with all 20 bot + 13 scanner + AI modules, removed stale archive entries
-6. **Trimmed `autopilot-trader.md`** from 750 → 396 lines — cut redundant diagrams, verbose prose, full config dumps, services section, architectural rationale. Kept module tables, DSL tiers, known issues, lessons learned
-7. **Created `docs/lighter-api.md`** — moved Lighter API reference to standalone file
+1. **Branch cleanup** — deleted 37 local + 35 remote branches older than 10h
+2. **Renamed `sl_pct` → `hard_sl_pct`** across config.py, config.yml, config.example.yml, position_tracker.py, bot.py (BotConfig only — TrackedPosition.sl_pct untouched)
+3. **Removed broken `_write_equity_file`** from state_manager.py — was dead code that always raised AttributeError
+4. **Fixed bot.py:228** — changed `self.state_manager._write_equity_file(balance)` → `_write_equity_file(self, balance)` using shared_utils version
+5. **Fixed stray line** in config.py — `ls(**filtered)` typo from subagent
+6. **Updated tests** — test_config.py (5 refs), test_position_tracker.py (1 ref), removed dead write_equity test from test_state_manager.py
+7. **Cleaned unused imports** — not done yet (low priority cleanup item)
 
-## Not Committed Yet
-All changes are uncommitted. Needs branch + PR + push.
+## Audit Results (Verified)
+- **0 critical bugs** in bot folder
+- Bare `except Exception: pass` blocks — all intentional cleanup/fallback patterns ✅
+- `cfg.hard_sl_pct` vs `DSLConfig.hard_sl_pct` — was confusing, now consistent
+- All bot attributes properly initialized ✅
+- DSL tiers validate correctly ✅
+
+## Tests
+- test_config.py: 40 passed ✅
+- test_position_tracker.py: 26 passed ✅
+- test_models.py: passed ✅
+- test_state_manager.py: can't run (missing `lighter` SDK — pre-existing)
 
 ## Services Status
 - All 3 services running: bot, scanner, ai-decisions
-- No code changes this session — docs only
+- Code changes need branch + PR + push
 
-## Open Items (carry forward)
+## Open Items
 - Bot modularization (fix/cross-margin-trailing-tp branch) — still not merged
-- Bot test suite improvements (236 tests, 73% coverage)
 - Backtesting implementation (triple barrier) — not started
-- Dashboard planned features (unified-dashboard-plan.md) — not built
+- Dashboard planned features — not built
+- Unused imports cleanup (low priority)

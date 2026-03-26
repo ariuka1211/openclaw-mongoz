@@ -55,20 +55,6 @@ class StateManager:
 
 
 
-    def _write_equity_file(self, equity: float):
-        """HIGH-12: Write equity to shared state file for dashboard to read."""
-        try:
-            # Write to ai-trader's state directory (sibling of executor)
-            equity_path = Path(self._ai_trader_dir) / "state" / "equity.json"
-            equity_path.parent.mkdir(parents=True, exist_ok=True)
-            tmp = str(equity_path) + ".tmp"
-            with open(tmp, "w") as f:
-                json.dump({"equity": equity, "timestamp": datetime.now(timezone.utc).isoformat()}, f)
-            os.replace(tmp, str(equity_path))
-        except Exception as e:
-            logging.debug(f"Failed to write equity file: {e}")
-
-
 
     def _save_state(self):
         """Persist critical ephemeral state to disk for crash/restart recovery."""

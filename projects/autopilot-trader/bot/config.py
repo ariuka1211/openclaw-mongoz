@@ -21,8 +21,8 @@ class BotConfig:
     trailing_tp_trigger_pct: float = 3.0   # Start trailing after +3%
     trailing_tp_delta_pct: float = 1.0     # Trail by 1% from peak
 
-    # Stop loss
-    sl_pct: float = 1.25                   # Stop loss at -1.25% from entry
+    # Hard stop loss
+    hard_sl_pct: float = 1.25              # Hard stop loss at -1.25% from entry
 
     # Telegram
     telegram_token: str = ""
@@ -69,8 +69,8 @@ class BotConfig:
                 errors.append(f"Required field '{field_name}' must be a non-negative integer")
 
         # Positive numbers
-        if not isinstance(self.sl_pct, (int, float)) or self.sl_pct <= 0:
-            errors.append(f"'sl_pct' must be a positive number, got {self.sl_pct}")
+        if not isinstance(self.hard_sl_pct, (int, float)) or self.hard_sl_pct <= 0:
+            errors.append(f"'hard_sl_pct' must be a positive number, got {self.hard_sl_pct}")
 
         # Non-negative (0 = immediate trigger)
         for field_name in ("trailing_tp_trigger_pct", "trailing_tp_delta_pct"):
@@ -132,7 +132,7 @@ class BotConfig:
                     filtered[key] = filtered[key].lower() in ("true", "1", "yes")
                 else:
                     filtered[key] = int(filtered[key])
-        for key in ("trailing_tp_trigger_pct", "trailing_tp_delta_pct", "sl_pct",
+        for key in ("trailing_tp_trigger_pct", "trailing_tp_delta_pct", "hard_sl_pct",
                      "default_leverage", "stagnation_roe_pct", "price_call_delay"):
             if key in filtered and isinstance(filtered[key], str):
                 filtered[key] = float(filtered[key])

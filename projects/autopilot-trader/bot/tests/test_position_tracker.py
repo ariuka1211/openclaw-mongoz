@@ -102,7 +102,7 @@ class TestComputeSlPrice:
     def test_compute_sl_price_per_position_sl_pct_overrides_config(self, config_no_dsl):
         """Per-position sl_pct overrides config default."""
         tracker = PositionTracker(config_no_dsl)
-        # config sl_pct=1.25, but position has sl_pct=2.0
+        # config hard_sl_pct=1.25, but position has sl_pct=2.0
         # entry=50000 → SL = 50000 * (1 - 2.0/100) = 49000
         pos = TrackedPosition(
             market_id=1, symbol="BTC", side="long",
@@ -118,14 +118,14 @@ class TestGetSlPct:
     """Tests for PositionTracker._get_sl_pct()."""
 
     def test_get_sl_pct_none_uses_config(self, config_no_dsl):
-        """Position sl_pct=None → uses config.sl_pct."""
+        """Position sl_pct=None → uses config.hard_sl_pct."""
         tracker = PositionTracker(config_no_dsl)
         pos = TrackedPosition(
             market_id=1, symbol="BTC", side="long",
             entry_price=50000.0, size=0.1, high_water_mark=50000.0,
             sl_pct=None,
         )
-        assert tracker._get_sl_pct(pos) == config_no_dsl.sl_pct
+        assert tracker._get_sl_pct(pos) == config_no_dsl.hard_sl_pct
 
     def test_get_sl_pct_per_position_value(self, config_no_dsl):
         """Position sl_pct=2.0 → uses 2.0."""

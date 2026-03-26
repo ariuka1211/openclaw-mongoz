@@ -134,47 +134,49 @@ describe("Full scan pipeline", () => {
     const { CONFIG } = await import("../../src/config");
     CONFIG.accountEquity = 60;
 
-    // --- Verify signals.json structure ---
-    if (capturedSignals) {
-      // Has timestamp
-      expect(capturedSignals.timestamp).toBeDefined();
-      expect(typeof capturedSignals.timestamp).toBe("string");
+    // --- Verify signals.json was captured ---
+    expect(capturedSignals).not.toBeNull();
+    expect(capturedSignals).toBeTruthy();
 
-      // Has config
-      expect(capturedSignals.config).toBeDefined();
-      expect(capturedSignals.config.accountEquity).toBeDefined();
+    // Has timestamp as ISO string
+    expect(typeof capturedSignals.timestamp).toBe("string");
+    expect(capturedSignals.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/);
 
-      // Has opportunities array
-      expect(capturedSignals.opportunities).toBeDefined();
-      expect(Array.isArray(capturedSignals.opportunities)).toBe(true);
+    // Has config with accountEquity matching mock
+    expect(typeof capturedSignals.config).toBe("object");
+    expect(capturedSignals.config.accountEquity).toBe(10000);
 
-      // Verify opportunity structure
-      for (const opp of capturedSignals.opportunities) {
-        expect(typeof opp.symbol).toBe("string");
-        expect(typeof opp.marketId).toBe("number");
-        expect(typeof opp.compositeScore).toBe("number");
-        expect(opp.compositeScore).toBeGreaterThanOrEqual(0);
-        expect(opp.compositeScore).toBeLessThanOrEqual(100);
-        expect(["long", "short"]).toContain(opp.direction);
-        expect(typeof opp.fundingSpreadScore).toBe("number");
-        expect(typeof opp.momentumScore).toBe("number");
-        expect(typeof opp.maAlignmentScore).toBe("number");
-        expect(typeof opp.orderBlockScore).toBe("number");
-        expect(typeof opp.oiTrendScore).toBe("number");
-        expect(typeof opp.positionSizeUsd).toBe("number");
-        expect(typeof opp.actualLeverage).toBe("number");
-        expect(typeof opp.riskAmountUsd).toBe("number");
-        expect(typeof opp.safetyPass).toBe("boolean");
-        expect(typeof opp.detectedAt).toBe("string");
-      }
+    // Has opportunities array
+    expect(Array.isArray(capturedSignals.opportunities)).toBe(true);
+    expect(capturedSignals.opportunities.length).toBeGreaterThan(0);
 
-      // At least verify we can produce opportunities (even if none qualify)
-      // The pipeline ran without crashing
+    // Verify opportunity structure and value ranges
+    for (const opp of capturedSignals.opportunities) {
+      expect(typeof opp.symbol).toBe("string");
+      expect(opp.symbol.length).toBeGreaterThan(0);
+      expect(typeof opp.marketId).toBe("number");
+      expect(opp.marketId).toBeGreaterThan(0);
+      expect(typeof opp.compositeScore).toBe("number");
+      expect(opp.compositeScore).toBeGreaterThanOrEqual(0);
+      expect(opp.compositeScore).toBeLessThanOrEqual(100);
+      expect(["long", "short"]).toContain(opp.direction);
+      expect(typeof opp.fundingSpreadScore).toBe("number");
+      expect(typeof opp.momentumScore).toBe("number");
+      expect(typeof opp.maAlignmentScore).toBe("number");
+      expect(typeof opp.orderBlockScore).toBe("number");
+      expect(typeof opp.oiTrendScore).toBe("number");
+      expect(typeof opp.positionSizeUsd).toBe("number");
+      expect(typeof opp.actualLeverage).toBe("number");
+      expect(typeof opp.riskAmountUsd).toBe("number");
+      expect(typeof opp.safetyPass).toBe("boolean");
+      expect(typeof opp.detectedAt).toBe("string");
+      // Detected timestamp should be recent ISO
+      expect(opp.detectedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     }
 
-    // The key assertion: the pipeline ran (fetch was called multiple times)
+    // Pipeline made expected API calls
     const callCount = (fetchMock as any).mock?.calls?.length ?? 0;
-    expect(callCount).toBeGreaterThan(0);
+    expect(callCount).toBeGreaterThanOrEqual(4); // account + orderBookDetails + funding-rates + okx candles
 
     console.log(`  Pipeline: ${callCount} API calls, signals captured: ${capturedSignals ? "yes" : "no"}`);
   }, 15000);

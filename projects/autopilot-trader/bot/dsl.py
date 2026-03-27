@@ -39,7 +39,7 @@ DEFAULT_TIERS = [
 class DSLConfig:
     tiers: list[DSLTier] = field(default_factory=lambda: list(DEFAULT_TIERS))
     stagnation_roe_pct: float = 8.0   # ROE% threshold for stagnation check
-    stagnation_minutes: int = 60      # exit if no new high water mark for this long
+    stagnation_minutes: int = 90      # exit if no new high water mark for this long
     hard_sl_pct: float = 1.25         # hard stop loss from entry (ignores DSL)
 
 
@@ -86,7 +86,7 @@ def evaluate_dsl(state: DSLState, price: float, cfg: DSLConfig) -> str | None:
 
     Actions:
         "tier_lock"    — DSL tier floor breached, close position
-        "stagnation"   — position stalled, take profit
+        "stagnation"   — position stalled, exit
         "hard_sl"      — hard stop loss from entry breached
         None           — hold
 
@@ -192,7 +192,7 @@ def evaluate_trailing_sl(
 
     The trailing SL ratchets UP (for longs) from the high water mark.
     It only activates after price moves trigger_pct above entry.
-    The hard floor is an absolute stop at entry * (1 - hard_floor_pct/100).
+    The hard floor is a stop loss at entry * (1 - hard_floor_pct/100).
     """
     activated = trailing_sl_activated
 

@@ -1,5 +1,5 @@
 """
-Tests for TrackedPosition and BotState data models.
+Tests for TrackedPosition data model.
 """
 
 import sys
@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pytest
 
-from core.models import TrackedPosition, BotState
+from core.models import TrackedPosition
 
 
 class TestTrackedPosition:
@@ -83,57 +83,3 @@ class TestTrackedPosition:
         assert isinstance(pos.opened_at, datetime)
         assert pos.opened_at.tzinfo == timezone.utc
         assert before <= pos.opened_at <= after
-
-
-class TestBotState:
-    """BotState dataclass tests."""
-
-    def test_creation_default_factories(self):
-        """BotState creation → all default factories produce empty containers."""
-        state = BotState()
-        assert state.opened_signals == set()
-        assert state.recently_closed == {}
-        assert state.close_attempts == {}
-        assert state.close_attempt_cooldown == {}
-        assert state.dsl_close_attempts == {}
-        assert state.dsl_close_attempt_cooldown == {}
-        assert state.ai_close_cooldown == {}
-        assert state.bot_managed_market_ids == set()
-        assert state.pending_sync == set()
-        assert state.verifying_close == set()
-        assert state.api_lag_warnings == {}
-        assert state.no_price_ticks == {}
-
-    def test_opened_signals_is_set(self):
-        """BotState opened_signals is a set (not list)."""
-        state = BotState()
-        assert isinstance(state.opened_signals, set)
-        state.opened_signals.add(42)
-        assert 42 in state.opened_signals
-        state.opened_signals.add(42)  # dupes allowed in set
-        assert len(state.opened_signals) == 1
-
-    def test_recently_closed_is_dict(self):
-        """BotState recently_closed is a dict."""
-        state = BotState()
-        assert isinstance(state.recently_closed, dict)
-        state.recently_closed[1] = 50000.0
-        assert state.recently_closed[1] == 50000.0
-
-    def test_defaults_none_fields(self):
-        """BotState optional string fields default to None."""
-        state = BotState()
-        assert state.last_signal_timestamp is None
-        assert state.last_signal_hash is None
-        assert state.last_ai_decision_ts is None
-        assert state.saved_positions is None
-
-    def test_defaults_scalar_fields(self):
-        """BotState scalar defaults."""
-        state = BotState()
-        assert state.signal_processed_this_tick is False
-        assert state.result_dirty is False
-        assert state.last_order_time == 0
-        assert state.idle_tick_count == 0
-        assert state.kill_switch_active is False
-        assert state.position_sync_failures == 0

@@ -1,13 +1,11 @@
 """
-Lighter Copilot — Trailing TP/SL Bot
+Lighter Copilot — Trailing SL Bot
 
 Monitors open positions on Lighter.xyz and manages
-trailing take profit + stop loss orders.
+trailing stop loss orders.
 """
 
 import asyncio
-import hashlib
-import json
 import logging
 import os
 import signal
@@ -128,7 +126,7 @@ class LighterCopilot:
         self._dsl_close_attempt_cooldown: dict[str, float] = {}  # symbol → monotonic() deadline
         self._sl_retry_delays: list[int] = [15, 60, 300, 900]  # 15s, 1min, 5min, 15min
         self._last_order_time: float = 0  # for pacing orders in 15s free tx window
-        self._last_quota_alert_time: float = 0  # periodic quota status alert (20min)
+        self._last_quota_alert_time: float = 0  # periodic quota status alert (1 hour)
         self._quota_alert_interval: float = 3600  # 1 hour in seconds
         self._last_quota_emergency_warn: float = 0  # rate-limit for quota emergency warnings
         # Kill switch — file-based emergency stop

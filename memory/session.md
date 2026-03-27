@@ -1,37 +1,34 @@
-# Session Handoff — 2026-03-26 19:23 MDT
+# Session Handoff — 2026-03-26 20:12 MDT
 
-## ✅ COMPLETED: DSL + Trailing SL Implementation (DEPLOYED & RUNNING)
-
-**Branch:** merged to `main` (fa9f46d)  
-**Tests:** 107/107 pass  
-**Bot:** restarted, running clean, zero errors  
-**Status:** LIVE IN PRODUCTION
+## ✅ COMPLETED: Bot Code Audit + Cleanup
 
 ### What was done
+Full code audit of the bot folder using 2 subagents, then fixed all 12 verified findings in 2 phases.
 
-Replaced trailing TP with trailing SL across entire bot architecture:
+### Production Fixes (8)
+1. **state_manager.py** — Added missing `safe_read_json` import + sys.path setup (was silently breaking post-crash AI trader unblock)
+2. **lighter_api.py** — Removed 50-line dead `execute_tp` method
+3. **execution_engine.py** — Removed dead `in_cooldown` code (hardcoded False, 3 unreachable branches)
+4. **bot.py** — Updated docstring "Trailing TP/SL" → "Trailing SL"
+5. **dsl.py** — Removed "take profit" from docstrings
+6. **bot.py** — Removed unused `hashlib` and `json` imports
+7. **bot.py + execution_engine.py** — Fixed "20 minutes" → "1 hour" comments
+8. **dsl.py** — `stagnation_minutes` default 60 → 90 to match config.py
 
-1. **`dsl.py`** — Added `evaluate_trailing_sl()` (9 new tests)
-2. **`position_tracker.py`** — Removed `compute_tp_price()`, `_get_sl_pct()`. Added trailing SL in DSL + legacy modes
-3. **`execution_engine.py`** — Removed trailing_take_profit handler. Added trailing_sl exit handler
-4. **`state_manager.py`** — Migrated trailing_active → trailing_sl_activated (backward compat)
-5. **`config.py`** — Removed trailing_tp fields, added trailing_sl fields, stagnation 60→90
-6. **`bot.py`** — Updated logging (3 locations)
-7. **All tests updated** — 107/107 pass
+### Test Fixes (4)
+9. **models.py** — Removed unused `BotState` dataclass + docstring
+10. **conftest.py** — Removed unused `bot_state` fixture + BotState import
+11. **test_integration.py** — Fixed quota attributes set on `engine` instead of `bot`
+12. **test_models.py** — Removed `TestBotState` test class
 
-### Config values
-- trailing_sl_trigger_pct: 0.5% (price must rise 0.5% before trailing activates)
-- trailing_sl_step_pct: 0.95% (SL trails 0.95% below high water mark)
-- stagnation_minutes: 90
+### Verified
+- 112/112 tests passing
+- Bot restarted, running clean, zero errors
+- Fix #1 immediately proven working: post-crash ACK logged on restart
+- 4 positions tracked, DSL states restored
 
-### Verified on restart
-- Startup logs show new trailing SL config correctly
-- 5 positions restored with DSL state intact
-- No errors, no warnings from our changes
-
-### Key lesson
-- Initially kept old trailing_tp fields "for transition" — wrong, plan said delete them. Fixed on second audit pass.
+### Subagent lesson
+Phase 1 subagent lied about Fix #6 — claimed to remove `hashlib`/`json` imports but didn't. Had to manually verify and fix. Always verify subagent work.
 
 ## Open Items
-
-None — this task is complete and deployed.
+None.

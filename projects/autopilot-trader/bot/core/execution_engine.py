@@ -244,28 +244,24 @@ class ExecutionEngine:
                 # Reset timer to avoid spamming every tick (warn once per 10 min)
                 self.api._last_quota_time = time.time()
 
-        # Periodic quota status alert (every 20 minutes) — after position sync for accurate counts
+        # Periodic quota status alert (every 1 hour) — after position sync for accurate counts
         now = time.time()
         if now - self.bot._last_quota_alert_time > self.bot._quota_alert_interval:
             self.bot._last_quota_alert_time = now
             api_quota = self.api.volume_quota_remaining if self.api else None
-            in_cooldown = False
             if api_quota is not None:
                 status = f"{api_quota} TX"
             elif self.api and self.api._last_known_quota is not None:
                 age = int((now - self.api._last_quota_time) / 60)
                 status = f"~{self.api._last_known_quota} TX (updated {age}m ago)"
-            elif in_cooldown:
-                status = "0 TX (exhausted)"
             else:
                 status = "unknown"
             positions_count = len(self.tracker.positions)
-            emoji = "🔴" if (api_quota is not None and api_quota < 35) or (api_quota is None and in_cooldown) else "🟡" if (api_quota is not None and api_quota < 200) else "🟢"
+            emoji = "🔴" if (api_quota is not None and api_quota < 35) else "🟡" if (api_quota is not None and api_quota < 200) else "🟢"
             await self.alerter.send(
                 f"{emoji} *Quota Status*\n"
                 f"Remaining: {status}\n"
-                f"Positions: {positions_count}\n"
-                f"Cooldown: {'active' if in_cooldown else 'none'}"
+                f"Positions: {positions_count}"
             )
 
         # 1.4. HIGH-13: Clear pending sync AFTER position verification section completes.

@@ -367,55 +367,6 @@ class LighterAPI:
         except OSError as e:
             logging.warning(f"Failed to save quota cache: {e}")
 
-    async def execute_tp(self, market_id: int, size: float, trigger_price: float, is_long: bool) -> bool:
-        """Execute a take profit order (reduce-only, IOC)."""
-        try:
-            await self._ensure_signer()
-            size_dec, price_dec = await self._ensure_decimals(market_id)
-            base_amount = self._to_lighter_amount(size, size_dec)
-            price = self._to_lighter_amount(trigger_price, price_dec)
-            result = await self._signer.create_tp_order(
-                market_index=market_id,
-                client_order_index=self._next_client_order_index(),
-                base_amount=base_amount,
-                trigger_price=price,
-                price=price,
-                is_ask=is_long,      # close long = sell = ask
-                reduce_only=True,
-            )
-            # SDK returns Union[Tuple[CreateOrder, RespSendTx, None], Tuple[None, None, str]]
-            if isinstance(result, tuple):
-                if len(result) >= 3 and result[2] is not None:
-                    logging.error(f"❌ TP order rejected by exchange: {result[2]}")
-                    return False
-                if result[0] is None:
-                    logging.error("❌ TP order returned None (no order created)")
-                    return False
-                # Log response details
-                tx = result[0]
-                resp = result[1] if len(result) > 1 else None
-                if resp is not None:
-                    # 🔍 DEBUG: Raw response structure analysis
-                    quota_val, quota_detail = self._extract_quota_from_response(resp)
-                    
-                    resp_code = getattr(resp, 'code', None)
-                    resp_msg = getattr(resp, 'msg', None) or getattr(resp, 'message', None)
-                    resp_quota = quota_val  # Use enhanced extraction result
-                    self._update_quota_cache(resp_quota)
-                    if resp_msg and "didn't use volume quota" in str(resp_msg):
-                        logging.info(f"✅ TP order submitted (free slot): tx={tx}, msg={resp_msg}")
-                    else:
-                        logging.info(f"✅ TP order submitted: tx={tx}, resp_code={resp_code}, resp_msg={resp_msg}, vol_quota={resp_quota}")
-                else:
-                    logging.info(f"✅ TP order submitted: {tx}")
-                return True
-            # Fallback: if SDK returns something unexpected, treat as success with warning
-            logging.warning(f"⚠️ TP order unexpected return type: {type(result)} — {result}")
-            return True
-        except Exception as e:
-            logging.error(f"Failed to execute TP: {e}")
-            return False
-
     async def set_leverage(self, market_id: int, leverage: float) -> bool:
         """Set leverage cap on the exchange via IMF. Best-effort — may not work on all markets.
 

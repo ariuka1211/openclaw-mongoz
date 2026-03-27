@@ -8,6 +8,7 @@ and startup reconciliation with the exchange.
 import json
 import logging
 import os
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,6 +18,11 @@ from core.models import TrackedPosition
 from api.lighter_api import LighterAPI
 from core.position_tracker import PositionTracker
 from dsl import DSLState
+
+_shared_dir = Path(__file__).resolve().parent.parent / "shared"
+if str(_shared_dir) not in sys.path:
+    sys.path.insert(0, str(_shared_dir))
+from ipc_utils import safe_read_json
 
 
 class StateManager:

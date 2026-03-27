@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from config import BotConfig
 from dsl import DSLConfig, DSLState, DSLTier
-from core.models import TrackedPosition, BotState
+from core.models import TrackedPosition
 
 
 # ── Config ──────────────────────────────────────────────────────────
@@ -137,12 +137,6 @@ def tracked_position_short():
         size=1.0,
         high_water_mark=3000.0,
     )
-
-
-@pytest.fixture
-def bot_state():
-    """BotState with all defaults."""
-    return BotState()
 
 
 # ── Mocks ───────────────────────────────────────────────────────────

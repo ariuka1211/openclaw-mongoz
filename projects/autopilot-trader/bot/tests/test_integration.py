@@ -482,8 +482,8 @@ class TestKillSwitchChain:
 
         engine = ExecutionEngine(config, mock_api, bot.tracker, mock_alerter, bot)
         engine._ai_mode = False
-        engine._last_quota_alert_time = time.time()
-        engine._quota_alert_interval = 3600
+        bot._last_quota_alert_time = time.time()
+        bot._quota_alert_interval = 3600
         engine._ai_close_cooldown = {}
         engine._api_lag_warnings = {}
 
@@ -519,8 +519,8 @@ class TestKillSwitchChain:
 
         engine = ExecutionEngine(config, mock_api, bot.tracker, mock_alerter, bot)
         engine._ai_mode = False
-        engine._last_quota_alert_time = time.time()
-        engine._quota_alert_interval = 3600
+        bot._last_quota_alert_time = time.time()
+        bot._quota_alert_interval = 3600
         engine._ai_close_cooldown = {}
         engine._api_lag_warnings = {}
 

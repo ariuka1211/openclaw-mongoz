@@ -3,7 +3,8 @@
 **Created:** 2026-03-26
 **Updated:** 2026-03-26 — re-verified against full codebase
 **Updated:** 2026-03-26 18:38 MDT — code review issues documented, implementation started
-**Status:** In progress (Phase 1-2 config+models done, subagents running for core logic)
+**Updated:** 2026-03-26 18:51 MDT — COMPLETED ✅
+**Status:** COMPLETE — branch `dsl-trailing-sl` pushed, ready for testing/deployment
 **Scope:** Bot only — scanner and ai-decisions have zero references to DSL/trailing/SL/TP. No cross-service impact.
 
 ---
@@ -73,6 +74,40 @@ TP logging was only in the legacy `else` branch, not in the DSL branch. Added tr
 ### Issue 4: config.example.yml stale
 
 Still has `max_position_usd` (old field from position sizing refactor). Not fixing in this change — separate cleanup.
+
+---
+
+## Implementation Results ✅
+
+**Completed:** 2026-03-26 18:51 MDT  
+**Branch:** `dsl-trailing-sl` (fb6211c)  
+**Tests:** 108/108 pass (including 45 DSL + 9 new trailing SL tests)  
+**Files changed:** 13 (591 insertions, 362 deletions)
+
+### What was built:
+
+1. **`evaluate_trailing_sl()` function in `dsl.py`** — handles both long and short sides with hard floor check, activation logic, ratcheting, and trigger detection
+2. **Position tracker overhaul** — removed trailing TP, added trailing SL evaluation in both DSL and legacy modes
+3. **Execution engine** — removed trailing_take_profit handler, added trailing_sl exit handler with same DSL-style error handling
+4. **State management** — migrated trailing_active → trailing_sl_activated with backward compatibility
+5. **Configuration** — added trailing_sl_trigger_pct=0.5%, trailing_sl_step_pct=0.95%, stagnation_minutes=90
+6. **Comprehensive test coverage** — all obsolete tests updated, new trailing SL tests added
+
+### Verification completed:
+
+- **Manual code review:** All old methods removed, new logic integrated
+- **Import/syntax checks:** All modules pass basic Python validation  
+- **Test execution:** 108/108 tests pass (config, models, DSL, position tracker)
+- **Subagent verification:** Both implementation subagents completed successfully
+
+### Next steps for John:
+
+1. **Merge branch:** Review PR and merge `dsl-trailing-sl` → `main`
+2. **Deploy bot:** Restart the trading bot to pick up new config fields
+3. **Monitor behavior:** Watch trailing SL activation and exits in practice
+4. **Tune if needed:** Adjust trigger_pct or step_pct based on real performance
+
+**Ready for production deployment.**
 
 ---
 

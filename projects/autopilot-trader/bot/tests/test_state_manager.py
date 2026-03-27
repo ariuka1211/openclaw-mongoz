@@ -68,7 +68,7 @@ def _do_save_load(sm, state_file):
                 "leverage": pos.dsl_state.leverage if pos.dsl_state else 10.0,
                 "sl_pct": pos.sl_pct,
                 "high_water_mark": pos.high_water_mark,
-                "trailing_active": pos.trailing_active,
+                "trailing_sl_activated": pos.trailing_sl_activated,
                 "trailing_sl_level": pos.trailing_sl_level,
                 "unverified_at": pos.unverified_at,
                 "unverified_ticks": pos.unverified_ticks,
@@ -192,7 +192,7 @@ def test_save_load_roundtrip_positions_restored(config, mock_api, mock_alerter, 
     pos = TrackedPosition(
         market_id=1, symbol="BTC", side="long",
         entry_price=50000.0, size=0.1, high_water_mark=52000.0,
-        trailing_active=True, trailing_sl_level=49000.0,
+        trailing_sl_activated=True, trailing_sl_level=49000.0,
         sl_pct=1.5, unverified_at=12345.0, unverified_ticks=2,
         active_sl_order_id="order_123",
         dsl_state=dsl,
@@ -214,7 +214,7 @@ def test_save_load_roundtrip_positions_restored(config, mock_api, mock_alerter, 
     assert restored_pos["entry_price"] == 50000.0
     assert restored_pos["size"] == 0.1
     assert restored_pos["high_water_mark"] == 52000.0
-    assert restored_pos["trailing_active"] is True
+    assert restored_pos["trailing_sl_activated"] is True
     assert restored_pos["trailing_sl_level"] == 49000.0
     assert restored_pos["sl_pct"] == 1.5
     assert restored_pos["unverified_at"] == 12345.0

@@ -291,7 +291,7 @@ class TestStateRoundtrip:
                     "leverage": pos.dsl_state.leverage if pos.dsl_state else config.dsl_leverage,
                     "sl_pct": pos.sl_pct,
                     "high_water_mark": pos.high_water_mark,
-                    "trailing_active": pos.trailing_active,
+                    "trailing_sl_activated": pos.trailing_sl_activated,
                     "trailing_sl_level": pos.trailing_sl_level,
                     "unverified_at": pos.unverified_at,
                     "unverified_ticks": pos.unverified_ticks,

@@ -42,8 +42,6 @@ def config():
         min_risk_reward=1.5,
         max_concurrent_signals=3,
         dsl_leverage=10.0,
-        trailing_tp_trigger_pct=3.0,
-        trailing_tp_delta_pct=1.0,
         trailing_sl_trigger_pct=0.5,
         trailing_sl_step_pct=0.95,
         dsl_enabled=True,

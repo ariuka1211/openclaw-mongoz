@@ -34,7 +34,7 @@ class TestTrackedPosition:
         assert pos.high_water_mark == 50000.0
 
     def test_defaults(self):
-        """TrackedPosition defaults (trailing_active=False, dsl_state=None, etc.)."""
+        """TrackedPosition defaults (trailing_sl_activated=False, dsl_state=None, etc.)."""
         pos = TrackedPosition(
             market_id=1,
             symbol="BTC",
@@ -43,7 +43,7 @@ class TestTrackedPosition:
             size=0.1,
             high_water_mark=50000.0,
         )
-        assert pos.trailing_active is False
+        assert pos.trailing_sl_activated is False  # New trailing SL field
         assert pos.trailing_sl_level is None
         assert pos.dsl_state is None
         assert pos.sl_pct is None

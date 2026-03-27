@@ -17,10 +17,6 @@ class BotConfig:
     api_key_index: int = 3
     api_key_private: str = ""
 
-    # Trailing take profit (legacy — being replaced by trailing SL)
-    trailing_tp_trigger_pct: float = 3.0   # Start trailing after +3%
-    trailing_tp_delta_pct: float = 1.0     # Trail by 1% from peak
-
     # Trailing stop loss (downside protection, works alongside DSL)
     trailing_sl_trigger_pct: float = 0.5   # Start trailing after +0.5% price move
     trailing_sl_step_pct: float = 0.95     # Trail by 0.95% from new high
@@ -79,12 +75,6 @@ class BotConfig:
         # Positive numbers
         if not isinstance(self.hard_sl_pct, (int, float)) or self.hard_sl_pct <= 0:
             errors.append(f"'hard_sl_pct' must be a positive number, got {self.hard_sl_pct}")
-
-        # Non-negative (0 = immediate trigger)
-        for field_name in ("trailing_tp_trigger_pct", "trailing_tp_delta_pct"):
-            val = getattr(self, field_name)
-            if not isinstance(val, (int, float)) or val < 0:
-                errors.append(f"'{field_name}' must be a non-negative number, got {val}")
 
         # Trailing SL validation
         if not isinstance(self.trailing_sl_trigger_pct, (int, float)) or self.trailing_sl_trigger_pct < 0:
@@ -155,8 +145,7 @@ class BotConfig:
                     filtered[key] = filtered[key].lower() in ("true", "1", "yes")
                 else:
                     filtered[key] = int(filtered[key])
-        for key in ("trailing_tp_trigger_pct", "trailing_tp_delta_pct",
-                     "trailing_sl_trigger_pct", "trailing_sl_step_pct",
+        for key in ("trailing_sl_trigger_pct", "trailing_sl_step_pct",
                      "hard_sl_pct",
                      "dsl_leverage", "stagnation_roe_pct", "price_call_delay",
                      "max_risk_pct", "max_margin_pct", "min_risk_reward"):

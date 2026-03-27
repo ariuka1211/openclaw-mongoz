@@ -27,8 +27,8 @@ class TestFromYaml:
             "api_key_index: 2\n"
             "api_key_private: my_secret\n"
             "hard_sl_pct: 2.0\n"
-            "trailing_tp_trigger_pct: 4.0\n"
-            "trailing_tp_delta_pct: 1.5\n"
+            "trailing_sl_trigger_pct: 0.5\n"
+            "trailing_sl_step_pct: 0.95\n"
             "dsl_leverage: 20.0\n"
             "price_poll_interval: 30\n"
             "dsl_enabled: false\n"
@@ -40,8 +40,8 @@ class TestFromYaml:
         assert cfg.api_key_index == 2
         assert cfg.api_key_private == "my_secret"
         assert cfg.hard_sl_pct == 2.0
-        assert cfg.trailing_tp_trigger_pct == 4.0
-        assert cfg.trailing_tp_delta_pct == 1.5
+        assert cfg.trailing_sl_trigger_pct == 0.5
+        assert cfg.trailing_sl_step_pct == 0.95
         assert cfg.dsl_leverage == 20.0
         assert cfg.price_poll_interval == 30
         assert cfg.dsl_enabled is False
@@ -179,12 +179,6 @@ class TestValidate:
         errors = config.validate()
         assert any("hard_sl_pct" in e for e in errors)
 
-    def test_validate_trailing_tp_trigger_pct_negative(self, config):
-        """trailing_tp_trigger_pct = -1 → error."""
-        config.trailing_tp_trigger_pct = -1
-        errors = config.validate()
-        assert any("trailing_tp_trigger_pct" in e for e in errors)
-
     def test_validate_trailing_sl_trigger_pct_negative(self, config):
         """trailing_sl_trigger_pct = -1 → error."""
         config.trailing_sl_trigger_pct = -1
@@ -268,11 +262,11 @@ class TestDefaults:
     def test_defaults_dsl_leverage(self):
         assert BotConfig().dsl_leverage == 10.0
 
-    def test_default_trailing_tp_trigger_pct(self):
-        assert BotConfig().trailing_tp_trigger_pct == 3.0
+    def test_default_trailing_sl_trigger_pct(self):
+        assert BotConfig().trailing_sl_trigger_pct == 0.5
 
-    def test_default_trailing_tp_delta_pct(self):
-        assert BotConfig().trailing_tp_delta_pct == 1.0
+    def test_default_trailing_sl_step_pct(self):
+        assert BotConfig().trailing_sl_step_pct == 0.95
 
     def test_default_price_poll_interval(self):
         assert BotConfig().price_poll_interval == 60

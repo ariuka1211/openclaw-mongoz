@@ -23,7 +23,7 @@ dsl_enabled: true               # false = use legacy flat trailing
 max_position_usd: 15.0          # Each position notional cap
 dsl_leverage: 10.0              # DSL ROE calc fallback only
 stagnation_roe_pct: 5.0         # Exit if ROE ≥ this but no progress for stagnation_minutes
-stagnation_minutes: 60          # Minutes of stagnation before auto-exit
+stagnation_minutes: 90          # Minutes of stagnation before auto-exit
 
 # DSL tiers — progressively tighter as profit grows
 dsl_tiers:

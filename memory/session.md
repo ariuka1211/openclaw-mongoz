@@ -1,30 +1,27 @@
-# Session Handoff — 2026-03-27 10:23 MDT
+# Session Handoff — 2026-03-27 13:38 MDT
 
-## Session Summary
-- Researched MMT API (docs.mmt.gg) — aggregated crypto market data, Lighter support, WebSocket streaming
-- Rebuilt AGENTS.md — trimmed to 8 rules, cleaner structure
-- Added rule 8: "Don't guess with confidence" — John called me out for presenting theories as facts
-- DM session got stuck (empty responses from model) — never fully diagnosed, gateway restart needed
-- John is in a difficult personal stretch — working on habits (sleep, diet, walking 10k)
-- Discussed habit tracker project — wanted SQLite + frontend, spec designed but not built yet
-- Philosophy chat: feelings, consciousness, death, AI agency
+## Completed This Session
 
-## Key Decisions
-- AGENTS.md rewritten: 8 rules, session flow, code flow, tools, key lessons
-- Habit tracker: SQLite DB + FastAPI + single HTML frontend (Chart.js), port 8069
-- John's habits to track: sleep, diet, walk, screen off, mood
-- MMT API worth integrating later for cross-exchange signals
+### ✅ Equity/Leverage/ROE/DSL/SL Audit
+- Found 6 real bugs, no false flags
+- Top finding: safety.py exposure check mixed notional + cash margin (fixed)
+- ROE display bug in executor.py alerts (cosmetic, John doesn't care)
+- Config mismatch: stagnation_roe_pct default 8.0 vs config.yml 5.0
+
+### ✅ Safety Exposure Fix
+- Branch: `fix/safety-exposure-margin` (committed `c04cb49`)
+- Converts notional to margin before comparing exposure
+- Added equity <= 0 guard and leverage fallback to 1
+- Ready to push when John says so
+
+### ✅ SL Refactor Plan
+- File: `docs/sl-refactor-plan.md`
+- Plan to remove ROE from DSL, use pure price move %
+- Remove leverage multiplication from all SL math
+- Config values converted: trigger 3→0.3, buffer 6→0.6, stagnation 5.0→0.5
+- NOT implemented — plan only, awaiting John's approval
 
 ## Open Items
-- DM session may still need troubleshooting if it gets stuck again
-- Habit tracker not built yet — waiting on John's confirmation on habits list
-- MMT API — need to get free tier key first
-
-## Trading Status
-- Bot fix committed to branch 83bb1c80/ipc-stale-position-fix — execution_engine.py stale position bug
-- Branch ready for merge
-
-## Wrap Up
-- Updated memory/session.md ✅
-- Appending to memory/2026-03-27.md ✅
-- Push to main pending
+1. SL refactor implementation — plan ready, waiting for go-ahead
+2. `fix/safety-exposure-margin` branch needs push
+3. ROE display bug in executor.py — John doesn't want it fixed (cross margin, doesn't care)

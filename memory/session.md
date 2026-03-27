@@ -1,24 +1,27 @@
 # Session Handoff — 2026-03-26
 
-## Active: AI-decisions model switch to OpenRouter xiaomi/mimo-v2-pro
+## Active: DSL + Trailing SL Unification Plan
 
 ### What happened
-- Switched AI-decisions from Kilo (minimax/minimax-m2.5) → OpenRouter (xiaomi/mimo-v2-pro)
-- Built provider-based config system in config.json (easy switching)
-- Hit 402 errors on direct OpenRouter calls — was HTTP-Referer header issue
-- Fixed: added `HTTP-Referer: https://openclaw.ai` header in llm_client.py
-- Model works free on OpenRouter with proper headers (0 credits, no 402)
-- max_tokens bumped to 15000 (xiaomi is a thinking model, burns tokens on reasoning)
+- John worried about DSL and trailing TP interaction — did deep analysis
+- Found 3 problems: unit mismatch (raw price % vs ROE%), trailing TP is dead code in DSL mode, dual trailing systems overlapping
+- Designed replacement: DSL (profit protection) + Trailing SL (downside protection), remove trailing TP
+- Also found: AI's `stop_loss_pct` is silently ignored in DSL mode (DSL hard_sl uses config, not per-position sl_pct)
+- Created detailed plan v2 at `docs/plans/dsl-trailing-sl-plan.md`
+- Plan re-verified against full codebase — 17 files, no cross-service impact
 
 ### Current state
-- **AI-decisions**: running on OpenRouter with xiaomi/mimo-v2-pro, max_tokens=15000
-- **Config**: `"provider": "openrouter"` in config.json
-- **Provider switching**: change one line in config.json between "openrouter" and "kilo"
-- **Cost**: free on OpenRouter with proper headers
+- **Plan ready:** `docs/plans/dsl-trailing-sl-plan.md` — 17 files, implementation order defined
+- **Not started:** No code changes yet
+- **Services:** All running unchanged
 
-### Files changed
-- `ai-decisions/config.json` — provider system + max_tokens=15000
-- `ai-decisions/llm_client.py` — provider resolution + HTTP-Referer header fix
+### Key decisions
+- Remove trailing TP entirely (dead code in DSL mode)
+- Add trailing SL: trigger +0.5%, step 0.95%, ratchets up from entry
+- DSL stays unchanged for profit protection
+- Stagnation loosened: 60min → 90min
+- Per-position sl_pct now used for trailing SL hard floor (was ignored in DSL mode)
 
 ### Not committed yet
-- Branch: none (changes on working tree)
+- Previous sessions' changes still on working tree (position sizing refactor, leverage cleanup, pattern learning, OpenRouter switch)
+- This session: plan only, no code changes

@@ -18,6 +18,7 @@ class TrackedPosition:
     entry_price: float
     size: float
     high_water_mark: float
+    high_water_move_pct: float = 0.0         # price move % from entry at high water mark
     trailing_sl_activated: bool = False      # Has trailing SL been triggered (price moved past trigger)
     trailing_sl_level: float | None = None  # Trailing SL price level (ratchets)
     dsl_state: DSLState | None = None       # DSL state (when dsl_enabled)

@@ -16,10 +16,10 @@ class PositionTracker:
     def __init__(self, cfg: BotConfig):
         self.cfg = cfg
         self.positions: dict[int, TrackedPosition] = {}  # key: market_id
-        self.account_equity: float = 0.0  # Cached account equity for cross margin ROE
+        self.account_equity: float = 0.0  # Cached account equity for exposure calculations
         # Build DSL config from bot config
         self.dsl_cfg = DSLConfig(
-            stagnation_roe_pct=cfg.stagnation_roe_pct,
+            stagnation_move_pct=cfg.stagnation_move_pct,
             stagnation_minutes=cfg.stagnation_minutes,
             hard_sl_pct=cfg.hard_sl_pct,
         )
@@ -29,7 +29,7 @@ class PositionTracker:
                 DSLTier(
                     trigger_pct=t.get("trigger_pct", 7),
                     lock_hw_pct=t.get("lock_hw_pct", 40),
-                    trailing_buffer_roe=t.get("trailing_buffer_roe"),
+                    trailing_buffer_pct=t.get("trailing_buffer_pct"),
                     consecutive_breaches=t.get("consecutive_breaches", 3),
                 )
                 for t in cfg.dsl_tiers
@@ -51,15 +51,15 @@ class PositionTracker:
         # ── DSL mode: tiered trailing stop loss ──
         if self.cfg.dsl_enabled and pos.dsl_state:
             result = evaluate_dsl(pos.dsl_state, price, self.dsl_cfg)
-            roe = pos.dsl_state.current_roe(price)
+            move_pct = pos.dsl_state.current_move_pct(price)
             if result:
-                floor_str = (f"Floor: {pos.dsl_state.locked_floor_roe:+.1f}%"
-                             if pos.dsl_state.locked_floor_roe else "")
+                floor_str = (f"Floor: {pos.dsl_state.locked_floor_pct:+.1f}%"
+                             if pos.dsl_state.locked_floor_pct else "")
                 tier_str = (str(pos.dsl_state.current_tier.trigger_pct)
                             if pos.dsl_state.current_tier else "none")
                 logging.info(
                     f"🛑 {pos.symbol} DSL {result} | "
-                    f"ROE: {roe:+.1f}% | HW: {pos.dsl_state.high_water_roe:+.1f}% | "
+                    f"Move: {move_pct:+.2f}% | HW: {pos.dsl_state.high_water_move_pct:+.2f}% | "
                     f"Tier: {tier_str} | {floor_str}"
                 )
                 return result
@@ -67,21 +67,21 @@ class PositionTracker:
             # Log DSL state periodically (when tier changes or HW updates)
             if pos.dsl_state.current_tier:
                 logging.debug(
-                    f"📊 {pos.symbol} DSL | ROE: {roe:+.1f}% | "
-                    f"HW: {pos.dsl_state.high_water_roe:+.1f}% | "
+                    f"📊 {pos.symbol} DSL | Move: {move_pct:+.2f}% | "
+                    f"HW: {pos.dsl_state.high_water_move_pct:+.2f}% | "
                     f"Tier: {pos.dsl_state.current_tier.trigger_pct}% | "
                     f"Breaches: {pos.dsl_state.breach_count}/{pos.dsl_state.current_tier.consecutive_breaches}"
                 )
 
             # Alert on tier lock
-            if pos.dsl_state.locked_floor_roe is not None and not getattr(pos, '_tier_lock_alerted', False):
+            if pos.dsl_state.locked_floor_pct is not None and not getattr(pos, '_tier_lock_alerted', False):
                 pos._tier_lock_alerted = True
-                lev = pos.dsl_state.leverage if pos.dsl_state else self.cfg.dsl_leverage
-                floor_price = pos.entry_price * (1 + pos.dsl_state.locked_floor_roe / 100 / lev) if pos.side == "long" \
-                    else pos.entry_price * (1 - pos.dsl_state.locked_floor_roe / 100 / lev)
+                # locked_floor_pct is already in price move %, no leverage division needed
+                floor_price = pos.entry_price * (1 + pos.dsl_state.locked_floor_pct / 100) if pos.side == "long" \
+                    else pos.entry_price * (1 - pos.dsl_state.locked_floor_pct / 100)
                 return ("dsl_tier_lock", {
-                    "roe": roe,
-                    "floor_roe": pos.dsl_state.locked_floor_roe,
+                    "move_pct": move_pct,
+                    "floor_move_pct": pos.dsl_state.locked_floor_pct,
                     "floor_price": floor_price,
                     "tier": pos.dsl_state.current_tier.trigger_pct if pos.dsl_state.current_tier else 0,
                     "breaches": pos.dsl_state.breach_count,
@@ -91,7 +91,7 @@ class PositionTracker:
             if pos.dsl_state.stagnation_started and not getattr(pos, '_stagnation_alerted', False):
                 pos._stagnation_alerted = True
                 return ("dsl_stagnation_timer", {
-                    "roe": roe,
+                    "move_pct": move_pct,
                     "since": pos.dsl_state.stagnation_started,
                 })
 

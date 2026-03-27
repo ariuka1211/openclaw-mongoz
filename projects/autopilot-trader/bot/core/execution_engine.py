@@ -37,13 +37,13 @@ class ExecutionEngine:
 
     @staticmethod
     def _pnl_info(pos: TrackedPosition, price: float) -> dict:
-        """Calculate PnL USD, ROE%, and leverage for a position at a given price.
+        """Calculate PnL USD, price move %, and leverage for a position at a given price.
 
         pos.size is in base units (e.g., BTC), notional_usd = size * entry_price.
-        Returns dict with: pnl_usd, roe_pct, leverage, notional_usd.
+        Returns dict with: pnl_usd, price_move_pct, leverage, notional_usd.
         """
         if pos.entry_price <= 0 or pos.size <= 0:
-            return {"pnl_usd": 0.0, "roe_pct": 0.0, "leverage": 10.0, "notional_usd": 0.0}
+            return {"pnl_usd": 0.0, "price_move_pct": 0.0, "leverage": 10.0, "notional_usd": 0.0}
         notional_usd = pos.size * pos.entry_price
         if pos.side == "long":
             pnl_usd = pos.size * (price - pos.entry_price)
@@ -51,8 +51,8 @@ class ExecutionEngine:
             pnl_usd = pos.size * (pos.entry_price - price)
         pnl_pct = (pnl_usd / notional_usd * 100) if notional_usd > 0 else 0.0
         leverage = pos.dsl_state.leverage if pos.dsl_state else 10.0
-        roe_pct = pnl_pct * leverage
-        return {"pnl_usd": pnl_usd, "roe_pct": roe_pct, "leverage": leverage, "notional_usd": notional_usd}
+        price_move_pct = pnl_pct
+        return {"pnl_usd": pnl_usd, "price_move_pct": price_move_pct, "leverage": leverage, "notional_usd": notional_usd}
 
     @staticmethod
     def _fmt_mt(dt: datetime | None) -> str:
@@ -115,7 +115,7 @@ class ExecutionEngine:
             # Cache mark prices from unrealized_pnl (authoritative exchange price for PnL)
             self.api.update_mark_prices_from_positions(live_positions)
 
-            # Refresh account equity for cross margin ROE calculations
+            # Refresh account equity for exposure calculations
             try:
                 new_balance = await self.bot._get_balance()
                 if new_balance > 0:
@@ -352,7 +352,7 @@ class ExecutionEngine:
             del self.bot._no_price_ticks[mid]
 
         # NOTE: DSL uses leverage from exchange IMF (set via set_leverage() before opens).
-        # Both current_roe() and hard_sl_roe in dsl.py use state.leverage.
+        # current_move_pct() and hard_sl_pct in dsl.py use state.leverage.
 
         action = self.tracker.update_price(mid, price)
         is_long = pos.side == "long"
@@ -368,18 +368,18 @@ class ExecutionEngine:
                     if time.monotonic() - last_status >= 900:  # 15 minutes
                         self.bot._stagnation_last_status[mid] = time.monotonic()
                         pnl = self._pnl_info(pos, price)
-                        hw = pos.dsl_state.high_water_roe
+                        hw = pos.dsl_state.high_water_move_pct
                         logging.info(
                             f"⏳ {pos.symbol}: stagnation {elapsed_min:.0f}min / "
                             f"{self.cfg.stagnation_minutes}min ({remaining_min:.0f}min remaining), "
-                            f"PnL=${pnl['pnl_usd']:+.2f}, ROE={pnl['roe_pct']:+.1f}%, HW={hw:+.1f}%"
+                            f"PnL=${pnl['pnl_usd']:+.2f}, Move={pnl['price_move_pct']:+.2f}%, HW={hw:+.2f}%"
                         )
                         await self.alerter.send(
                             f"⏳ *STAGNATION STATUS*\n"
                             f"Symbol: {pos.symbol}\n"
                             f"Side: {pos.side}\n"
-                            f"PnL: ${pnl['pnl_usd']:+.2f} ({pnl['roe_pct']:+.1f}% ROE @ {pnl['leverage']:.0f}x)\n"
-                            f"HW Peak: {hw:+.1f}% ROE\n"
+                            f"PnL: ${pnl['pnl_usd']:+.2f} ({pnl['price_move_pct']:+.2f}% move)\n"
+                            f"HW Peak: {hw:+.2f}% move\n"
                             f"Timer: {elapsed_min:.0f}min / {self.cfg.stagnation_minutes}min "
                             f"({remaining_min:.0f}min remaining)"
                         )
@@ -398,8 +398,8 @@ class ExecutionEngine:
                 f"🔒 *DSL TIER LOCKED*\n"
                 f"Symbol: {pos.symbol}\n"
                 f"Side: {pos.side}\n"
-                f"PnL: ${pnl['pnl_usd']:+.2f} ({pnl['roe_pct']:+.1f}% ROE @ {pnl['leverage']:.0f}x)\n"
-                f"Lock floor: {details['floor_roe']:+.1f}% ROE (~${details['floor_price']:,.2f})\n"
+                f"PnL: ${pnl['pnl_usd']:+.2f} ({pnl['price_move_pct']:+.2f}% move)\n"
+                f"Lock floor: {details['floor_move_pct']:+.2f}% move (~${details['floor_price']:,.2f})\n"
                 f"Tier: +{details['tier']}% ({details['breaches']}x)"
             )
             logging.info(msg)
@@ -416,7 +416,7 @@ class ExecutionEngine:
                 f"⏳ *DSL STAGNATION TIMER STARTED*\n"
                 f"Symbol: {pos.symbol}\n"
                 f"Side: {pos.side}\n"
-                f"PnL: ${pnl['pnl_usd']:+.2f} ({pnl['roe_pct']:+.1f}% ROE @ {pnl['leverage']:.0f}x)\n"
+                f"PnL: ${pnl['pnl_usd']:+.2f} ({pnl['price_move_pct']:+.2f}% move)\n"
                 f"Timer: {self.cfg.stagnation_minutes}min (started {since_str} MT → exits {exit_str} MT if no new high)"
             )
             logging.info(msg)
@@ -433,14 +433,14 @@ class ExecutionEngine:
                 "hard_sl": "🛑 HARD STOP LOSS",
             }
             hw_pnl = self._pnl_info(pos, pos.dsl_state.high_water_price) if pos.dsl_state and pos.dsl_state.high_water_price else None
-            hw_str = f"HW Peak: ${hw_pnl['pnl_usd']:+.2f} ({pos.dsl_state.high_water_roe:+.1f}% ROE)" if hw_pnl else ""
+            hw_str = f"HW Peak: ${hw_pnl['pnl_usd']:+.2f} ({pos.dsl_state.high_water_move_pct:+.2f}% move)" if hw_pnl else ""
             msg = (
                 f"{labels.get(action, action)}\n"
                 f"Symbol: {pos.symbol}\n"
                 f"Side: {pos.side}\n"
                 f"Trigger: ${price:,.2f}\n"
                 f"Entry: ${pos.entry_price:,.2f}\n"
-                f"PnL: ${pnl['pnl_usd']:+.2f} ({pnl['roe_pct']:+.1f}% ROE @ {pnl['leverage']:.0f}x)\n"
+                f"PnL: ${pnl['pnl_usd']:+.2f} ({pnl['price_move_pct']:+.2f}% move)\n"
                 f"{hw_str}"
             )
             logging.info(msg)
@@ -477,7 +477,7 @@ class ExecutionEngine:
                         await self.alerter.send(
                             f"🚨 *DSL CLOSE FAILED ×{attempts}*\n"
                             f"{pos.side.upper()} {pos.symbol}\n"
-                            f"PnL: ${pnl['pnl_usd']:+.2f} ({pnl['roe_pct']:+.1f}% ROE @ {pnl['leverage']:.0f}x)\n"
+                            f"PnL: ${pnl['pnl_usd']:+.2f} ({pnl['price_move_pct']:+.2f}% move)\n"
                             f"Action: {labels.get(action, action)}\n"
                             f"Order submitted but NOT filled after {attempts} attempts.\n"
                             f"Cooldown: {self.bot._close_cooldown_seconds // 60}min — MANUAL INTERVENTION REQUIRED."
@@ -502,7 +502,7 @@ class ExecutionEngine:
                     await self.alerter.send(
                         f"🚨 *DSL SL FAILED ×{attempts}*\n"
                         f"{pos.side.upper()} {pos.symbol}\n"
-                        f"PnL: ${pnl['pnl_usd']:+.2f} ({pnl['roe_pct']:+.1f}% ROE @ {pnl['leverage']:.0f}x)\n"
+                        f"PnL: ${pnl['pnl_usd']:+.2f} ({pnl['price_move_pct']:+.2f}% move)\n"
                         f"Action: {labels.get(action, action)}\n"
                         f"Retry delays exhausted. Next retry in 15min.\n"
                         f"MANUAL INTERVENTION may be needed."
@@ -525,13 +525,13 @@ class ExecutionEngine:
             notional = pos.size * pos.entry_price
             pnl_pct_val = (pnl_usd / notional * 100) if notional > 0 else 0.0
             leverage = pos.dsl_state.leverage if pos.dsl_state else 10.0
-            roe_pct = pnl_pct_val * leverage
+            price_move_pct = pnl_pct_val
             await self.alerter.send(
                 f"✅ *DSL → CLOSED*\n"
                 f"{pos.side.upper()} {pos.symbol}\n"
                 f"Entry: ${pos.entry_price:,.2f}\n"
                 f"Exit: ${exit_price:,.2f}\n"
-                f"PnL: ${pnl_usd:+.2f} ({roe_pct:+.1f}% ROE @ {leverage:.0f}x)\n"
+                f"PnL: ${pnl_usd:+.2f} ({price_move_pct:+.2f}% move)\n"
                 f"Reason: {labels.get(action, action)}"
             )
             return
@@ -545,7 +545,7 @@ class ExecutionEngine:
                 f"Side: {pos.side}\n"
                 f"Trigger: ${price:,.2f}\n"
                 f"Entry: ${pos.entry_price:,.2f}\n"
-                f"PnL: ${pnl['pnl_usd']:+.2f} ({pnl['roe_pct']:+.1f}% ROE @ {pnl['leverage']:.0f}x)"
+                f"PnL: ${pnl['pnl_usd']:+.2f} ({pnl['price_move_pct']:+.2f}% move)"
             )
             logging.info(msg)
             await self.alerter.send(msg)
@@ -604,7 +604,7 @@ class ExecutionEngine:
                 f"{pos.side.upper()} {pos.symbol}\n"
                 f"Entry: ${pos.entry_price:,.2f}\n"
                 f"Exit: ${exit_price:,.2f}\n"
-                f"PnL: ${pnl_usd:+.2f} ({pnl['roe_pct']:+.1f}% ROE @ {pnl['leverage']:.0f}x)"
+                f"PnL: ${pnl_usd:+.2f} ({pnl['price_move_pct']:+.2f}% move)"
             )
             return
 
@@ -652,7 +652,7 @@ class ExecutionEngine:
                 await self.alerter.send(
                     f"🚨 *SL FAILED ×{attempts}*\n"
                     f"{pos.side.upper()} {pos.symbol}\n"
-                    f"PnL: ${pnl['pnl_usd']:+.2f} ({pnl['roe_pct']:+.1f}% ROE @ {pnl['leverage']:.0f}x)\n"
+                    f"PnL: ${pnl['pnl_usd']:+.2f} ({pnl['price_move_pct']:+.2f}% move)\n"
                     f"Action: {action.replace('_', ' ').upper()}\n"
                     f"Retry delays exhausted. Next retry in 15min.\n"
                     f"MANUAL INTERVENTION may be needed."

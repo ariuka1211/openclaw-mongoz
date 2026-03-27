@@ -139,13 +139,13 @@ def log_outcome(pos: TrackedPosition, exit_price: float, exit_reason: str,
     This ensures only one outcome row per close (no double-writing).
 
     PnL math (no double-counting of leverage):
-      pnl_pct  = raw price movement % (not leveraged)
-      size_usd = notional position value at entry (size × entry_price)
-      pnl_usd  = actual dollar P&L = notional × pnl_pct / 100
-                 (this IS the real dollar gain/loss, leverage doesn't change it —
-                  1 BTC moved $100 is $100 whether you used 1x or 10x margin)
-      roe_pct  = Return on Equity % = pnl_pct × leverage
-                 (what you earned relative to your margin deposit)
+      pnl_pct       = raw price movement % (not leveraged)
+      size_usd      = notional position value at entry (size × entry_price)
+      pnl_usd       = actual dollar P&L = notional × pnl_pct / 100
+                      (this IS the real dollar gain/loss, leverage doesn't change it —
+                       1 BTC moved $100 is $100 whether you used 1x or 10x margin)
+      price_move_pct = raw price movement % (alias for pnl_pct, used in new API)
+      roe_pct       = Return on Equity % = pnl_pct × leverage (kept for history)
     """
     if _db is None:
         return
@@ -159,7 +159,9 @@ def log_outcome(pos: TrackedPosition, exit_price: float, exit_reason: str,
         # Dollar P&L = notional × raw price change % (leverage doesn't affect dollar P&L)
         pnl_usd = size_usd * pnl_pct / 100
         hold_seconds = int((datetime.now(timezone.utc) - pos.opened_at).total_seconds())
-        # ROE = return relative to margin (not notional) = pnl_pct × leverage
+        # price_move_pct = raw price movement % (used in new API, no leverage multiply)
+        price_move_pct = pnl_pct
+        # roe_pct = pnl_pct × leverage (kept for historical data)
         leverage = pos.dsl_state.leverage if pos.dsl_state else cfg.dsl_leverage
         roe_pct = pnl_pct * leverage
 
@@ -174,6 +176,7 @@ def log_outcome(pos: TrackedPosition, exit_price: float, exit_reason: str,
             "pnl_usd": pnl_usd,
             "pnl_pct": pnl_pct,
             "roe_pct": roe_pct,
+            "price_move_pct": price_move_pct,
             "hold_time_seconds": hold_seconds,
             "max_drawdown_pct": 0,  # not tracked yet
             "exit_reason": reason_tag,
@@ -182,7 +185,7 @@ def log_outcome(pos: TrackedPosition, exit_price: float, exit_reason: str,
         tag = " (est)" if estimated else ""
         logging.info(
             f"📝 Outcome logged{tag}: {pos.side} {pos.symbol} "
-            f"PnL=${pnl_usd:+.2f} ({roe_pct:+.1f}% ROE @ {leverage:.1f}x) "
+            f"PnL=${pnl_usd:+.2f} ({price_move_pct:+.2f}% move) "
             f"held={hold_seconds}s reason={exit_reason}"
         )
     except Exception as e:

@@ -64,6 +64,7 @@ class DecisionDB:
                 pnl_usd REAL,
                 pnl_pct REAL,
                 roe_pct REAL,
+                price_move_pct REAL,
                 hold_time_seconds INTEGER,
                 max_drawdown_pct REAL,
                 exit_reason TEXT,
@@ -84,10 +85,14 @@ class DecisionDB:
             CREATE INDEX IF NOT EXISTS idx_outcomes_symbol ON outcomes(symbol);
             CREATE INDEX IF NOT EXISTS idx_alerts_ts ON alerts(timestamp);
         """)
-            # Migration: add roe_pct column if missing
+            # Migration: add missing columns
             columns = {row[1] for row in self._conn.execute("PRAGMA table_info(outcomes)").fetchall()}
             if "roe_pct" not in columns:
                 self._conn.execute("ALTER TABLE outcomes ADD COLUMN roe_pct REAL")
+            if "price_move_pct" not in columns:
+                self._conn.execute("ALTER TABLE outcomes ADD COLUMN price_move_pct REAL")
+            if "price_move_pct" not in columns:
+                self._conn.execute("ALTER TABLE outcomes ADD COLUMN price_move_pct REAL")
             # Migration: add token columns if missing
             decision_columns = {row[1] for row in self._conn.execute("PRAGMA table_info(decisions)").fetchall()}
             if "tokens_in" not in decision_columns:
@@ -144,9 +149,9 @@ class DecisionDB:
             self._conn.execute(
                 """INSERT INTO outcomes
                    (timestamp, cycle_id, symbol, direction, entry_price, exit_price,
-                    size_usd, pnl_usd, pnl_pct, roe_pct, hold_time_seconds, max_drawdown_pct,
+                    size_usd, pnl_usd, pnl_pct, roe_pct, price_move_pct, hold_time_seconds, max_drawdown_pct,
                     exit_reason, decision_snapshot)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     now,
                     outcome.get("cycle_id"),
@@ -158,6 +163,7 @@ class DecisionDB:
                     outcome.get("pnl_usd"),
                     outcome.get("pnl_pct"),
                     outcome.get("roe_pct"),
+                    outcome.get("price_move_pct"),
                     outcome.get("hold_time_seconds", 0),
                     outcome.get("max_drawdown_pct", 0),
                     outcome.get("exit_reason", "unknown"),
@@ -233,7 +239,7 @@ class DecisionDB:
         with self._lock:
             rows = self._conn.execute(
                 """SELECT timestamp, symbol, direction, entry_price, exit_price,
-                          size_usd, pnl_usd, pnl_pct, roe_pct, hold_time_seconds, exit_reason
+                          size_usd, pnl_usd, pnl_pct, roe_pct, price_move_pct, hold_time_seconds, exit_reason
                    FROM outcomes ORDER BY id DESC LIMIT ?""",
                 (limit,),
             ).fetchall()
@@ -248,8 +254,9 @@ class DecisionDB:
                 "pnl_usd": r[6],
                 "pnl_pct": r[7],
                 "roe_pct": r[8],
-                "hold_time_seconds": r[9],
-                "exit_reason": r[10],
+                "price_move_pct": r[9],
+                "hold_time_seconds": r[10],
+                "exit_reason": r[11],
             }
             for r in rows
         ]

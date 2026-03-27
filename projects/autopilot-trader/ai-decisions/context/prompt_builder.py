@@ -30,7 +30,7 @@ class PromptBuilder:
         sections = []
         section_tokens = {}
 
-        # Resolve equity early — needed by positions ROE calc below
+        # Resolve equity early — needed for exposure headroom calc below
         equity = self.ai_trader.data_reader.read_equity()
         if equity <= 0:
             equity = signals_config.get("accountEquity", 1000)  # fallback for tests
@@ -39,13 +39,13 @@ class PromptBuilder:
         if positions:
             pos_summary = []
             for p in positions:
-                roe = self._calc_roe(p, equity)
+                move_pct = self._calc_move_pct(p, equity)
                 pos_summary.append(
                     f"- {p.get('symbol', '?')} {p.get('side', '?').upper()} "
                     # MED-26: Canonical field is 'position_size_usd' (written by bot's _write_ai_result)
                     f"${p.get('position_size_usd', p.get('size_usd', 0)):.0f} "
                     f"@ {p.get('entry_price', 0):.4f} "
-                    f"(ROE: {roe:+.1f}%)"
+                    f"(move: {move_pct:+.2f}%)"
                 )
             pos_section = "## Open Positions\n" + "\n".join(pos_summary)
         else:
@@ -86,10 +86,10 @@ class PromptBuilder:
             out_lines = []
             for o in outcomes[:5]:
                 emoji = "🟢" if o.get("pnl_usd", 0) > 0 else "🔴"
-                roe = o.get("roe_pct", o.get("pnl_pct", 0))
+                move = o.get("price_move_pct", o.get("pnl_pct", 0))
                 out_lines.append(
                     f"{emoji} {o['symbol']} {o.get('direction', '?')} → "
-                    f"${o.get('pnl_usd', 0):+.2f} (ROE {roe:+.1f}%) "
+                    f"${o.get('pnl_usd', 0):+.2f} (move {move:+.2f}%) "
                     f"held {o.get('hold_time_seconds', 0) // 60}min"
                 )
             out_section = "## Recent Trade Outcomes\n" + "\n".join(out_lines)
@@ -227,12 +227,8 @@ class PromptBuilder:
         return "\n\n".join(s for s in sections if s)
 
     @staticmethod
-    def _calc_roe(position: dict, equity: float = 0) -> float:
-        """Calculate ROE% for a position.
-        
-        For cross margin: ROE = raw_move% × (notional / equity)
-        Falls back to isolated margin (raw_move% × leverage) if equity is unavailable.
-        """
+    def _calc_move_pct(position: dict, equity: float = 0) -> float:
+        """Calculate raw price move % for a position. Positive = profitable direction."""
         entry = position.get("entry_price", 0)
         current = position.get("current_price", entry)
         side = position.get("side", "long")
@@ -241,11 +237,4 @@ class PromptBuilder:
         raw = (current - entry) / entry * 100
         if side == "short":
             raw = -raw
-        # Cross margin: use notional/equity when available
-        notional = position.get("position_size_usd", position.get("size_usd", 0))
-        if equity > 0 and notional > 0:
-            effective_lev = notional / equity
-            return raw * effective_lev
-        # Fallback: isolated margin (leverage from position data)
-        leverage = position.get("leverage", 1.0)
-        return raw * leverage
+        return raw

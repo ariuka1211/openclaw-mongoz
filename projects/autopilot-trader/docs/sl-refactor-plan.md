@@ -2,8 +2,16 @@
 
 **Created:** 2026-03-27
 **Author:** Subagent (plan-sl-refactor)
-**Status:** DRAFT — awaiting John's review
-**Branch:** `sl-no-roe` (to be created)
+**Status:** APPROVED — John approved 2026-03-27 14:31 MDT
+**Branch:** `sl-no-roe` (created)
+
+### Review Findings (fixed 2026-03-27)
+1. ✅ Config.py default mismatch: `stagnation_roe_pct: float = 8.0` vs config.yml 5.0 → rename to `stagnation_move_pct: float = 0.5`
+2. ✅ Hard SL tolerance: keep `+ 0.001` after removing `* state.leverage` → `if move_pct <= -abs(cfg.hard_sl_pct) + 0.001:`
+3. ✅ `price_move_pct` DB column = alias for existing `pnl_pct` → kept for explicitness
+4. ✅ State migration sign: works because `current_roe()` flips sign for shorts → add comment
+5. ✅ `DEFAULT_TIERS` hardcoded values need ÷10 conversion too
+6. ✅ prompt_builder `_calc_roe` → `_calc_move_pct`, remove leverage multiplication
 
 ---
 

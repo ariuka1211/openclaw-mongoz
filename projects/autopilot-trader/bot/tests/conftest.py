@@ -45,16 +45,16 @@ def config():
         trailing_sl_trigger_pct=0.5,
         trailing_sl_step_pct=0.95,
         dsl_enabled=True,
-        stagnation_roe_pct=8.0,
+        stagnation_move_pct=0.5,
         stagnation_minutes=90,
         price_poll_interval=5,
         price_call_delay=5.0,
         track_manual_positions=False,
         dsl_tiers=[
-            {"trigger_pct": 7, "lock_hw_pct": 40, "trailing_buffer_roe": 5, "consecutive_breaches": 3},
-            {"trigger_pct": 12, "lock_hw_pct": 55, "trailing_buffer_roe": 4, "consecutive_breaches": 2},
-            {"trigger_pct": 15, "lock_hw_pct": 75, "trailing_buffer_roe": 3, "consecutive_breaches": 2},
-            {"trigger_pct": 20, "lock_hw_pct": 85, "trailing_buffer_roe": 2, "consecutive_breaches": 2},
+            {"trigger_pct": 0.7, "lock_hw_pct": 40, "trailing_buffer_pct": 0.5, "consecutive_breaches": 3},
+            {"trigger_pct": 1.2, "lock_hw_pct": 55, "trailing_buffer_pct": 0.4, "consecutive_breaches": 2},
+            {"trigger_pct": 1.5, "lock_hw_pct": 75, "trailing_buffer_pct": 0.3, "consecutive_breaches": 2},
+            {"trigger_pct": 2.0, "lock_hw_pct": 85, "trailing_buffer_pct": 0.2, "consecutive_breaches": 2},
         ],
     )
 
@@ -74,14 +74,14 @@ def dsl_config():
     """Default DSLConfig matching the default tiers in dsl.py."""
     return DSLConfig(
         tiers=[
-            DSLTier(trigger_pct=3,  lock_hw_pct=30, trailing_buffer_roe=6, consecutive_breaches=3),
-            DSLTier(trigger_pct=7,  lock_hw_pct=40, trailing_buffer_roe=5, consecutive_breaches=3),
-            DSLTier(trigger_pct=12, lock_hw_pct=55, trailing_buffer_roe=4, consecutive_breaches=2),
-            DSLTier(trigger_pct=15, lock_hw_pct=75, trailing_buffer_roe=3, consecutive_breaches=2),
-            DSLTier(trigger_pct=20, lock_hw_pct=85, trailing_buffer_roe=2, consecutive_breaches=2),
-            DSLTier(trigger_pct=30, lock_hw_pct=90, trailing_buffer_roe=1, consecutive_breaches=2),
+            DSLTier(trigger_pct=0.3, lock_hw_pct=30, trailing_buffer_pct=0.6, consecutive_breaches=3),
+            DSLTier(trigger_pct=0.7, lock_hw_pct=40, trailing_buffer_pct=0.5, consecutive_breaches=3),
+            DSLTier(trigger_pct=1.2, lock_hw_pct=55, trailing_buffer_pct=0.4, consecutive_breaches=2),
+            DSLTier(trigger_pct=1.5, lock_hw_pct=75, trailing_buffer_pct=0.3, consecutive_breaches=2),
+            DSLTier(trigger_pct=2.0, lock_hw_pct=85, trailing_buffer_pct=0.2, consecutive_breaches=2),
+            DSLTier(trigger_pct=3.0, lock_hw_pct=90, trailing_buffer_pct=0.1, consecutive_breaches=2),
         ],
-        stagnation_roe_pct=8.0,
+        stagnation_move_pct=0.5,
         stagnation_minutes=60,
         hard_sl_pct=1.25,
     )

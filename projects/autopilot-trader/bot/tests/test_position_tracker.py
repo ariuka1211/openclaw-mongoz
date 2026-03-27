@@ -155,7 +155,7 @@ class TestUpdatePriceDsl:
     """Tests for PositionTracker.update_price() in DSL mode."""
 
     def test_update_price_dsl_enabled_delegates_to_evaluate_dsl(self, config):
-        """DSL enabled + dsl_state → delegates to evaluate_dsl (high_water_roe updated)."""
+        """DSL enabled + dsl_state → delegates to evaluate_dsl (high_water_move_pct updated)."""
         tracker = PositionTracker(config)
         pos = TrackedPosition(
             market_id=1, symbol="BTC", side="long",
@@ -168,11 +168,11 @@ class TestUpdatePriceDsl:
             ),
         )
         tracker.positions[1] = pos
-        # Small price change: ROE=2%, below min tier trigger (7%), so no DSL actions
+        # Small price change: move=0.2%, below min tier trigger (0.3%), so no DSL actions
         result = tracker.update_price(1, 50100.0)
         assert result is None
-        # Verify DSL state was updated (high_water_roe reflects the move)
-        assert pos.dsl_state.high_water_roe == pytest.approx(2.0)
+        # Verify DSL state was updated (high_water_move_pct reflects the move)
+        assert pos.dsl_state.high_water_move_pct == pytest.approx(0.2)  # (50100-50000)/50000*100 = 0.2%
 
     def test_update_price_dsl_has_trailing_sl_alongside(self, config):
         """DSL mode includes trailing SL evaluation after DSL."""
@@ -191,6 +191,9 @@ class TestUpdatePriceDsl:
         
         # Price reaches trailing SL trigger but not DSL tier trigger
         # trailing_sl_trigger_pct=0.5%, entry=50000 → trigger at 50250
+        # Note: 0.5% move = stagnation_move_pct threshold, so we mark stagnation_alerted
+        # to prevent the first-time timer-start tuple from being returned
+        pos._stagnation_alerted = True
         result = tracker.update_price(1, 50250.0)
         assert result is None  # Just activated, no exit yet
         assert pos.trailing_sl_activated is True
@@ -205,13 +208,13 @@ class TestUpdatePriceDsl:
             high_water_time=datetime.now(timezone.utc),
         )
         # Pre-set DSL state to simulate a position that already hit high tier
-        dsl_state.high_water_roe = 15.0
+        dsl_state.high_water_move_pct = 1.5
         # Use DSLTier object directly (not dict from config)
         dsl_state.current_tier = DSLTier(
-            trigger_pct=7, lock_hw_pct=40,
-            trailing_buffer_roe=5, consecutive_breaches=3,
+            trigger_pct=0.7, lock_hw_pct=40,
+            trailing_buffer_pct=0.5, consecutive_breaches=3,
         )
-        dsl_state.locked_floor_roe = 10.0  # locked at 10% ROE
+        dsl_state.locked_floor_pct = 1.0  # locked at 1% move
         dsl_state.breach_count = 3
 
         pos = TrackedPosition(
@@ -221,8 +224,8 @@ class TestUpdatePriceDsl:
         )
         tracker.positions[1] = pos
 
-        # Price drops so ROE < locked_floor_roe (10%)
-        # At entry=50000, lev=10 → ROE < 10% when move < 1%, price < 50500
+        # Price drops so move < locked_floor_pct (1%)
+        # At entry=50000, move < 1% when price < 50500
         result = tracker.update_price(1, 49800.0)
         assert result is not None
         assert isinstance(result, tuple)
@@ -237,8 +240,8 @@ class TestUpdatePriceDsl:
             high_water_price=52000.0,
             high_water_time=datetime.now(timezone.utc),
         )
-        # Pre-set: high_water_roe above min trigger, stagnation starts
-        dsl_state.high_water_roe = 5.0  # above min tier trigger
+        # Pre-set: high_water_move_pct above min trigger, stagnation starts
+        dsl_state.high_water_move_pct = 0.5  # above min tier trigger (0.3%)
 
         pos = TrackedPosition(
             market_id=1, symbol="BTC", side="long",
@@ -247,7 +250,7 @@ class TestUpdatePriceDsl:
         )
         tracker.positions[1] = pos
 
-        # Price movement causes high_water_roe update which triggers stagnation_started.
+        # Price movement causes high_water_move_pct update which triggers stagnation_started.
         # The _stagnation_alerted flag fires the alert tuple on first detection.
         result = tracker.update_price(1, 51000.0)
         assert result is not None

@@ -367,15 +367,23 @@ class TestQuotaCheckChain:
 class TestDSLEvaluationChain:
 
     def test_tracker_update_price_returns_action_on_trigger(self, config_no_dsl, mock_api, mock_alerter):
-        """update_price with legacy trailing mode → returns action on trigger."""
+        """update_price with legacy trailing mode → activates trailing SL on price up."""
         bot = _build_mock_bot(config_no_dsl, mock_api, mock_alerter)
         tracker = bot.tracker
 
         tracker.add_position(1, "BTC", "long", 50000.0, 0.1)
 
-        # Price up 5% → trailing takes profit should trigger
+        # Price up 5% → trailing SL activates (trigger=0.5%, step=0.95%)
+        # SL level = 52500 * (1 - 0.95/100) ≈ 52001, price still above → no trigger yet
         result = tracker.update_price(1, 52500.0)
-        assert result is not None
+        # Verify the trailing SL activated (level is set)
+        pos = tracker.positions[1]
+        assert pos.trailing_sl_activated is True
+        assert pos.trailing_sl_level is not None
+
+        # Now price drops below ratcheted level → triggers trailing_sl
+        result = tracker.update_price(1, 51900.0)
+        assert result == "trailing_sl"
 
     def test_tracker_update_price_dsl_hard_sl_action(self, config, mock_api, mock_alerter):
         """update_price with price below hard SL → returns 'hard_sl' action."""
@@ -384,25 +392,25 @@ class TestDSLEvaluationChain:
 
         tracker.add_position(1, "TEST", "long", 100.0, 1.0, leverage=10.0)
 
-        # Price well below hard SL → ROE < -1.25%
+        # Price well below hard SL → move < -1.25%
         result = tracker.update_price(1, 98.0)
         assert result == "hard_sl"
 
     def test_dsl_evaluate_dsl_returns_none_at_no_trigger(self, dsl_config, dsl_state_long):
-        """evaluate_dsl at low ROE → returns None (no trigger)."""
+        """evaluate_dsl at low move → returns None (no trigger)."""
         result = evaluate_dsl(dsl_state_long, 100.5, dsl_config)
         assert result is None
 
     def test_dsl_evaluate_dsl_can_return_tier_lock_action(self, dsl_config, dsl_state_long):
-        """evaluate_dsl with high ROE + multiple breaches → can return 'tier_lock'."""
-        # entry=100, leverage=10x → ROE = (price_diff/entry)*leverage*100
-        # Tier 0: 3% trigger, 6% trailing buffer, 3 consecutive breaches
-        # First: push price up to set HW ROE (tier 0 activates)
-        evaluate_dsl(dsl_state_long, 103.0, dsl_config)  # ROE=30%, HW=30%, tier 0, floor=24%
-        # Then drop price to 3 consecutive breaches below locked floor
-        r1 = evaluate_dsl(dsl_state_long, 100.5, dsl_config)  # ROE=5%, below 24% floor → breach 1
-        r2 = evaluate_dsl(dsl_state_long, 100.5, dsl_config)  # ROE=5%, below 24% floor → breach 2
-        r3 = evaluate_dsl(dsl_state_long, 100.5, dsl_config)  # ROE=5%, below 24% floor → breach 3 → tier_lock
+        """evaluate_dsl with high move + multiple breaches → can return 'tier_lock'."""
+        # entry=100, move = (price - 100)/100 * 100 = price - 100
+        # Tier 0: 0.3% trigger, 0.6% trailing buffer, 3 consecutive breaches
+        # First: push price up to set high water move (tier 0 activates)
+        evaluate_dsl(dsl_state_long, 103.0, dsl_config)  # move=3%, HW=3%, tier 0, floor=3-0.6=2.4%
+        # Then drop price to 3 consecutive breaches below floor
+        r1 = evaluate_dsl(dsl_state_long, 100.5, dsl_config)  # move=0.5%, below 2.4% floor → breach 1
+        r2 = evaluate_dsl(dsl_state_long, 100.5, dsl_config)  # move=0.5%, below 2.4% floor → breach 2
+        r3 = evaluate_dsl(dsl_state_long, 100.5, dsl_config)  # move=0.5%, below 2.4% floor → breach 3 → tier_lock
         assert r3 == "tier_lock"
 
 

@@ -122,11 +122,11 @@ class TestFromYaml:
             "dsl_tiers:\n"
             "  - trigger_pct: 5\n"
             "    lock_hw_pct: 30\n"
-            "    trailing_buffer_roe: 4\n"
+            "    trailing_buffer_pct: 0.4\n"
             "    consecutive_breaches: 2\n"
             "  - trigger_pct: 10.0\n"
             "    lock_hw_pct: 60.0\n"
-            "    trailing_buffer_roe: 2.5\n"
+            "    trailing_buffer_pct: 0.25\n"
             "    consecutive_breaches: 1\n"
         )
         cfg = BotConfig.from_yaml(str(cfg_file))
@@ -243,8 +243,8 @@ class TestValidate:
     def test_validate_dsl_tiers_valid_no_errors(self, config):
         """Valid DSL tiers → no errors for tier-specific issues."""
         config.dsl_tiers = [
-            {"trigger_pct": 5, "lock_hw_pct": 30, "trailing_buffer_roe": 4, "consecutive_breaches": 2},
-            {"trigger_pct": 10, "lock_hw_pct": 60, "trailing_buffer_roe": 3, "consecutive_breaches": 1},
+            {"trigger_pct": 5, "lock_hw_pct": 30, "trailing_buffer_pct": 4, "consecutive_breaches": 2},
+            {"trigger_pct": 10, "lock_hw_pct": 60, "trailing_buffer_pct": 3, "consecutive_breaches": 1},
         ]
         errors = config.validate()
         tier_errors = [e for e in errors if "tier" in e.lower() or "trigger_pct" in e or "lock_hw_pct" in e]
@@ -277,8 +277,8 @@ class TestDefaults:
     def test_default_dsl_enabled(self):
         assert BotConfig().dsl_enabled is True
 
-    def test_default_stagnation_roe_pct(self):
-        assert BotConfig().stagnation_roe_pct == 8.0
+    def test_default_stagnation_move_pct(self):
+        assert BotConfig().stagnation_move_pct == 0.5
 
     def test_default_stagnation_minutes(self):
         assert BotConfig().stagnation_minutes == 90

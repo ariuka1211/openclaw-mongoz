@@ -121,12 +121,12 @@ def test_serialize_dsl_state_full_state_all_fields(config, mock_api, mock_alerte
         side="long",
         entry_price=100.0,
         leverage=15.0,
-        high_water_roe=25.5,
+        high_water_move_pct=2.55,
         high_water_price=105.0,
         high_water_time=now,
         current_tier=DSLTier(trigger_pct=12, lock_hw_pct=55),
         breach_count=2,
-        locked_floor_roe=10.0,
+        locked_floor_pct=1.0,
         stagnation_active=True,
         stagnation_started=now,
     )
@@ -134,11 +134,13 @@ def test_serialize_dsl_state_full_state_all_fields(config, mock_api, mock_alerte
     assert result["side"] == "long"
     assert result["entry_price"] == 100.0
     assert result["leverage"] == 15.0
-    assert result["high_water_roe"] == 25.5
+    assert result["high_water_move_pct"] == 2.55
+    assert result["high_water_roe"] == pytest.approx(2.55 * 15.0)  # backward compat: move% * leverage
     assert result["high_water_price"] == 105.0
     assert result["current_tier_trigger"] == 12
     assert result["breach_count"] == 2
-    assert result["locked_floor_roe"] == 10.0
+    assert result["locked_floor_pct"] == 1.0
+    assert result["locked_floor_roe"] == pytest.approx(1.0 * 15.0)  # backward compat: move% * leverage
     assert result["stagnation_active"] is True
 
 
@@ -185,7 +187,7 @@ def test_save_load_roundtrip_positions_restored(config, mock_api, mock_alerter, 
         side="long",
         entry_price=50000.0,
         leverage=10.0,
-        high_water_roe=15.0,
+        high_water_move_pct=1.5,
         high_water_price=52000.0,
         current_tier=DSLTier(trigger_pct=12, lock_hw_pct=55),
     )
@@ -229,12 +231,12 @@ def test_save_load_roundtrip_dsl_state_fields(config, mock_api, mock_alerter, mo
         side="short",
         entry_price=3000.0,
         leverage=10.0,
-        high_water_roe=8.0,
+        high_water_move_pct=0.8,
         high_water_price=2900.0,
         high_water_time=hw_time,
         current_tier=DSLTier(trigger_pct=7, lock_hw_pct=40),
         breach_count=1,
-        locked_floor_roe=5.0,
+        locked_floor_pct=0.5,
         stagnation_active=True,
         stagnation_started=hw_time,
     )
@@ -254,10 +256,10 @@ def test_save_load_roundtrip_dsl_state_fields(config, mock_api, mock_alerter, mo
     assert saved_data["dsl"]["side"] == "short"
     assert saved_data["dsl"]["entry_price"] == 3000.0
     assert saved_data["dsl"]["leverage"] == 10.0
-    assert saved_data["dsl"]["high_water_roe"] == 8.0
+    assert saved_data["dsl"]["high_water_move_pct"] == 0.8
     assert saved_data["dsl"]["current_tier_trigger"] == 7
     assert saved_data["dsl"]["breach_count"] == 1
-    assert saved_data["dsl"]["locked_floor_roe"] == 5.0
+    assert saved_data["dsl"]["locked_floor_pct"] == 0.5
     assert saved_data["dsl"]["stagnation_active"] is True
 
 
@@ -325,12 +327,12 @@ def test_restore_dsl_state_valid_dict_fields_correct(config, mock_api, mock_aler
     dsl_data = {
         "side": "long",
         "entry_price": 100.0,
-        "high_water_roe": 15.0,
+        "high_water_move_pct": 1.5,
         "high_water_price": 105.0,
         "high_water_time": "2024-06-15T10:30:00+00:00",
         "current_tier_trigger": 12,
         "breach_count": 2,
-        "locked_floor_roe": 10.0,
+        "locked_floor_pct": 1.0,
         "stagnation_active": True,
         "stagnation_started": "2024-06-15T10:30:00+00:00",
         "leverage": 15.0,
@@ -339,10 +341,10 @@ def test_restore_dsl_state_valid_dict_fields_correct(config, mock_api, mock_aler
     import asyncio
     asyncio.get_event_loop().run_until_complete(sm._restore_dsl_state(dsl_data, pos))
 
-    assert pos.dsl_state.high_water_roe == 15.0
+    assert pos.dsl_state.high_water_move_pct == 1.5
     assert pos.dsl_state.high_water_price == 105.0
     assert pos.dsl_state.breach_count == 2
-    assert pos.dsl_state.locked_floor_roe == 10.0
+    assert pos.dsl_state.locked_floor_pct == 1.0
     assert pos.dsl_state.stagnation_active is True
     assert pos.dsl_state.leverage == 15.0
     assert pos.dsl_state.current_tier == tier2
@@ -357,7 +359,7 @@ def test_restore_dsl_state_missing_fields_uses_defaults(config, mock_api, mock_a
 
     dsl = DSLState(
         side="long", entry_price=100.0, leverage=10.0,
-        high_water_roe=5.0, breach_count=3,
+        high_water_move_pct=0.5, breach_count=3,
     )
     pos = TrackedPosition(
         market_id=1, symbol="BTC", side="long",
@@ -369,7 +371,7 @@ def test_restore_dsl_state_missing_fields_uses_defaults(config, mock_api, mock_a
     import asyncio
     asyncio.get_event_loop().run_until_complete(sm._restore_dsl_state(dsl_data, pos))
 
-    assert pos.dsl_state.high_water_roe == 0.0
+    assert pos.dsl_state.high_water_move_pct == 0.0
     assert pos.dsl_state.high_water_price == 0.0
     assert pos.dsl_state.breach_count == 0
     assert pos.dsl_state.stagnation_active is False

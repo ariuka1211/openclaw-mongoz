@@ -46,7 +46,7 @@ class LighterAPI:
         self.tracked_market_ids: list[int] = self._load_tracked_markets()
 
         # Mark price cache — derived from unrealized_pnl during position sync
-        # More accurate than recent_trades for ROE/stop-loss calculations
+        # More accurate than recent_trades for stop-loss calculations
         self._mark_prices: dict[int, dict] = {}  # market_id → {"price": float, "time": float}
 
         # Volume quota tracking — must exist before any async calls
@@ -275,7 +275,7 @@ class LighterAPI:
         """Cache mark prices derived from unrealized_pnl (from account API).
 
         This is the authoritative price the exchange uses for PnL calculations.
-        More accurate than recent_trades for ROE and stop-loss evaluation.
+        More accurate than recent_trades for stop-loss evaluation.
         """
         for pos in positions:
             mid = pos["market_id"]
@@ -309,7 +309,7 @@ class LighterAPI:
         return None
 
     async def get_price_with_mark_fallback(self, market_id: int) -> float | None:
-        """Get price for ROE evaluation. Tries mark price first, falls back to recent_trades."""
+        """Get price for DSL evaluation. Tries mark price first, falls back to recent_trades."""
         mark = self.get_mark_price(market_id)
         if mark:
             return mark

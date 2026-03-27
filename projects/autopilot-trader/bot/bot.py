@@ -167,7 +167,7 @@ class LighterCopilot:
             logging.info(f"   Mode: DSL (Dynamic Stop Loss)")
             logging.info(f"   Leverage: {self.cfg.dsl_leverage}x")
             logging.info(f"   Hard SL: {self.cfg.hard_sl_pct}% from entry")
-            logging.info(f"   Stagnation: {self.cfg.stagnation_roe_pct}% ROE, {self.cfg.stagnation_minutes}min")
+            logging.info(f"   Stagnation: {self.cfg.stagnation_move_pct}% move, {self.cfg.stagnation_minutes}min")
             logging.info(f"   Trailing SL: trigger +{self.cfg.trailing_sl_trigger_pct}%, step {self.cfg.trailing_sl_step_pct}%")
             for t in self.tracker.dsl_cfg.tiers:
                 logging.info(f"   Tier: +{t.trigger_pct}% → lock {t.lock_hw_pct}% HW ({t.consecutive_breaches} breaches)")
@@ -217,7 +217,7 @@ class LighterCopilot:
         except Exception as e:
             logging.warning(f"⚠️ Account tier check failed: {e}")
 
-        # Check balance — needed for effective leverage (cross margin ROE)
+        # Check balance — needed for exposure calculations
         logging.info("💰 Checking balance...")
         try:
             balance = await self._get_balance()
@@ -226,9 +226,9 @@ class LighterCopilot:
                 logging.info(f"   Balance: ${balance:,.2f} USDC")
                 _write_equity_file(self, balance)
             else:
-                logging.warning(f"   Balance fetch returned 0 — using default leverage for ROE")
+                logging.warning(f"   Balance fetch returned 0 — using default equity")
         except Exception as e:
-            logging.warning(f"   Could not fetch balance: {e} — using default leverage for ROE")
+            logging.warning(f"   Could not fetch balance: {e} — using default equity")
 
         await self.alerts.send(
             "🟢 *Lighter Copilot* started\n"

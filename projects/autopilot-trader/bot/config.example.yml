@@ -21,35 +21,35 @@ hard_sl_pct: 1.25               # Hard stop loss at -1.25% from entry (DSL: abso
 # DSL (Dynamic Stop Loss) — tiered trailing stop loss
 dsl_enabled: true               # false = use legacy flat trailing
 max_position_usd: 15.0          # Each position notional cap
-dsl_leverage: 10.0              # DSL ROE calc fallback only
-stagnation_roe_pct: 5.0         # Exit if ROE ≥ this but no progress for stagnation_minutes
+dsl_leverage: 10.0              # Deprecated: only used for display, not in SL math
+stagnation_move_pct: 0.5        # Exit if price hasn't moved ≥ this % for stagnation_minutes
 stagnation_minutes: 90          # Minutes of stagnation before auto-exit
 
-# DSL tiers — progressively tighter as profit grows
+# DSL tiers — price move % thresholds, progressively tighter as profit grows
 dsl_tiers:
-  - trigger_pct: 3
+  - trigger_pct: 0.3
     lock_hw_pct: 30
-    trailing_buffer_roe: 6
+    trailing_buffer_pct: 0.6
     consecutive_breaches: 3
-  - trigger_pct: 7
+  - trigger_pct: 0.7
     lock_hw_pct: 40
-    trailing_buffer_roe: 5
+    trailing_buffer_pct: 0.5
     consecutive_breaches: 3
-  - trigger_pct: 12
+  - trigger_pct: 1.2
     lock_hw_pct: 55
-    trailing_buffer_roe: 4
+    trailing_buffer_pct: 0.4
     consecutive_breaches: 2
-  - trigger_pct: 15
+  - trigger_pct: 1.5
     lock_hw_pct: 75
-    trailing_buffer_roe: 3
+    trailing_buffer_pct: 0.3
     consecutive_breaches: 2
-  - trigger_pct: 20
+  - trigger_pct: 2.0
     lock_hw_pct: 85
-    trailing_buffer_roe: 2
+    trailing_buffer_pct: 0.2
     consecutive_breaches: 2
-  - trigger_pct: 30
+  - trigger_pct: 3.0
     lock_hw_pct: 90
-    trailing_buffer_roe: 1
+    trailing_buffer_pct: 0.1
     consecutive_breaches: 2
 
 # Position management scope

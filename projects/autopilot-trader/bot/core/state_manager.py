@@ -48,14 +48,18 @@ class StateManager:
             "side": dsl.side,
             "entry_price": dsl.entry_price,
             "leverage": dsl.leverage,
-            "high_water_roe": dsl.high_water_roe,
+            # New price-move% fields
+            "high_water_move_pct": dsl.high_water_move_pct,
             "high_water_price": dsl.high_water_price,
             "high_water_time": dsl.high_water_time.isoformat() if dsl.high_water_time else None,
             "current_tier_trigger": dsl.current_tier.trigger_pct if dsl.current_tier else None,
             "breach_count": dsl.breach_count,
-            "locked_floor_roe": dsl.locked_floor_roe,
+            "locked_floor_pct": dsl.locked_floor_pct,
             "stagnation_active": dsl.stagnation_active,
             "stagnation_started": dsl.stagnation_started.isoformat() if dsl.stagnation_started else None,
+            # Backward compat: old field names (ROE = price move × leverage)
+            "high_water_roe": dsl.high_water_move_pct * dsl.leverage if dsl.leverage else 0,
+            "locked_floor_roe": dsl.locked_floor_pct * dsl.leverage if (dsl.locked_floor_pct and dsl.leverage) else None,
         }
 
 
@@ -341,25 +345,47 @@ class StateManager:
             saved_stag_time = dsl_data.get("stagnation_started")
             stag_time = datetime.fromisoformat(saved_stag_time) if saved_stag_time else None
 
-            pos.dsl_state.high_water_roe = dsl_data.get("high_water_roe", 0.0)
-            pos.dsl_state.high_water_price = dsl_data.get("high_water_price", 0.0)
-            pos.dsl_state.high_water_time = hw_time
-            pos.dsl_state.current_tier = tier
-            pos.dsl_state.breach_count = dsl_data.get("breach_count", 0)
-            pos.dsl_state.locked_floor_roe = dsl_data.get("locked_floor_roe")
-            pos.dsl_state.stagnation_active = dsl_data.get("stagnation_active", False)
-            pos.dsl_state.stagnation_started = stag_time
             # Backward compat: old state files may have effective_leverage (≈0.1) — ignore if < 1.0
             saved_lev = dsl_data.get("leverage", self.cfg.dsl_leverage)
             if saved_lev < 1.0:
                 saved_lev = self.cfg.dsl_leverage
             pos.dsl_state.leverage = saved_lev
 
+            # Backward compat migration: old ROE fields → new price move % fields
+            if "high_water_move_pct" in dsl_data:
+                pos.dsl_state.high_water_move_pct = dsl_data["high_water_move_pct"]
+            elif "high_water_roe" in dsl_data:
+                old = dsl_data["high_water_roe"]
+                new = old / saved_lev
+                pos.dsl_state.high_water_move_pct = new
+                logging.info(f"Migrated high_water_roe={old} → high_water_move_pct={new:.2f}%")
+            else:
+                pos.dsl_state.high_water_move_pct = 0.0
+
+            pos.dsl_state.high_water_price = dsl_data.get("high_water_price", 0.0)
+            pos.dsl_state.high_water_time = hw_time
+            pos.dsl_state.current_tier = tier
+            pos.dsl_state.breach_count = dsl_data.get("breach_count", 0)
+
+            if "locked_floor_pct" in dsl_data:
+                pos.dsl_state.locked_floor_pct = dsl_data["locked_floor_pct"]
+            elif "locked_floor_roe" in dsl_data and dsl_data["locked_floor_roe"] is not None:
+                old = dsl_data["locked_floor_roe"]
+                new = old / saved_lev
+                pos.dsl_state.locked_floor_pct = new
+                logging.info(f"Migrated locked_floor_roe={old} → locked_floor_pct={new:.2f}%")
+            else:
+                pos.dsl_state.locked_floor_pct = None
+
+            pos.dsl_state.stagnation_move_pct = dsl_data.get("stagnation_move_pct")
+            pos.dsl_state.stagnation_active = dsl_data.get("stagnation_active", False)
+            pos.dsl_state.stagnation_started = stag_time
+
             logging.info(
                 f"🔄 Restored DSL state for {pos.symbol}: "
-                f"HW_ROE={pos.dsl_state.high_water_roe:+.1f}%, "
+                f"HW Move%={pos.dsl_state.high_water_move_pct:+.2f}%, "
                 f"Tier={tier.trigger_pct if tier else 'none'}, "
-                f"Floor={pos.dsl_state.locked_floor_roe}, "
+                f"Floor={pos.dsl_state.locked_floor_pct}, "
                 f"Breaches={pos.dsl_state.breach_count}"
             )
         except Exception as e:

@@ -123,7 +123,7 @@ async def execute_ai_open(bot, cfg, api, tracker, alerter, decision: dict) -> bo
         bot._save_state()
 
         # BUG-06: Verify we can actually fetch price for this position after open
-        # If price is unavailable, the position becomes "orphaned" — DSL can't compute ROE
+        # If price is unavailable, the position becomes "orphaned" — DSL can't compute price move
         price_ok = False
         for attempt in range(1, 4):
             verify_price = await api.get_price_with_mark_fallback(market_id)
@@ -226,12 +226,12 @@ async def execute_ai_close(bot, cfg, api, tracker, alerter, decision: dict) -> b
             bot._close_attempt_cooldown[symbol] = time.monotonic() + bot._close_cooldown_seconds
             # CRITICAL-4: Log with estimated price as fallback after all retries exhausted
             log_outcome(pos, current_price, "ai_close", cfg, tracker, estimated=True)
-            roe = ((current_price - pos.entry_price) / pos.entry_price * 100) if is_long \
+            move_pct = ((current_price - pos.entry_price) / pos.entry_price * 100) if is_long \
                 else ((pos.entry_price - current_price) / pos.entry_price * 100)
             await alerter.send(
                 f"🚨 *CLOSE FAILED ×{attempts}*\n"
                 f"{pos.side.upper()} {symbol}\n"
-                f"ROE: {roe:+.1f}%\n"
+                f"Move: {move_pct:+.2f}%\n"
                 f"Order submitted but NOT filled after {attempts} attempts.\n"
                 f"Cooldown: {bot._close_cooldown_seconds // 60}min — may need manual intervention."
             )
@@ -252,16 +252,16 @@ async def execute_ai_close(bot, cfg, api, tracker, alerter, decision: dict) -> b
     tracker.remove_position(mid_to_close)
     bot._opened_signals.discard(mid_to_close)
 
-    roe = ((exit_price - pos.entry_price) / pos.entry_price * 100) if is_long \
+    move_pct = ((exit_price - pos.entry_price) / pos.entry_price * 100) if is_long \
         else ((pos.entry_price - exit_price) / pos.entry_price * 100)
 
     await alerter.send(
         f"🤖 *AI → CLOSED*\n"
         f"{pos.side.upper()} {symbol}\n"
-        f"ROE: {roe:+.1f}%\n"
+        f"Move: {move_pct:+.2f}%\n"
         f"Reason: {decision.get('reasoning', '?')[:200]}"
     )
-    logging.info(f"AI closed: {pos.side} {symbol} ROE={roe:+.1f}%")
+    logging.info(f"AI closed: {pos.side} {symbol} Move={move_pct:+.2f}%")
 
     # Set cooldown — prevent re-opening this symbol for N minutes
     bot._ai_close_cooldown[symbol] = time.monotonic() + bot._ai_cooldown_seconds
@@ -314,9 +314,9 @@ async def execute_ai_close_all(bot, cfg, api, tracker, alerter, decision: dict) 
             exit_price = fill_price if fill_price else current_price
             # HIGH-6: Log outcome to DB for close_all positions
             log_outcome(pos, exit_price, "ai_close_all", cfg, tracker)
-            roe = ((exit_price - pos.entry_price) / pos.entry_price * 100) if is_long \
+            move_pct = ((exit_price - pos.entry_price) / pos.entry_price * 100) if is_long \
                 else ((pos.entry_price - exit_price) / pos.entry_price * 100)
-            logging.info(f"Emergency closed: {pos.side} {pos.symbol} ROE={roe:+.1f}%")
+            logging.info(f"Emergency closed: {pos.side} {pos.symbol} Move={move_pct:+.2f}%")
             bot._recently_closed[mid] = time.monotonic() + 300
             pos.active_sl_order_id = None  # MED-18
             bot.bot_managed_market_ids.discard(mid)

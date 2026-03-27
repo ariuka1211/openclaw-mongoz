@@ -48,8 +48,8 @@ class BotConfig:
     max_margin_pct: float = 0.15       # 15% equity margin per position
     min_risk_reward: float = 1.5       # minimum R:R ratio
     max_concurrent_signals: int = 3    # max positions from scanner signals
-    dsl_leverage: float = 10.0        # DSL ROE calc fallback only
-    stagnation_roe_pct: float = 8.0
+    dsl_leverage: float = 10.0        # Deprecated: only used for display, not in SL math
+    stagnation_move_pct: float = 0.5   # price move % threshold for stagnation check
     stagnation_minutes: int = 90
     dsl_tiers: list = field(default_factory=list)
 
@@ -116,9 +116,9 @@ class BotConfig:
                     if not isinstance(breaches, int) or breaches < 1:
                         errors.append(f"dsl_tiers[{i}].consecutive_breaches must be >= 1, got {breaches}")
 
-                    buf = tier.get("trailing_buffer_roe")
+                    buf = tier.get("trailing_buffer_pct")
                     if buf is not None and not isinstance(buf, (int, float)):
-                        errors.append(f"dsl_tiers[{i}].trailing_buffer_roe must be numeric or null, got {buf!r}")
+                        errors.append(f"dsl_tiers[{i}].trailing_buffer_pct must be numeric or null, got {buf!r}")
 
                     # Check ascending order
                     if trigger is not None and trigger <= prev_trigger:
@@ -147,7 +147,7 @@ class BotConfig:
                     filtered[key] = int(filtered[key])
         for key in ("trailing_sl_trigger_pct", "trailing_sl_step_pct",
                      "hard_sl_pct",
-                     "dsl_leverage", "stagnation_roe_pct", "price_call_delay",
+                     "dsl_leverage", "stagnation_move_pct", "price_call_delay",
                      "max_risk_pct", "max_margin_pct", "min_risk_reward"):
             if key in filtered and isinstance(filtered[key], str):
                 filtered[key] = float(filtered[key])
@@ -157,6 +157,7 @@ class BotConfig:
                 for tkey in ("trigger_pct", "lock_hw_pct", "consecutive_breaches"):
                     if tkey in tier and isinstance(tier[tkey], str):
                         tier[tkey] = float(tier[tkey]) if tkey != "consecutive_breaches" else int(tier[tkey])
-                if "trailing_buffer_roe" in tier and isinstance(tier["trailing_buffer_roe"], str):
-                    tier["trailing_buffer_roe"] = float(tier["trailing_buffer_roe"])
+                if "trailing_buffer_pct" in tier and isinstance(tier["trailing_buffer_pct"], str):
+                    tier["trailing_buffer_pct"] = float(tier["trailing_buffer_pct"])
         return cls(**filtered)
+

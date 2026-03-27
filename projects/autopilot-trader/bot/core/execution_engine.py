@@ -278,7 +278,10 @@ class ExecutionEngine:
         # HIGH-10: Clear dirty flag — AI trader has had a full tick to read the result
         if self.bot._ai_mode:
             self.bot._result_dirty = False
-        if self.bot._ai_mode and self.tracker.positions:
+        # Always refresh when AI mode is active — even with 0 positions.
+        # Without this, the result file goes stale when all positions close
+        # and the AI trader sees phantom positions forever.
+        if self.bot._ai_mode:
             self.bot.signal_processor._refresh_position_context()
 
         # 1.5. Process signals — AI mode or rule-based

@@ -1,50 +1,37 @@
-# Session Handoff — 2026-03-26 18:52 MDT
+# Session Handoff — 2026-03-26 19:23 MDT
 
-## ✅ COMPLETED: DSL + Trailing SL Implementation
+## ✅ COMPLETED: DSL + Trailing SL Implementation (DEPLOYED & RUNNING)
 
-**Branch:** `dsl-trailing-sl` (fb6211c) — pushed and ready for merge  
-**Tests:** 108/108 pass  
-**Plan:** Updated with full implementation details
+**Branch:** merged to `main` (fa9f46d)  
+**Tests:** 107/107 pass  
+**Bot:** restarted, running clean, zero errors  
+**Status:** LIVE IN PRODUCTION
 
-### Summary
+### What was done
 
-Successfully replaced trailing TP with trailing SL across the entire bot architecture:
+Replaced trailing TP with trailing SL across entire bot architecture:
 
-1. **Added `evaluate_trailing_sl()` to dsl.py** — handles long/short, activation, ratcheting, hard floor
-2. **Overhauled position_tracker.py** — removed trailing TP, added trailing SL in both DSL and legacy modes  
-3. **Updated execution_engine.py** — new trailing_sl exit handler, removed trailing_take_profit
-4. **Migrated state_manager.py** — trailing_active → trailing_sl_activated (backward compat)
-5. **Updated bot.py + configs** — new logging, trailing_sl_trigger_pct=0.5%, trailing_sl_step_pct=0.95%
-6. **Fixed all tests** — 108/108 pass including 9 new trailing SL tests
+1. **`dsl.py`** — Added `evaluate_trailing_sl()` (9 new tests)
+2. **`position_tracker.py`** — Removed `compute_tp_price()`, `_get_sl_pct()`. Added trailing SL in DSL + legacy modes
+3. **`execution_engine.py`** — Removed trailing_take_profit handler. Added trailing_sl exit handler
+4. **`state_manager.py`** — Migrated trailing_active → trailing_sl_activated (backward compat)
+5. **`config.py`** — Removed trailing_tp fields, added trailing_sl fields, stagnation 60→90
+6. **`bot.py`** — Updated logging (3 locations)
+7. **All tests updated** — 107/107 pass
 
-### Found/Fixed Issues During Implementation
+### Config values
+- trailing_sl_trigger_pct: 0.5% (price must rise 0.5% before trailing activates)
+- trailing_sl_step_pct: 0.95% (SL trails 0.95% below high water mark)
+- stagnation_minutes: 90
 
-1. **Math concern:** step=0.95% doesn't guarantee profit at first trigger (by design)
-2. **stagnation_minutes:** 60→90 (loosened as planned)
-3. **Bot logging:** Added trailing SL to DSL startup logs
-4. **Per-position sl_pct:** Now properly used in trailing SL hard floor (AI override respected)
+### Verified on restart
+- Startup logs show new trailing SL config correctly
+- 5 positions restored with DSL state intact
+- No errors, no warnings from our changes
 
-### Code Review Verification
-
-Both subagents completed successfully:
-- ✅ dsl-trailing-sl: Added evaluate_trailing_sl + 9 new tests (45/45 total DSL tests pass)  
-- ✅ tracker-engine-state: Replaced all trailing TP with trailing SL across 4 core files
-
-Manual verification confirmed all old methods removed, new logic integrated correctly.
-
-### Next Steps for John
-
-1. **Review/merge:** Branch `dsl-trailing-sl` ready for production
-2. **Deploy:** Restart bot to pick up new config fields
-3. **Monitor:** Watch trailing SL behavior in practice (activation at +0.5%, ratcheting at 0.95% step)
-4. **Tune:** Adjust trigger/step if too loose/tight
+### Key lesson
+- Initially kept old trailing_tp fields "for transition" — wrong, plan said delete them. Fixed on second audit pass.
 
 ## Open Items
 
-None — implementation complete. Ready for deployment.
-
-## Environment
-
-- Bot running DSL mode, account 719758
-- All services healthy (lighter-scanner, lighter-bot, ai-trader)
-- No restart needed until deployment
+None — this task is complete and deployed.

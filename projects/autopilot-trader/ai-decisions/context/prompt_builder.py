@@ -86,7 +86,7 @@ class PromptBuilder:
             out_lines = []
             for o in outcomes[:5]:
                 emoji = "🟢" if o.get("pnl_usd", 0) > 0 else "🔴"
-                move = o.get("price_move_pct", o.get("pnl_pct", 0))
+                move = o.get("price_move_pct", o.get("pnl_pct", 0)) or 0
                 out_lines.append(
                     f"{emoji} {o['symbol']} {o.get('direction', '?')} → "
                     f"${o.get('pnl_usd', 0):+.2f} (move {move:+.2f}%) "

@@ -367,6 +367,29 @@ class LighterAPI:
         except OSError as e:
             logging.warning(f"Failed to save quota cache: {e}")
 
+    async def get_market_leverage(self, market_id: int) -> float:
+        """Get actual exchange leverage for a market from IMF (default_initial_margin_fraction).
+
+        Uses order_books API to get market specs. Leverage = 1 / IMF (in decimal).
+        IMF is in micro units (1,000,000 = 100%), so divide by 1,000,000.
+        Falls back to cfg.dsl_leverage if API fails.
+        """
+        try:
+            await self._ensure_client()
+            books = await self._order_api.order_books(market_id=market_id)
+            for book in books.order_books:
+                if book.market_id == market_id and hasattr(book, 'default_initial_margin_fraction'):
+                    imf_micro = float(book.default_initial_margin_fraction)
+                    if imf_micro > 0:
+                        # IMF is in micro units: 100,000 micro = 10% = 0.10 decimal
+                        imf_decimal = imf_micro / 1_000_000
+                        leverage = 1.0 / imf_decimal
+                        return min(leverage, 100.0)  # cap at 100x for safety
+                    return self.cfg.dsl_leverage
+        except Exception as e:
+            logging.warning(f"get_market_leverage(market={market_id}) failed: {e}")
+        return self.cfg.dsl_leverage
+
     async def set_leverage(self, market_id: int, leverage: float) -> bool:
         """Set leverage cap on the exchange via IMF. Best-effort — may not work on all markets.
 

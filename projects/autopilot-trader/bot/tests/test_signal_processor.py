@@ -409,6 +409,7 @@ class TestKillSwitch:
         mock_api.open_position = AsyncMock(return_value=True)
         mock_api.get_positions = AsyncMock(return_value=[])
         mock_api.get_price_with_mark_fallback = AsyncMock(return_value=50000.0)
+        mock_api.get_market_leverage = AsyncMock(return_value=10.0)
         mock_api.volume_quota_remaining = 100
 
         mock_bot._get_balance = AsyncMock(return_value=1000)
@@ -493,6 +494,7 @@ class TestSignalHashDedup:
         mock_api.open_position = AsyncMock(return_value=True)
         mock_api.get_positions = AsyncMock(return_value=[])
         mock_api.get_price_with_mark_fallback = AsyncMock(return_value=50000.0)
+        mock_api.get_market_leverage = AsyncMock(return_value=10.0)
         mock_api.volume_quota_remaining = 100
 
         mock_bot._last_signal_hash = "old_hash_123456"
@@ -561,6 +563,7 @@ class TestMinScoreFilter:
         mock_api.open_position = AsyncMock(return_value=True)
         mock_api.get_positions = AsyncMock(return_value=[])
         mock_api.get_price_with_mark_fallback = AsyncMock(return_value=50000.0)
+        mock_api.get_market_leverage = AsyncMock(return_value=10.0)
         mock_api.volume_quota_remaining = 100
         mock_bot._opened_signals = set()
         mock_bot.bot_managed_market_ids = set()

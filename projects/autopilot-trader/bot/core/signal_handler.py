@@ -120,11 +120,21 @@ async def process_signals(bot, cfg, api, tracker, alerter):
             logging.warning(f"⚠️ {symbol}: no live price available, skipping")
             continue
 
-        # Calculate position size from equity and signal
+        # Calculate position size from equity and signal (pure risk-based, no margin cap)
         size_usd, risk_usd, sl_pct, reason = sizer.size_position(balance, opp)
         if size_usd <= 0:
             logging.debug(f"⏭️ {symbol}: sizing rejected — {reason}")
             continue
+        risk_size = size_usd  # remember pre-cap size for logging
+
+        # Apply margin cap using REAL exchange leverage
+        if api:
+            actual_leverage = await api.get_market_leverage(mid)
+            max_notional = balance * cfg.max_margin_pct * actual_leverage
+            if size_usd > max_notional:
+                logging.info(f"📐 {symbol}: margin capped ${risk_size:.2f} → ${max_notional:.2f} (lev={actual_leverage:.0f}x)")
+                size_usd = max_notional
+
         logging.info(f"📐 {symbol}: sized ${size_usd:.2f} (risk=${risk_usd:.2f}, SL={sl_pct*100:.2f}%, {reason})")
 
         # Open the position

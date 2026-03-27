@@ -6,9 +6,9 @@ Replaces the old hardcoded max_position_usd cap.
 
 Rules:
   - Max risk per trade: max_risk_pct of equity (default 2%)
-  - Max margin per position: max_margin_pct of equity (default 15%)
   - Min risk/reward ratio: min_rr (default 1.5)
   - Hard SL floor: never set SL closer than hard_sl_pct
+  - Margin cap (with real exchange leverage) applied by caller
 """
 
 import logging
@@ -20,17 +20,15 @@ class PositionSizer:
     """Calculate position size from equity and signal data."""
 
     __slots__ = (
-        'max_risk_pct', 'max_margin_pct', 'min_rr',
-        'hard_sl_pct', 'leverage', 'max_concurrent',
+        'max_risk_pct', 'min_rr',
+        'hard_sl_pct', 'max_concurrent',
     )
 
     def __init__(self, cfg):
         """Initialize from BotConfig."""
         self.max_risk_pct = getattr(cfg, 'max_risk_pct', 0.02)
-        self.max_margin_pct = getattr(cfg, 'max_margin_pct', 0.15)
         self.min_rr = getattr(cfg, 'min_risk_reward', 1.5)
         self.hard_sl_pct = cfg.hard_sl_pct
-        self.leverage = cfg.dsl_leverage
         self.max_concurrent = getattr(cfg, 'max_concurrent_signals', 3)
 
     def size_position(self, equity, signal):
@@ -59,16 +57,11 @@ class PositionSizer:
         # 3. Position size from risk: size = risk / sl_distance
         size_usd = risk_usd / sl_pct
 
-        # 4. Margin cap
-        max_notional = equity * self.max_margin_pct * self.leverage
-        if size_usd > max_notional:
-            size_usd = max_notional
-
-        # 5. Minimum position check
+        # 4. Minimum position check
         if size_usd < 1.0:
             return (0, 0, 0, f"position ${size_usd:.2f} too small")
 
-        # 6. R:R check
+        # 5. R:R check
         ob_dist_pct = signal.get('obDistancePct')
         if ob_dist_pct is not None and ob_dist_pct > 0:
             rr = ob_dist_pct / (sl_pct * 100)

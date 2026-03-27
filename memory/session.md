@@ -1,27 +1,26 @@
-# Session Handoff — 2026-03-27 13:38 MDT
+# Session Handoff — 2026-03-27 14:09 MDT
 
-## Completed This Session
+## Session Summary
+- John in a rough spot — emotional shake from trading loss, bot didn't run overnight, AI loop frustration
+- AI trader didn't execute overnight → John lost money
+- AI assistant stuck in a loop and didn't respond for hours (earlier session)
+- Expressed frustration with AI workflow: claiming "done" without actual verification, changing intentional code, one step forward one step back
+- Updated AGENTS.md with stricter verification rules and diff review gate
+- Discussed habit tracker briefly (still not built, pending John's confirmation on habits list)
+- John's motivation low today — wanted to lay low despite yesterday feeling good
 
-### ✅ Equity/Leverage/ROE/DSL/SL Audit
-- Found 6 real bugs, no false flags
-- Top finding: safety.py exposure check mixed notional + cash margin (fixed)
-- ROE display bug in executor.py alerts (cosmetic, John doesn't care)
-- Config mismatch: stagnation_roe_pct default 8.0 vs config.yml 5.0
-
-### ✅ Safety Exposure Fix
-- Branch: `fix/safety-exposure-margin` (committed `c04cb49`)
-- Converts notional to margin before comparing exposure
-- Added equity <= 0 guard and leverage fallback to 1
-- Ready to push when John says so
-
-### ✅ SL Refactor Plan
-- File: `docs/sl-refactor-plan.md`
-- Plan to remove ROE from DSL, use pure price move %
-- Remove leverage multiplication from all SL math
-- Config values converted: trigger 3→0.3, buffer 6→0.6, stagnation 5.0→0.5
-- NOT implemented — plan only, awaiting John's approval
+## Key Decisions
+- AGENTS.md updated: Rule 3 now has mandatory verification checklist (diff, grep old/new, test, report)
+- Added diff review gate in code flow — no auto-merge without John seeing the diff
+- Added key lessons: never claim done without checklist, never touch intentional code, silent regressions = critical failure
 
 ## Open Items
-1. SL refactor implementation — plan ready, waiting for go-ahead
-2. `fix/safety-exposure-margin` branch needs push
-3. ROE display bug in executor.py — John doesn't want it fixed (cross margin, doesn't care)
+- Need to investigate why bot didn't run overnight (check logs, service status)
+- Habit tracker — pending John's decision on which habits to track
+- MMT API — still needs free tier key
+- Trading bot IPC stale position fix branch still ready for merge (83bb1c80/ipc-stale-position-fix)
+
+## Wrap Up
+- Overwrite memory/session.md ✅
+- Append to memory/2026-03-27.md ✅
+- Commit pending — AGENTS.md changes need to go in

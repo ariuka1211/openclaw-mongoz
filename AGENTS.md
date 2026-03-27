@@ -9,7 +9,14 @@
 
 1. **ASK before acting.** Reading is free. Writing, restarting, committing — ask first.
 2. **SPAWN subagents for code.** Never debug/edit in main session.
-3. **VERIFY subagent work.** Read changed files fully. Grep for old strings (should be gone) and new strings (should exist). Run tests. Report results. Respawn with specifics if broken — never retry vaguely.
+3. **VERIFY subagent work — MANDATORY checklist, no exceptions.**
+   - `git diff` — read every changed line before accepting
+   - Grep for OLD strings (should be gone) and NEW strings (should exist)
+   - Check no intentional code was silently reverted or changed
+   - Run existing tests if they exist, at minimum `python -c "import <module>"`
+   - Report: "changed X, old-grep=Y, new-grep=Z, tests=PASS/FAIL"
+   - If anything is wrong, respawn with the EXACT diff that failed — never retry vaguely
+   - ❌ Never say "done" unless the checklist is complete
 4. **No tight polling.** Use `background: true`, set timeouts. Polling in a loop wastes tokens and hits rate limits.
 5. **STOP means STOP.** Immediately, no questions.
 6. **No exec for services.** Use `systemctl restart bot|scanner|ai-decisions`. Exec processes die when the session ends.
@@ -41,10 +48,13 @@ Show checklist, complete each:
 1. Check existing code: `find ... | grep -i <keyword>`
 2. Write task prompt (files, context, constraints)
 3. Spawn subagent: `sessions_spawn`, `background: true`
-4. **Verify** — read changed files fully, grep old/new strings, run tests
-5. Branch: `git checkout -b <agent-id>/<short-desc>`
-6. Commit: `git-agent-commit.sh <agent-id> "what" <files>`
-7. Wait for John to say "push" — then push branch to main
+4. **Diff review** — `git diff` in main session, show John the changes, get approval
+5. **Verify** — grep old/new strings, check no regressions, run smoke test
+6. Branch: `git checkout -b <agent-id>/<short-desc>`
+7. Commit: `git-agent-commit.sh <agent-id> "what" <files>`
+8. Wait for John to say "push" — then push branch to main
+
+**⚠️ NEVER merge without John seeing the diff. No auto-merges. No "looks fine."**
 
 ---
 
@@ -60,3 +70,6 @@ Show checklist, complete each:
 
 - Subagents add code that reads vars but never inits `__init__`. Use `__slots__`. Restart services after merge.
 - Trading-specific: `projects/autopilot-trader/docs/trading-lessons.md`
+- **Never claim "done" without running the verification checklist.** "Done" means grep + diff + tests all pass.
+- **Never change intentionally-written code** unless the task explicitly says so. Default: touch only what you're asked to touch.
+- **No silent regressions.** If a subagent undoes previous work, that's a critical failure — report it.

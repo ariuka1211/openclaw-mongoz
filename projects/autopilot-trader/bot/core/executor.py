@@ -75,6 +75,15 @@ async def execute_ai_open(bot, cfg, api, tracker, alerter, decision: dict) -> bo
         logging.warning(f"AI open: no price for {symbol}")
         return False
 
+    # Apply margin cap using REAL exchange leverage
+    balance = await bot._get_balance()
+    actual_leverage = await api.get_market_leverage(market_id)
+    max_notional = balance * cfg.max_margin_pct * actual_leverage
+    risk_size = size_usd
+    if size_usd > max_notional:
+        logging.info(f"📐 {symbol}: margin capped ${risk_size:.2f} → ${max_notional:.2f} (lev={actual_leverage:.0f}x)")
+        size_usd = max_notional
+
     success = await api.open_position(market_id, size_usd, is_long, current_price)
     if success:
         mark_order_submitted(bot)

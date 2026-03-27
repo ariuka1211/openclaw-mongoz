@@ -44,7 +44,7 @@ class BotConfig:
 
     # DSL (Dynamic Stop Loss)
     dsl_enabled: bool = True
-    max_risk_pct: float = 0.02         # 2% equity risk per trade
+    max_risk_pct: float = 0.04         # 4% equity risk per trade
     max_margin_pct: float = 0.15       # 15% equity margin per position
     min_risk_reward: float = 1.5       # minimum R:R ratio
     max_concurrent_signals: int = 3    # max positions from scanner signals

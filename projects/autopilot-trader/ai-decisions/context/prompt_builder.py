@@ -152,10 +152,20 @@ class PromptBuilder:
             available = max_pos - len(positions)
             slots_status = f"📊 {available}/{max_pos} slots open — consider adding positions from strong signals (score ≥ 70, safety ✅)."
 
+        # Exposure headroom
+        max_exp = self.ai_trader.config.get("safety", {}).get("max_total_exposure_pct", 15.0)
+        current_exposure = sum(
+            abs(p.get("position_size_usd", p.get("size_usd", 0))) for p in positions
+        )
+        current_pct = (current_exposure / equity * 100) if equity > 0 else 0
+        headroom_pct = max(max_exp - current_pct, 0)
+        exp_line = f"- Exposure: {current_pct:.1f}% used / {max_exp:.0f}% max ({headroom_pct:.1f}% headroom)"
+
         account_section = (
             f"## Account\n"
             f"- Equity: ${equity:.2f}\n"
             f"{slots_status}\n"
+            f"{exp_line}\n"
             f"- Daily realized PnL: ${self.ai_trader.db.get_daily_pnl():+.2f}\n"
             f"- Win rate: {win_rate:.0f}% ({wins}/{total_trades})\n"
             f"- Avg win: ${avg_win:+.2f} | Avg loss: ${avg_loss:+.2f}\n"

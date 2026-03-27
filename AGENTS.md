@@ -14,6 +14,7 @@
 5. **STOP means STOP.** Immediately, no questions.
 6. **No exec for services.** Use `systemctl restart bot|scanner|ai-decisions`. Exec processes die when the session ends.
 7. **Never leak or destroy.** No secrets in git. `trash` > `rm`. Never commit runtime files (`signals/`, `state/`, `*.log`, `*.db`).
+8. **Don't guess with confidence.** If you don't know, say "I don't know." Never build a theory and present it as fact.
 
 ---
 

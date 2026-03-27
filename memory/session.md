@@ -1,27 +1,30 @@
-# Session Handoff — 2026-03-26 22:42 MDT
+# Session Handoff — 2026-03-27 10:23 MDT
 
-## ✅ COMPLETED: Telegram Alert ROE/PnL Leverage Fix
+## Session Summary
+- Researched MMT API (docs.mmt.gg) — aggregated crypto market data, Lighter support, WebSocket streaming
+- Rebuilt AGENTS.md — trimmed to 8 rules, cleaner structure
+- Added rule 8: "Don't guess with confidence" — John called me out for presenting theories as facts
+- DM session got stuck (empty responses from model) — never fully diagnosed, gateway restart needed
+- John is in a difficult personal stretch — working on habits (sleep, diet, walking 10k)
+- Discussed habit tracker project — wanted SQLite + frontend, spec designed but not built yet
+- Philosophy chat: feelings, consciousness, death, AI agency
 
-### Problem Found
-Telegram alerts and DSL logic used hardcoded `cfg.dsl_leverage` (10.0) for ROE calculations instead of actual exchange leverage. Positions at 25x showed ROE 2.5x too low; at 3x showed 3.3x too high. DSL tier triggers, stagnation, and hard SL all miscalibrated.
+## Key Decisions
+- AGENTS.md rewritten: 8 rules, session flow, code flow, tools, key lessons
+- Habit tracker: SQLite DB + FastAPI + single HTML frontend (Chart.js), port 8069
+- John's habits to track: sleep, diet, walk, screen off, mood
+- MMT API worth integrating later for cross-exchange signals
 
-### Root Cause
-Both signal_handler.py and executor.py fetched real exchange leverage via `get_market_leverage()` for the margin cap, but then passed `leverage=cfg.dsl_leverage` (10.0) to `add_position()`.
+## Open Items
+- DM session may still need troubleshooting if it gets stuck again
+- Habit tracker not built yet — waiting on John's confirmation on habits list
+- MMT API — need to get free tier key first
 
-### Fix Applied
-Changed all 4 `add_position()` calls to use `actual_leverage` instead of `cfg.dsl_leverage`:
-- `signal_handler.py` lines 158, 176
-- `executor.py` lines 104, 120
+## Trading Status
+- Bot fix committed to branch 83bb1c80/ipc-stale-position-fix — execution_engine.py stale position bug
+- Branch ready for merge
 
-### Verified
-- `grep cfg.dsl_leverage` on both files → 0 hits
-- `grep actual_leverage` → 10 hits (4 fixed + 6 original)
-- 105 tests pass, 1 pre-existing failure (unrelated)
-- Bot restarted via systemctl, running clean
-
-### Open Items
-None.
-
-## Session Context
-- Branch: fix/leverage-in-alerts
-- No other changes on working tree except memory files
+## Wrap Up
+- Updated memory/session.md ✅
+- Appending to memory/2026-03-27.md ✅
+- Push to main pending

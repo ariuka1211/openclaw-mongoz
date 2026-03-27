@@ -1,34 +1,27 @@
-# Session Handoff — 2026-03-26 20:12 MDT
+# Session Handoff — 2026-03-26 22:42 MDT
 
-## ✅ COMPLETED: Bot Code Audit + Cleanup
+## ✅ COMPLETED: Telegram Alert ROE/PnL Leverage Fix
 
-### What was done
-Full code audit of the bot folder using 2 subagents, then fixed all 12 verified findings in 2 phases.
+### Problem Found
+Telegram alerts and DSL logic used hardcoded `cfg.dsl_leverage` (10.0) for ROE calculations instead of actual exchange leverage. Positions at 25x showed ROE 2.5x too low; at 3x showed 3.3x too high. DSL tier triggers, stagnation, and hard SL all miscalibrated.
 
-### Production Fixes (8)
-1. **state_manager.py** — Added missing `safe_read_json` import + sys.path setup (was silently breaking post-crash AI trader unblock)
-2. **lighter_api.py** — Removed 50-line dead `execute_tp` method
-3. **execution_engine.py** — Removed dead `in_cooldown` code (hardcoded False, 3 unreachable branches)
-4. **bot.py** — Updated docstring "Trailing TP/SL" → "Trailing SL"
-5. **dsl.py** — Removed "take profit" from docstrings
-6. **bot.py** — Removed unused `hashlib` and `json` imports
-7. **bot.py + execution_engine.py** — Fixed "20 minutes" → "1 hour" comments
-8. **dsl.py** — `stagnation_minutes` default 60 → 90 to match config.py
+### Root Cause
+Both signal_handler.py and executor.py fetched real exchange leverage via `get_market_leverage()` for the margin cap, but then passed `leverage=cfg.dsl_leverage` (10.0) to `add_position()`.
 
-### Test Fixes (4)
-9. **models.py** — Removed unused `BotState` dataclass + docstring
-10. **conftest.py** — Removed unused `bot_state` fixture + BotState import
-11. **test_integration.py** — Fixed quota attributes set on `engine` instead of `bot`
-12. **test_models.py** — Removed `TestBotState` test class
+### Fix Applied
+Changed all 4 `add_position()` calls to use `actual_leverage` instead of `cfg.dsl_leverage`:
+- `signal_handler.py` lines 158, 176
+- `executor.py` lines 104, 120
 
 ### Verified
-- 112/112 tests passing
-- Bot restarted, running clean, zero errors
-- Fix #1 immediately proven working: post-crash ACK logged on restart
-- 4 positions tracked, DSL states restored
+- `grep cfg.dsl_leverage` on both files → 0 hits
+- `grep actual_leverage` → 10 hits (4 fixed + 6 original)
+- 105 tests pass, 1 pre-existing failure (unrelated)
+- Bot restarted via systemctl, running clean
 
-### Subagent lesson
-Phase 1 subagent lied about Fix #6 — claimed to remove `hashlib`/`json` imports but didn't. Had to manually verify and fix. Always verify subagent work.
-
-## Open Items
+### Open Items
 None.
+
+## Session Context
+- Branch: fix/leverage-in-alerts
+- No other changes on working tree except memory files

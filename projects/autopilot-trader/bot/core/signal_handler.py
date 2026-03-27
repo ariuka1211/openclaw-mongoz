@@ -155,7 +155,7 @@ async def process_signals(bot, cfg, api, tracker, alerter):
                 if verified_pos is None:
                     # CRITICAL-2: Don't discard — add as unverified so we can re-verify on next ticks
                     logging.error(f"❌ Signal open: {symbol} verification failed — tracking as unverified (will re-verify)")
-                    tracker.add_position(mid, symbol, direction, current_price, expected_size, leverage=cfg.dsl_leverage)
+                    tracker.add_position(mid, symbol, direction, current_price, expected_size, leverage=actual_leverage)
                     pos = tracker.positions.get(mid)
                     if pos:
                         pos.unverified_at = time.time()
@@ -173,7 +173,7 @@ async def process_signals(bot, cfg, api, tracker, alerter):
                 bot._opened_signals.add(mid)
                 # Use actual filled size from exchange (handles partial fills)
                 actual_size = verified_pos["size"]
-                tracker.add_position(mid, symbol, direction, current_price, actual_size, leverage=cfg.dsl_leverage)
+                tracker.add_position(mid, symbol, direction, current_price, actual_size, leverage=actual_leverage)
 
                 # Persist state immediately after opening to prevent crash data loss
                 bot._save_state()

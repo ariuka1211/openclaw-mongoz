@@ -170,12 +170,12 @@ class LighterCopilot:
             logging.info(f"   Leverage: {self.cfg.dsl_leverage}x")
             logging.info(f"   Hard SL: {self.cfg.hard_sl_pct}% from entry")
             logging.info(f"   Stagnation: {self.cfg.stagnation_roe_pct}% ROE, {self.cfg.stagnation_minutes}min")
+            logging.info(f"   Trailing SL: trigger +{self.cfg.trailing_sl_trigger_pct}%, step {self.cfg.trailing_sl_step_pct}%")
             for t in self.tracker.dsl_cfg.tiers:
                 logging.info(f"   Tier: +{t.trigger_pct}% → lock {t.lock_hw_pct}% HW ({t.consecutive_breaches} breaches)")
         else:
             logging.info(f"   Mode: Legacy trailing")
-            logging.info(f"   TP trigger: +{self.cfg.trailing_tp_trigger_pct}%")
-            logging.info(f"   TP delta: {self.cfg.trailing_tp_delta_pct}%")
+            logging.info(f"   Trailing SL: trigger +{self.cfg.trailing_sl_trigger_pct}%, step {self.cfg.trailing_sl_step_pct}%")
             logging.info(f"   SL: trailing {self.cfg.hard_sl_pct}%")
 
         logging.info("🔗 Initializing Lighter API...")
@@ -235,7 +235,7 @@ class LighterCopilot:
         await self.alerts.send(
             "🟢 *Lighter Copilot* started\n"
             f"Account: {self.cfg.account_index}\n"
-            f"TP: trail {self.cfg.trailing_tp_delta_pct}% after +{self.cfg.trailing_tp_trigger_pct}%\n"
+            f"Trail SL: +{self.cfg.trailing_sl_trigger_pct}% trigger, {self.cfg.trailing_sl_step_pct}% step\n"
             f"SL: trailing {self.cfg.hard_sl_pct}%"
         )
 

@@ -15,92 +15,23 @@ from core.position_tracker import PositionTracker
 from dsl import DSLState, DSLTier
 
 
-# ── compute_tp_price() ──────────────────────────────────────────────
+# ── _compute_hard_floor_price() ─────────────────────────────────────
 
-class TestComputeTpPrice:
-    """Tests for PositionTracker.compute_tp_price()."""
+class TestComputeHardFloorPrice:
+    """Tests for PositionTracker._compute_hard_floor_price()."""
 
-    def test_compute_tp_price_long_hwm_below_trigger_returns_none(self, config_no_dsl):
-        """Long: HWM below trigger → None."""
+    def test_compute_hard_floor_price_long_no_per_position_sl(self, config_no_dsl):
+        """Long, no per-position sl_pct → entry * (1 - config.hard_sl_pct/100)."""
         tracker = PositionTracker(config_no_dsl)
-        # trailing_tp_trigger_pct=3%, entry=50000 → trigger=51500
-        pos = TrackedPosition(
-            market_id=1, symbol="BTC", side="long",
-            entry_price=50000.0, size=0.1, high_water_mark=51000.0,
-        )
-        assert tracker.compute_tp_price(pos) is None
-
-    def test_compute_tp_price_long_hwm_above_trigger_returns_delta(self, config_no_dsl):
-        """Long: HWM above trigger → HWM * (1 - delta_pct/100)."""
-        tracker = PositionTracker(config_no_dsl)
-        # trailing_tp_trigger_pct=3%, entry=50000 → trigger=51500
-        # trailing_tp_delta_pct=1%, HWM=52000 → TP = 52000 * 0.99 = 51480
-        pos = TrackedPosition(
-            market_id=1, symbol="BTC", side="long",
-            entry_price=50000.0, size=0.1, high_water_mark=52000.0,
-        )
-        assert tracker.compute_tp_price(pos) == pytest.approx(51480.0)
-
-    def test_compute_tp_price_short_hwm_above_trigger_returns_none(self, config_no_dsl):
-        """Short: HWM above trigger → None (trigger is below entry for shorts)."""
-        tracker = PositionTracker(config_no_dsl)
-        # trailing_tp_trigger_pct=3%, entry=3000 → trigger=2910
-        # For short, trigger is below entry. If HWM=2950 (above trigger), returns None
-        pos = TrackedPosition(
-            market_id=2, symbol="ETH", side="short",
-            entry_price=3000.0, size=1.0, high_water_mark=2950.0,
-        )
-        assert tracker.compute_tp_price(pos) is None
-
-    def test_compute_tp_price_short_hwm_below_trigger_returns_delta(self, config_no_dsl):
-        """Short: HWM below trigger → HWM * (1 + delta_pct/100)."""
-        tracker = PositionTracker(config_no_dsl)
-        # trailing_tp_trigger_pct=3%, entry=3000 → trigger=2910
-        # HWM=2850 (below trigger) → TP = 2850 * 1.01 = 2878.5
-        pos = TrackedPosition(
-            market_id=2, symbol="ETH", side="short",
-            entry_price=3000.0, size=1.0, high_water_mark=2850.0,
-        )
-        assert tracker.compute_tp_price(pos) == pytest.approx(2878.5)
-
-
-# ── compute_sl_price() ──────────────────────────────────────────────
-
-class TestComputeSlPrice:
-    """Tests for PositionTracker.compute_sl_price()."""
-
-    def test_compute_sl_price_long_no_trailing_sl(self, config_no_dsl):
-        """Long, no trailing_sl_level → entry * (1 - sl_pct/100)."""
-        tracker = PositionTracker(config_no_dsl)
-        # sl_pct=1.25, entry=50000 → SL = 50000 * (1 - 1.25/100) = 49375
+        # hard_sl_pct=1.25, entry=50000 → SL = 50000 * (1 - 1.25/100) = 49375
         pos = TrackedPosition(
             market_id=1, symbol="BTC", side="long",
             entry_price=50000.0, size=0.1, high_water_mark=50000.0,
         )
-        assert tracker.compute_sl_price(pos) == pytest.approx(49375.0)
+        assert tracker._compute_hard_floor_price(pos) == pytest.approx(49375.0)
 
-    def test_compute_sl_price_long_trailing_sl_set(self, config_no_dsl):
-        """Long, trailing_sl_level set → returns that level."""
-        tracker = PositionTracker(config_no_dsl)
-        pos = TrackedPosition(
-            market_id=1, symbol="BTC", side="long",
-            entry_price=50000.0, size=0.1, high_water_mark=52000.0,
-            trailing_sl_level=51000.0,
-        )
-        assert tracker.compute_sl_price(pos) == 51000.0
-
-    def test_compute_sl_price_short_no_trailing_sl(self, config_no_dsl):
-        """Short, no trailing_sl_level → entry * (1 + sl_pct/100)."""
-        tracker = PositionTracker(config_no_dsl)
-        # sl_pct=1.25, entry=3000 → SL = 3000 * (1 + 1.25/100) = 3037.5
-        pos = TrackedPosition(
-            market_id=2, symbol="ETH", side="short",
-            entry_price=3000.0, size=1.0, high_water_mark=3000.0,
-        )
-        assert tracker.compute_sl_price(pos) == pytest.approx(3037.5)
-
-    def test_compute_sl_price_per_position_sl_pct_overrides_config(self, config_no_dsl):
-        """Per-position sl_pct overrides config default."""
+    def test_compute_hard_floor_price_long_per_position_sl_overrides(self, config_no_dsl):
+        """Long, per-position sl_pct overrides config default."""
         tracker = PositionTracker(config_no_dsl)
         # config hard_sl_pct=1.25, but position has sl_pct=2.0
         # entry=50000 → SL = 50000 * (1 - 2.0/100) = 49000
@@ -109,33 +40,29 @@ class TestComputeSlPrice:
             entry_price=50000.0, size=0.1, high_water_mark=50000.0,
             sl_pct=2.0,
         )
-        assert tracker.compute_sl_price(pos) == pytest.approx(49000.0)
+        assert tracker._compute_hard_floor_price(pos) == pytest.approx(49000.0)
 
-
-# ── _get_sl_pct() ───────────────────────────────────────────────────
-
-class TestGetSlPct:
-    """Tests for PositionTracker._get_sl_pct()."""
-
-    def test_get_sl_pct_none_uses_config(self, config_no_dsl):
-        """Position sl_pct=None → uses config.hard_sl_pct."""
+    def test_compute_hard_floor_price_short_no_per_position_sl(self, config_no_dsl):
+        """Short, no per-position sl_pct → entry * (1 + config.hard_sl_pct/100)."""
         tracker = PositionTracker(config_no_dsl)
+        # hard_sl_pct=1.25, entry=3000 → SL = 3000 * (1 + 1.25/100) = 3037.5
         pos = TrackedPosition(
-            market_id=1, symbol="BTC", side="long",
-            entry_price=50000.0, size=0.1, high_water_mark=50000.0,
-            sl_pct=None,
+            market_id=2, symbol="ETH", side="short",
+            entry_price=3000.0, size=1.0, high_water_mark=3000.0,
         )
-        assert tracker._get_sl_pct(pos) == config_no_dsl.hard_sl_pct
+        assert tracker._compute_hard_floor_price(pos) == pytest.approx(3037.5)
 
-    def test_get_sl_pct_per_position_value(self, config_no_dsl):
-        """Position sl_pct=2.0 → uses 2.0."""
+    def test_compute_hard_floor_price_short_per_position_sl_overrides(self, config_no_dsl):
+        """Short, per-position sl_pct overrides config default."""
         tracker = PositionTracker(config_no_dsl)
+        # config hard_sl_pct=1.25, but position has sl_pct=2.0
+        # entry=3000 → SL = 3000 * (1 + 2.0/100) = 3060
         pos = TrackedPosition(
-            market_id=1, symbol="BTC", side="long",
-            entry_price=50000.0, size=0.1, high_water_mark=50000.0,
+            market_id=2, symbol="ETH", side="short",
+            entry_price=3000.0, size=1.0, high_water_mark=3000.0,
             sl_pct=2.0,
         )
-        assert tracker._get_sl_pct(pos) == 2.0
+        assert tracker._compute_hard_floor_price(pos) == pytest.approx(3060.0)
 
 
 # ── update_price() — Legacy mode ────────────────────────────────────
@@ -153,61 +80,49 @@ class TestUpdatePriceLegacy:
         tracker.positions[1] = pos
         result = tracker.update_price(1, 51000.0)
         assert pos.high_water_mark == 51000.0
-        assert result is None  # trigger not hit yet (3% = 51500)
+        assert result is None  # trigger not reached yet
 
-    def test_update_price_long_hits_trailing_trigger(self, config_no_dsl):
-        """Long: price hits trailing trigger → trailing_active=True, returns ("trailing_activated", {...})."""
-        tracker = PositionTracker(config_no_dsl)
-        tracker.account_equity = 1000.0
-        pos = TrackedPosition(
-            market_id=1, symbol="BTC", side="long",
-            entry_price=50000.0, size=0.1, high_water_mark=50000.0,
-        )
-        tracker.positions[1] = pos
-        # Price hits 51500 = entry * 1.03 (trigger)
-        result = tracker.update_price(1, 51500.0)
-        assert pos.trailing_active is True
-        assert isinstance(result, tuple)
-        assert result[0] == "trailing_activated"
-        assert "price" in result[1]
-        assert result[1]["price"] == 51500.0
-
-    def test_update_price_long_trailing_sl_ratchets_up(self, config_no_dsl):
-        """Long: trailing SL ratchets up, never down."""
+    def test_update_price_long_trailing_sl_triggers(self, config_no_dsl):
+        """Long: price drops to hard floor → returns "trailing_sl"."""
         tracker = PositionTracker(config_no_dsl)
         pos = TrackedPosition(
             market_id=1, symbol="BTC", side="long",
             entry_price=50000.0, size=0.1, high_water_mark=50000.0,
         )
         tracker.positions[1] = pos
+        # Price drops to hard floor: 50000 * (1 - 1.25/100) = 49375
+        result = tracker.update_price(1, 49375.0)
+        assert result == "trailing_sl"
 
-        # First tick: price=51000 → candidate SL = 51000 * 0.9875 = 50362.5
-        tracker.update_price(1, 51000.0)
-        first_sl = pos.trailing_sl_level
-        assert first_sl == pytest.approx(51000.0 * (1 - 1.25 / 100))
-
-        # Second tick: price drops to 50500 → candidate = 50500 * 0.9875 = 49868.75
-        # This is lower than first_sl, so trailing_sl_level should NOT change
-        tracker.update_price(1, 50500.0)
-        assert pos.trailing_sl_level == pytest.approx(first_sl)  # unchanged
-
-        # Third tick: price rises to 52000 → candidate = 52000 * 0.9875 = 51350
-        tracker.update_price(1, 52000.0)
-        assert pos.trailing_sl_level == pytest.approx(52000.0 * (1 - 1.25 / 100))
-        assert pos.trailing_sl_level > first_sl  # ratcheted up
-
-    def test_update_price_long_price_drops_to_sl(self, config_no_dsl):
-        """Long: price drops to SL → returns 'stop_loss'."""
+    def test_update_price_long_trailing_sl_activates_and_ratchets(self, config_no_dsl):
+        """Long: price reaches trigger → SL activates and ratchets up."""
+        # Use trigger=0.5%, step=0.95%
+        config_no_dsl.trailing_sl_trigger_pct = 0.5
+        config_no_dsl.trailing_sl_step_pct = 0.95
         tracker = PositionTracker(config_no_dsl)
         pos = TrackedPosition(
             market_id=1, symbol="BTC", side="long",
-            entry_price=50000.0, size=0.1, high_water_mark=52000.0,
-            trailing_sl_level=51000.0,
+            entry_price=50000.0, size=0.1, high_water_mark=50000.0,
         )
         tracker.positions[1] = pos
-        # Price drops to trailing SL level
+        
+        # First: push price to trigger level: 50000 * (1 + 0.5/100) = 50250
+        result = tracker.update_price(1, 50250.0)
+        assert result is None  # No action yet, just activated
+        assert pos.trailing_sl_activated is True
+        assert pos.trailing_sl_level is not None
+
+        # Second: price rises further, SL should ratchet up
+        result = tracker.update_price(1, 50500.0)
+        first_level = pos.trailing_sl_level
         result = tracker.update_price(1, 51000.0)
-        assert result == "stop_loss"
+        second_level = pos.trailing_sl_level
+        assert second_level > first_level  # Ratcheted up
+
+        # Third: price drops but not to SL level → no trigger
+        result = tracker.update_price(1, 50800.0)
+        assert result is None
+        assert pos.trailing_sl_level == second_level  # Unchanged
 
     def test_update_price_short_drops_hwm_updates(self, config_no_dsl):
         """Short: price drops, HWM updates (lower)."""
@@ -217,35 +132,21 @@ class TestUpdatePriceLegacy:
             entry_price=3000.0, size=1.0, high_water_mark=3000.0,
         )
         tracker.positions[2] = pos
-        # Price 2950: trigger = 3000 * 0.97 = 2910. 2950 > 2910 so no trailing activation
         result = tracker.update_price(2, 2950.0)
         assert pos.high_water_mark == 2950.0
-        assert result is None  # trigger not hit yet
+        assert result is None
 
-    def test_update_price_short_trailing_sl_ratchets_down(self, config_no_dsl):
-        """Short: trailing SL ratchets down, never up."""
+    def test_update_price_short_trailing_sl_triggers(self, config_no_dsl):
+        """Short: price rises to hard floor → returns "trailing_sl"."""
         tracker = PositionTracker(config_no_dsl)
         pos = TrackedPosition(
             market_id=2, symbol="ETH", side="short",
             entry_price=3000.0, size=1.0, high_water_mark=3000.0,
         )
         tracker.positions[2] = pos
-
-        # First tick: price=2900 → candidate SL = 2900 * 1.0125 = 2936.25
-        tracker.update_price(2, 2900.0)
-        first_sl = pos.trailing_sl_level
-        assert first_sl == pytest.approx(2900.0 * (1 + 1.25 / 100))
-
-        # Price rises to 2950 → candidate = 2950 * 1.0125 = 2986.875
-        # Higher than first_sl, should NOT update (short SL ratchets down)
-        tracker.update_price(2, 2950.0)
-        assert pos.trailing_sl_level == pytest.approx(first_sl)
-
-        # Price drops to 2800 → candidate = 2800 * 1.0125 = 2835
-        # Lower than first_sl, should update
-        tracker.update_price(2, 2800.0)
-        assert pos.trailing_sl_level == pytest.approx(2800.0 * (1 + 1.25 / 100))
-        assert pos.trailing_sl_level < first_sl  # ratcheted down
+        # Price rises to hard floor: 3000 * (1 + 1.25/100) = 3037.5
+        result = tracker.update_price(2, 3037.5)
+        assert result == "trailing_sl"
 
 
 # ── update_price() — DSL mode ───────────────────────────────────────
@@ -267,14 +168,35 @@ class TestUpdatePriceDsl:
             ),
         )
         tracker.positions[1] = pos
-        # Small price change: ROE=2%, below min tier trigger (3%), so no DSL actions
+        # Small price change: ROE=2%, below min tier trigger (7%), so no DSL actions
         result = tracker.update_price(1, 50100.0)
         assert result is None
         # Verify DSL state was updated (high_water_roe reflects the move)
         assert pos.dsl_state.high_water_roe == pytest.approx(2.0)
 
+    def test_update_price_dsl_has_trailing_sl_alongside(self, config):
+        """DSL mode includes trailing SL evaluation after DSL."""
+        tracker = PositionTracker(config)
+        pos = TrackedPosition(
+            market_id=1, symbol="BTC", side="long",
+            entry_price=50000.0, size=0.1, high_water_mark=50000.0,
+            dsl_state=DSLState(
+                side="long", entry_price=50000.0,
+                leverage=10.0,
+                high_water_price=50000.0,
+                high_water_time=datetime.now(timezone.utc),
+            ),
+        )
+        tracker.positions[1] = pos
+        
+        # Price reaches trailing SL trigger but not DSL tier trigger
+        # trailing_sl_trigger_pct=0.5%, entry=50000 → trigger at 50250
+        result = tracker.update_price(1, 50250.0)
+        assert result is None  # Just activated, no exit yet
+        assert pos.trailing_sl_activated is True
+
     def test_update_price_dsl_returns_tier_lock(self, config):
-        """Returns ("dsl_tier_lock", {...}) when DSL triggers tier lock."""
+        """Returns "dsl_tier_lock" when DSL triggers tier lock."""
         tracker = PositionTracker(config)
         dsl_state = DSLState(
             side="long", entry_price=50000.0,
@@ -300,8 +222,7 @@ class TestUpdatePriceDsl:
         tracker.positions[1] = pos
 
         # Price drops so ROE < locked_floor_roe (10%)
-        # At entry=50000, eff_lev=10 → ROE < 10% when move < 1%, price < 50500
-        # evaluate_dsl returns "tier_lock", update_price wraps as ("dsl_tier_lock", {...})
+        # At entry=50000, lev=10 → ROE < 10% when move < 1%, price < 50500
         result = tracker.update_price(1, 49800.0)
         assert result is not None
         assert isinstance(result, tuple)
@@ -317,7 +238,7 @@ class TestUpdatePriceDsl:
             high_water_time=datetime.now(timezone.utc),
         )
         # Pre-set: high_water_roe above min trigger, stagnation starts
-        dsl_state.high_water_roe = 5.0  # above min tier trigger (3%)
+        dsl_state.high_water_roe = 5.0  # above min tier trigger
 
         pos = TrackedPosition(
             market_id=1, symbol="BTC", side="long",

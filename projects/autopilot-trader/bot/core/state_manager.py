@@ -82,7 +82,7 @@ class StateManager:
                     "leverage": pos.dsl_state.leverage if pos.dsl_state else self.cfg.dsl_leverage,
                     "sl_pct": pos.sl_pct,
                     "high_water_mark": pos.high_water_mark,
-                    "trailing_active": pos.trailing_active,
+                    "trailing_sl_activated": pos.trailing_sl_activated,
                     "trailing_sl_level": pos.trailing_sl_level,
                     "unverified_at": pos.unverified_at,
                     "unverified_ticks": pos.unverified_ticks,
@@ -395,8 +395,11 @@ class StateManager:
                 # Also restore legacy trailing state
                 if saved_pos.get("trailing_sl_level") is not None:
                     pos.trailing_sl_level = saved_pos["trailing_sl_level"]
-                if saved_pos.get("trailing_active"):
-                    pos.trailing_active = True
+                if saved_pos.get("trailing_sl_activated"):
+                    pos.trailing_sl_activated = True
+                # Backward compat: migrate old field
+                elif saved_pos.get("trailing_active"):
+                    pos.trailing_sl_activated = True
                 if saved_pos.get("high_water_mark"):
                     pos.high_water_mark = max(pos.high_water_mark, saved_pos["high_water_mark"])
                 # Restore AI-specified stop loss % (Fix #10)

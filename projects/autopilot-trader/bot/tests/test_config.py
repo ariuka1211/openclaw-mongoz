@@ -185,6 +185,24 @@ class TestValidate:
         errors = config.validate()
         assert any("trailing_tp_trigger_pct" in e for e in errors)
 
+    def test_validate_trailing_sl_trigger_pct_negative(self, config):
+        """trailing_sl_trigger_pct = -1 → error."""
+        config.trailing_sl_trigger_pct = -1
+        errors = config.validate()
+        assert any("trailing_sl_trigger_pct" in e for e in errors)
+
+    def test_validate_trailing_sl_step_pct_zero(self, config):
+        """trailing_sl_step_pct = 0 → error (must be > 0)."""
+        config.trailing_sl_step_pct = 0
+        errors = config.validate()
+        assert any("trailing_sl_step_pct" in e for e in errors)
+
+    def test_validate_trailing_sl_step_pct_too_high(self, config):
+        """trailing_sl_step_pct = 6 → error (must be <= 5)."""
+        config.trailing_sl_step_pct = 6
+        errors = config.validate()
+        assert any("trailing_sl_step_pct" in e for e in errors)
+
     def test_validate_price_poll_interval_zero(self, config):
         """price_poll_interval = 0 → error (must be >= 1)."""
         config.price_poll_interval = 0
@@ -269,7 +287,7 @@ class TestDefaults:
         assert BotConfig().stagnation_roe_pct == 8.0
 
     def test_default_stagnation_minutes(self):
-        assert BotConfig().stagnation_minutes == 60
+        assert BotConfig().stagnation_minutes == 90
 
     def test_default_account_index(self):
         assert BotConfig().account_index == 0

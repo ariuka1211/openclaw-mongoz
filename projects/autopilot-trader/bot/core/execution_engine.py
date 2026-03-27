@@ -396,19 +396,6 @@ class ExecutionEngine:
             details = {}
 
         # Informational alerts (no trade execution)
-        if action == "trailing_activated":
-            pnl = self._pnl_info(pos, details['price'])
-            msg = (
-                f"🎯 *TRAILING TP ACTIVE*\n"
-                f"Symbol: {pos.symbol}\n"
-                f"Side: {pos.side}\n"
-                f"Price: ${details['price']:,.2f}\n"
-                f"PnL: ${pnl['pnl_usd']:+.2f} ({pnl['roe_pct']:+.1f}% ROE @ {pnl['leverage']:.0f}x)"
-            )
-            logging.info(msg)
-            await self.alerter.send(msg)
-            return
-
         if action == "dsl_tier_lock":
             pnl = self._pnl_info(pos, price)
             msg = (
@@ -553,9 +540,80 @@ class ExecutionEngine:
             )
             return
 
-        # Legacy actions
-        tp_price = self.tracker.compute_tp_price(pos)
-        sl_price = self.tracker.compute_sl_price(pos)
+        # Trailing SL exit (new — downside protection)
+        if action == "trailing_sl":
+            pnl = self._pnl_info(pos, price)
+            msg = (
+                f"🔻 *TRAILING SL EXIT*\n"
+                f"Symbol: {pos.symbol}\n"
+                f"Side: {pos.side}\n"
+                f"Trigger: ${price:,.2f}\n"
+                f"Entry: ${pos.entry_price:,.2f}\n"
+                f"PnL: ${pnl['pnl_usd']:+.2f} ({pnl['roe_pct']:+.1f}% ROE @ {pnl['leverage']:.0f}x)"
+            )
+            logging.info(msg)
+            await self.alerter.send(msg)
+            # Check close attempt cooldown
+            cooldown_until = self.bot._dsl_close_attempt_cooldown.get(pos.symbol)
+            if cooldown_until and time.monotonic() < cooldown_until:
+                remaining = int(cooldown_until - time.monotonic())
+                logging.info(f"🧊 Trailing SL close: {pos.symbol} in cooldown ({remaining}s) — skipping")
+                return
+            # Cancel stale SL order
+            if pos.active_sl_order_id:
+                await self.api._cancel_order(mid, int(pos.active_sl_order_id))
+                pos.active_sl_order_id = None
+            sl_success, sl_coi = await self.api.execute_sl(mid, pos.size, price, is_long)
+            if sl_success and sl_coi:
+                pos.active_sl_order_id = sl_coi
+            if sl_success:
+                position_closed = await self.bot.signal_processor._verify_position_closed(mid, pos.symbol)
+                if not position_closed:
+                    attempts = self.bot._dsl_close_attempts.get(pos.symbol, 0) + 1
+                    self.bot._dsl_close_attempts[pos.symbol] = attempts
+                    if attempts >= self.bot._max_close_attempts:
+                        self.bot._dsl_close_attempt_cooldown[pos.symbol] = time.monotonic() + self.bot._close_cooldown_seconds
+                        self.bot.signal_processor._log_outcome(pos, price, "trailing_sl", estimated=True)
+                        await self.alerter.send(
+                            f"🚨 *TRAILING SL CLOSE FAILED ×{attempts}*\n"
+                            f"{pos.side.upper()} {pos.symbol}\n"
+                            f"MANUAL INTERVENTION REQUIRED."
+                        )
+                    return
+                self.bot._dsl_close_attempts.pop(pos.symbol, None)
+                self.bot._dsl_close_attempt_cooldown.pop(pos.symbol, None)
+            else:
+                attempts = self.bot._dsl_close_attempts.get(pos.symbol, 0) + 1
+                self.bot._dsl_close_attempts[pos.symbol] = attempts
+                delay_idx = min(attempts - 1, len(self.bot._sl_retry_delays) - 1)
+                retry_delay = self.bot._sl_retry_delays[delay_idx]
+                self.bot._dsl_close_attempt_cooldown[pos.symbol] = time.monotonic() + retry_delay
+                logging.warning(f"⚠️ {pos.symbol}: trailing SL order rejected (attempt {attempts}, retry in {retry_delay}s)")
+                return
+            fill_price = await self.bot.signal_processor._get_fill_price(mid, sl_coi)
+            exit_price = fill_price if fill_price else price
+            self.bot.signal_processor._log_outcome(pos, exit_price, "trailing_sl")
+            self.bot._recently_closed[mid] = time.monotonic() + 300
+            pos.active_sl_order_id = None
+            self.bot.bot_managed_market_ids.discard(mid)
+            self.tracker.remove_position(mid)
+            self.bot._opened_signals.discard(mid)
+            # Post-close alert
+            if is_long:
+                pnl_usd = pos.size * (exit_price - pos.entry_price)
+            else:
+                pnl_usd = pos.size * (pos.entry_price - exit_price)
+            await self.alerter.send(
+                f"✅ *TRAILING SL → CLOSED*\n"
+                f"{pos.side.upper()} {pos.symbol}\n"
+                f"Entry: ${pos.entry_price:,.2f}\n"
+                f"Exit: ${exit_price:,.2f}\n"
+                f"PnL: ${pnl_usd:+.2f} ({pnl['roe_pct']:+.1f}% ROE @ {pnl['leverage']:.0f}x)"
+            )
+            return
+
+        # Legacy actions (stop_loss from non-DSL mode)
+        sl_price = self.tracker._compute_hard_floor_price(pos)
         pnl_pct = ((price - pos.entry_price) / pos.entry_price * 100)
 
         msg = (
@@ -570,59 +628,42 @@ class ExecutionEngine:
         logging.info(msg)
         await self.alerter.send(msg)
 
-        # Execute the order
-        if action == "trailing_take_profit":
-            # In quota emergency mode, skip TP orders — only SL proceeds
-            if self.bot.order_manager._should_skip_non_critical_orders():
-                logging.warning(f"🚫 {pos.symbol}: TP skipped in quota emergency mode, SL only")
-                return  # Keep position, will retry next tick when quota recovers
-            await self.api.execute_tp(mid, pos.size, price, is_long)
-            # TP submitted — log outcome immediately (no verification loop for TP)
+        # Execute the SL order
+        if pos.active_sl_order_id:
+            logging.info(f"🗑️ {pos.symbol}: cancelling stale SL order {pos.active_sl_order_id} before legacy SL")
+            await self.api._cancel_order(mid, int(pos.active_sl_order_id))
+            pos.active_sl_order_id = None
+        sl_success, sl_coi = await self.api.execute_sl(mid, pos.size, price, is_long)
+        if sl_success and sl_coi:
+            pos.active_sl_order_id = sl_coi
+        if sl_success:
+            position_closed = await self.bot.signal_processor._verify_position_closed(mid, pos.symbol)
+            if not position_closed:
+                logging.warning(f"⚠️ {pos.symbol}: SL submitted but position still open — keeping in tracker")
+                return
+            fill_price = await self.bot.signal_processor._get_fill_price(mid, sl_coi)
+            price = fill_price if fill_price else price
             self.bot.signal_processor._log_outcome(pos, price, action)
         else:
-            # MED-18: Cancel stale SL order before placing new one
-            if pos.active_sl_order_id:
-                logging.info(f"🗑️ {pos.symbol}: cancelling stale SL order {pos.active_sl_order_id} before legacy SL")
-                await self.api._cancel_order(mid, int(pos.active_sl_order_id))
-                pos.active_sl_order_id = None
-            sl_success, sl_coi = await self.api.execute_sl(mid, pos.size, price, is_long)
-            if sl_success and sl_coi:
-                pos.active_sl_order_id = sl_coi
-            if sl_success:
-                # CRITICAL-4: Don't log outcome yet — log ONCE after verification
-                position_closed = await self.bot.signal_processor._verify_position_closed(mid, pos.symbol)
-                if not position_closed:
-                    logging.warning(f"⚠️ {pos.symbol}: SL submitted but position still open — keeping in tracker")
-                    return  # Don't remove from tracker, will retry next tick
-                fill_price = await self.bot.signal_processor._get_fill_price(mid, sl_coi)
-                price = fill_price if fill_price else price
-                # CRITICAL-4: Log outcome ONCE with actual fill price after verification
-                self.bot.signal_processor._log_outcome(pos, price, action)
-            else:
-                # SL order failed (rate-limited or rejected) — track attempts with graduated delay
-                # Note: _close_attempts is shared between AI close and legacy SL paths.
-                # This is intentional — both paths count toward the same circuit breaker,
-                # preventing either from hammering a stuck position independently.
-                attempts = self.bot._close_attempts.get(pos.symbol, 0) + 1
-                self.bot._close_attempts[pos.symbol] = attempts
-                delay_idx = min(attempts - 1, len(self.bot._sl_retry_delays) - 1)
-                retry_delay = self.bot._sl_retry_delays[delay_idx]
-                self.bot._close_attempt_cooldown[pos.symbol] = time.monotonic() + retry_delay
-                logging.warning(f"⚠️ {pos.symbol}: SL order rejected (attempt {attempts}, retry in {retry_delay}s)")
-
-                if attempts >= 4:
-                    pnl = self._pnl_info(pos, price)
-                    await self.alerter.send(
-                        f"🚨 *SL FAILED ×{attempts}*\n"
-                        f"{pos.side.upper()} {pos.symbol}\n"
-                        f"PnL: ${pnl['pnl_usd']:+.2f} ({pnl['roe_pct']:+.1f}% ROE @ {pnl['leverage']:.0f}x)\n"
-                        f"Action: {action.replace('_', ' ').upper()}\n"
-                        f"Retry delays exhausted. Next retry in 15min.\n"
-                        f"MANUAL INTERVENTION may be needed."
-                    )
-                return  # Don't remove from tracker, will retry after cooldown
-        self.bot._recently_closed[mid] = time.monotonic() + 300  # 5 min phantom guard
-        pos.active_sl_order_id = None  # MED-18
+            attempts = self.bot._close_attempts.get(pos.symbol, 0) + 1
+            self.bot._close_attempts[pos.symbol] = attempts
+            delay_idx = min(attempts - 1, len(self.bot._sl_retry_delays) - 1)
+            retry_delay = self.bot._sl_retry_delays[delay_idx]
+            self.bot._close_attempt_cooldown[pos.symbol] = time.monotonic() + retry_delay
+            logging.warning(f"⚠️ {pos.symbol}: SL order rejected (attempt {attempts}, retry in {retry_delay}s)")
+            if attempts >= 4:
+                pnl = self._pnl_info(pos, price)
+                await self.alerter.send(
+                    f"🚨 *SL FAILED ×{attempts}*\n"
+                    f"{pos.side.upper()} {pos.symbol}\n"
+                    f"PnL: ${pnl['pnl_usd']:+.2f} ({pnl['roe_pct']:+.1f}% ROE @ {pnl['leverage']:.0f}x)\n"
+                    f"Action: {action.replace('_', ' ').upper()}\n"
+                    f"Retry delays exhausted. Next retry in 15min.\n"
+                    f"MANUAL INTERVENTION may be needed."
+                )
+            return
+        self.bot._recently_closed[mid] = time.monotonic() + 300
+        pos.active_sl_order_id = None
         self.bot.bot_managed_market_ids.discard(mid)
         self.tracker.remove_position(mid)
         self.bot._opened_signals.discard(mid)

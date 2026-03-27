@@ -19,8 +19,9 @@ class TrackedPosition:
     entry_price: float
     size: float
     high_water_mark: float
-    trailing_active: bool = False
-    trailing_sl_level: float | None = None  # legacy: flat trailing stop loss level
+    trailing_active: bool = False            # DEPRECATED: trailing TP concept gone, use trailing_sl_activated
+    trailing_sl_activated: bool = False      # Has trailing SL been triggered (price moved past trigger)
+    trailing_sl_level: float | None = None  # Trailing SL price level (ratchets)
     dsl_state: DSLState | None = None       # DSL state (when dsl_enabled)
     sl_pct: float | None = None             # per-position stop loss % (from AI), None = use config default
     opened_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))

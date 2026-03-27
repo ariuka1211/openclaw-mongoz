@@ -17,9 +17,13 @@ class BotConfig:
     api_key_index: int = 3
     api_key_private: str = ""
 
-    # Trailing take profit
+    # Trailing take profit (legacy — being replaced by trailing SL)
     trailing_tp_trigger_pct: float = 3.0   # Start trailing after +3%
     trailing_tp_delta_pct: float = 1.0     # Trail by 1% from peak
+
+    # Trailing stop loss (downside protection, works alongside DSL)
+    trailing_sl_trigger_pct: float = 0.5   # Start trailing after +0.5% price move
+    trailing_sl_step_pct: float = 0.95     # Trail by 0.95% from new high
 
     # Hard stop loss
     hard_sl_pct: float = 1.25              # Hard stop loss at -1.25% from entry
@@ -50,7 +54,7 @@ class BotConfig:
     max_concurrent_signals: int = 3    # max positions from scanner signals
     dsl_leverage: float = 10.0        # DSL ROE calc fallback only
     stagnation_roe_pct: float = 8.0
-    stagnation_minutes: int = 60
+    stagnation_minutes: int = 90
     dsl_tiers: list = field(default_factory=list)
 
     # Position management scope
@@ -81,6 +85,12 @@ class BotConfig:
             val = getattr(self, field_name)
             if not isinstance(val, (int, float)) or val < 0:
                 errors.append(f"'{field_name}' must be a non-negative number, got {val}")
+
+        # Trailing SL validation
+        if not isinstance(self.trailing_sl_trigger_pct, (int, float)) or self.trailing_sl_trigger_pct < 0:
+            errors.append(f"'trailing_sl_trigger_pct' must be a non-negative number, got {self.trailing_sl_trigger_pct}")
+        if not isinstance(self.trailing_sl_step_pct, (int, float)) or self.trailing_sl_step_pct <= 0 or self.trailing_sl_step_pct > 5:
+            errors.append(f"'trailing_sl_step_pct' must be in (0, 5], got {self.trailing_sl_step_pct}")
 
         # Minimum intervals
         if not isinstance(self.price_poll_interval, (int, float)) or self.price_poll_interval < 1:
@@ -145,7 +155,9 @@ class BotConfig:
                     filtered[key] = filtered[key].lower() in ("true", "1", "yes")
                 else:
                     filtered[key] = int(filtered[key])
-        for key in ("trailing_tp_trigger_pct", "trailing_tp_delta_pct", "hard_sl_pct",
+        for key in ("trailing_tp_trigger_pct", "trailing_tp_delta_pct",
+                     "trailing_sl_trigger_pct", "trailing_sl_step_pct",
+                     "hard_sl_pct",
                      "dsl_leverage", "stagnation_roe_pct", "price_call_delay",
                      "max_risk_pct", "max_margin_pct", "min_risk_reward"):
             if key in filtered and isinstance(filtered[key], str):

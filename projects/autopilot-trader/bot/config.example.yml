@@ -11,9 +11,9 @@ api_key_private: "${LIGHTER_API_PRIVATE_KEY}"
 # Webshare proxy (for geo-restricted servers)
 proxy_url: "socks5://${LIGHTER_PROXY_USER}:${LIGHTER_PROXY_PASS}@${LIGHTER_PROXY_HOST}:${LIGHTER_PROXY_PORT}/"
 
-# Trailing take profit
-trailing_tp_trigger_pct: 0.0    # 0 = trailing SL starts immediately from peak
-trailing_tp_delta_pct: 1.0      # Trail by 1% from peak
+# Trailing stop loss (downside protection, works alongside DSL)
+trailing_sl_trigger_pct: 0.5    # Start trailing after +0.5% price move
+trailing_sl_step_pct: 0.95      # Trail by 0.95% from new high
 
 # Stop loss
 hard_sl_pct: 1.25               # Hard stop loss at -1.25% from entry (DSL: absolute floor)

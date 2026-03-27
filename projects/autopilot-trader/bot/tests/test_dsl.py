@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 import pytest
 
-from dsl import DSLConfig, DSLState, DSLTier, evaluate_dsl
+from dsl import DSLConfig, DSLState, DSLTier, evaluate_dsl, evaluate_trailing_sl
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -533,3 +533,194 @@ class TestEdgeCases:
         result = evaluate_dsl(state, 100.5, cfg)  # ROE = 5%
         assert state.current_tier is not None
         assert state.current_tier.trigger_pct == 5
+
+
+# ══════════════════════════════════════════════════════════════════════
+# evaluate_trailing_sl
+# ══════════════════════════════════════════════════════════════════════
+
+TRIGGER_PCT = 0.5
+STEP_PCT = 0.95
+HARD_FLOOR_PCT = 1.25
+
+
+class TestEvaluateTrailingSL:
+
+    def test_long_activation(self):
+        """Long: HW reaches trigger → trailing_sl_activated becomes True."""
+        entry = 100.0
+        hw = 100.6  # above trigger 100 * 1.005 = 100.5
+        action, level, activated = evaluate_trailing_sl(
+            side="long",
+            entry_price=entry,
+            price=100.6,
+            high_water_price=hw,
+            trailing_sl_level=None,
+            trailing_sl_activated=False,
+            trigger_pct=TRIGGER_PCT,
+            step_pct=STEP_PCT,
+            hard_floor_pct=HARD_FLOOR_PCT,
+        )
+        assert activated is True
+        assert action is None  # no trigger yet
+
+    def test_long_trigger_fires(self):
+        """Long: already activated, price drops below SL level → 'trailing_sl'."""
+        entry = 100.0
+        # HW=100.6, candidate = 100.6 * (1 - 0.95/100) = 99.6443
+        # max(99.55, 99.6443) = 99.6443
+        action, level, activated = evaluate_trailing_sl(
+            side="long",
+            entry_price=entry,
+            price=99.4,
+            high_water_price=100.6,
+            trailing_sl_level=99.55,
+            trailing_sl_activated=True,
+            trigger_pct=TRIGGER_PCT,
+            step_pct=STEP_PCT,
+            hard_floor_pct=HARD_FLOOR_PCT,
+        )
+        assert action == "trailing_sl"
+        assert level == pytest.approx(100.6 * (1 - STEP_PCT / 100))
+
+    def test_long_hard_floor(self):
+        """Long: price below hard floor → 'trailing_sl' immediately even if not activated."""
+        entry = 100.0
+        # hard floor = 100 * (1 - 1.25/100) = 98.75
+        action, level, activated = evaluate_trailing_sl(
+            side="long",
+            entry_price=entry,
+            price=98.7,  # below 98.75
+            high_water_price=100.6,
+            trailing_sl_level=None,
+            trailing_sl_activated=False,
+            trigger_pct=TRIGGER_PCT,
+            step_pct=STEP_PCT,
+            hard_floor_pct=HARD_FLOOR_PCT,
+        )
+        assert action == "trailing_sl"
+        assert level is None
+        assert activated is False
+
+    def test_long_ratchet_never_goes_down(self):
+        """Long: ratchet only moves up — HW drops don't lower the SL level."""
+        entry = 100.0
+
+        # HW at 102, ratchet: candidate = 102 * (1 - 0.95/100) = 102 * 0.9905 = 101.031
+        action1, level1, activated1 = evaluate_trailing_sl(
+            side="long",
+            entry_price=entry,
+            price=102.0,
+            high_water_price=102.0,
+            trailing_sl_level=None,
+            trailing_sl_activated=True,
+            trigger_pct=TRIGGER_PCT,
+            step_pct=STEP_PCT,
+            hard_floor_pct=HARD_FLOOR_PCT,
+        )
+        expected_level = 102.0 * (1 - STEP_PCT / 100)
+        assert level1 == pytest.approx(expected_level)
+
+        # HW drops to 101, new candidate = 101 * 0.9905 = 100.0405
+        # but SL stays at 101.031 (max)
+        action2, level2, activated2 = evaluate_trailing_sl(
+            side="long",
+            entry_price=entry,
+            price=102.0,
+            high_water_price=101.0,
+            trailing_sl_level=level1,
+            trailing_sl_activated=True,
+            trigger_pct=TRIGGER_PCT,
+            step_pct=STEP_PCT,
+            hard_floor_pct=HARD_FLOOR_PCT,
+        )
+        assert level2 == pytest.approx(level1)  # never goes down
+
+    def test_long_not_activated_no_trigger(self):
+        """Long: HW below trigger, price normal → no activation, no trigger."""
+        entry = 100.0
+        # trigger at 100 * 1.005 = 100.5, HW=100.3 (below)
+        action, level, activated = evaluate_trailing_sl(
+            side="long",
+            entry_price=entry,
+            price=100.2,
+            high_water_price=100.3,
+            trailing_sl_level=None,
+            trailing_sl_activated=False,
+            trigger_pct=TRIGGER_PCT,
+            step_pct=STEP_PCT,
+            hard_floor_pct=HARD_FLOOR_PCT,
+        )
+        assert action is None
+        assert activated is False
+
+    def test_short_activation(self):
+        """Short: HW below trigger → activates."""
+        entry = 100.0
+        # trigger at 100 * (1 - 0.5/100) = 99.5, HW=99.4 (below)
+        action, level, activated = evaluate_trailing_sl(
+            side="short",
+            entry_price=entry,
+            price=99.4,
+            high_water_price=99.4,
+            trailing_sl_level=None,
+            trailing_sl_activated=False,
+            trigger_pct=TRIGGER_PCT,
+            step_pct=STEP_PCT,
+            hard_floor_pct=HARD_FLOOR_PCT,
+        )
+        assert activated is True
+        assert action is None
+
+    def test_short_trigger_fires(self):
+        """Short: already activated, price rises above SL level → 'trailing_sl'."""
+        entry = 100.0
+        # HW=99.4, candidate = 99.4 * (1 + 0.95/100) = 100.3443
+        # min(100.45, 100.3443) = 100.3443
+        action, level, activated = evaluate_trailing_sl(
+            side="short",
+            entry_price=entry,
+            price=100.5,
+            high_water_price=99.4,
+            trailing_sl_level=100.45,
+            trailing_sl_activated=True,
+            trigger_pct=TRIGGER_PCT,
+            step_pct=STEP_PCT,
+            hard_floor_pct=HARD_FLOOR_PCT,
+        )
+        assert action == "trailing_sl"
+        assert level == pytest.approx(99.4 * (1 + STEP_PCT / 100))
+
+    def test_short_hard_floor(self):
+        """Short: price above hard floor → 'trailing_sl'."""
+        entry = 100.0
+        # hard floor = 100 * (1 + 1.25/100) = 101.25
+        action, level, activated = evaluate_trailing_sl(
+            side="short",
+            entry_price=entry,
+            price=101.3,  # above 101.25
+            high_water_price=99.4,
+            trailing_sl_level=None,
+            trailing_sl_activated=False,
+            trigger_pct=TRIGGER_PCT,
+            step_pct=STEP_PCT,
+            hard_floor_pct=HARD_FLOOR_PCT,
+        )
+        assert action == "trailing_sl"
+        assert level is None
+
+    def test_trigger_zero_immediate_activation(self):
+        """Long: trigger=0 → activates immediately at entry."""
+        entry = 100.0
+        action, level, activated = evaluate_trailing_sl(
+            side="long",
+            entry_price=entry,
+            price=100.0,
+            high_water_price=100.0,
+            trailing_sl_level=None,
+            trailing_sl_activated=False,
+            trigger_pct=0.0,
+            step_pct=STEP_PCT,
+            hard_floor_pct=HARD_FLOOR_PCT,
+        )
+        assert activated is True

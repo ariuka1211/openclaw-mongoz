@@ -8,7 +8,7 @@ import logging
 from datetime import datetime, timezone
 
 from config import BotConfig
-from dsl import DSLConfig, DSLState, DSLTier, evaluate_dsl
+from dsl import DSLConfig, DSLState, DSLTier, evaluate_dsl, evaluate_trailing_sl
 from core.models import TrackedPosition
 
 
@@ -35,34 +35,13 @@ class PositionTracker:
                 for t in cfg.dsl_tiers
             ]
 
-    def compute_tp_price(self, pos: TrackedPosition) -> float | None:
-        """Calculate trailing take-profit price based on high-water mark.
-        
-        Returns None if:
-        - For longs: high-water mark hasn't exceeded trigger level yet
-        - For shorts: high-water mark hasn't dropped below trigger level yet (at entry, returns None)
-        """
+    def _compute_hard_floor_price(self, pos: TrackedPosition) -> float:
+        """Return hard floor price (per-position sl_pct or config default)."""
+        sl = pos.sl_pct if pos.sl_pct is not None else self.cfg.hard_sl_pct
         if pos.side == "long":
-            trigger = pos.entry_price * (1 + self.cfg.trailing_tp_trigger_pct / 100)
-            if pos.high_water_mark < trigger:
-                return None
-            return pos.high_water_mark * (1 - self.cfg.trailing_tp_delta_pct / 100)
+            return pos.entry_price * (1 - sl / 100)
         else:
-            trigger = pos.entry_price * (1 - self.cfg.trailing_tp_trigger_pct / 100)
-            if pos.high_water_mark > trigger:
-                return None
-            return pos.high_water_mark * (1 + self.cfg.trailing_tp_delta_pct / 100)
-
-    def compute_sl_price(self, pos: TrackedPosition) -> float:
-        """Return trailing stop loss level. Trails upward on longs, downward on shorts."""
-        sl_pct = self._get_sl_pct(pos)
-        if pos.trailing_sl_level is not None:
-            return pos.trailing_sl_level
-        return pos.entry_price * (1 - sl_pct / 100 if pos.side == "long" else 1 + sl_pct / 100)
-
-    def _get_sl_pct(self, pos: TrackedPosition) -> float:
-        """Get effective stop loss % — per-position (AI) or config default."""
-        return pos.sl_pct if pos.sl_pct is not None else self.cfg.hard_sl_pct
+            return pos.entry_price * (1 + sl / 100)
 
     def update_price(self, market_id: int, price: float) -> str | None:
         pos = self.positions.get(market_id)
@@ -116,109 +95,66 @@ class PositionTracker:
                     "since": pos.dsl_state.stagnation_started,
                 })
 
-            # ── Trailing TP (works alongside DSL) ──
-            # Sync high_water_mark for compute_tp_price() which uses it
+            # ── Trailing SL (downside protection alongside DSL) ──
+            # Sync high_water_mark from DSL for trailing SL
             if pos.dsl_state.high_water_price > 0:
                 pos.high_water_mark = pos.dsl_state.high_water_price
 
-            # Check trailing TP activation
-            if not pos.trailing_active:
-                if pos.side == "long":
-                    trigger = pos.entry_price * (1 + self.cfg.trailing_tp_trigger_pct / 100)
-                    if pos.high_water_mark >= trigger:
-                        pos.trailing_active = True
-                        logging.info(f"🎯 {pos.symbol} trailing TP ACTIVE at ${pos.high_water_mark:,.2f}")
-                else:
-                    trigger = pos.entry_price * (1 - self.cfg.trailing_tp_trigger_pct / 100)
-                    if pos.high_water_mark <= trigger:
-                        pos.trailing_active = True
-                        logging.info(f"🎯 {pos.symbol} trailing TP ACTIVE at ${pos.high_water_mark:,.2f}")
+            # Use DSL's high water price for trailing SL
+            hw_price = pos.dsl_state.high_water_price if pos.dsl_state.high_water_price > 0 else pos.high_water_mark
+            sl_floor_pct = pos.sl_pct if pos.sl_pct is not None else self.cfg.hard_sl_pct
 
-            # Check trailing TP trigger
-            if pos.trailing_active:
-                tp_price = self.compute_tp_price(pos)
-                if tp_price:
-                    pnl_pct = (price - pos.entry_price) / pos.entry_price * 100 if pos.side == "long" \
-                        else (pos.entry_price - price) / pos.entry_price * 100
-                    if pos.side == "long" and price <= tp_price and pnl_pct > 0:
-                        return "trailing_take_profit"
-                    elif pos.side == "short" and price >= tp_price and pnl_pct > 0:
-                        return "trailing_take_profit"
-
+            action, new_level, new_activated = evaluate_trailing_sl(
+                side=pos.side,
+                entry_price=pos.entry_price,
+                price=price,
+                high_water_price=hw_price,
+                trailing_sl_level=pos.trailing_sl_level,
+                trailing_sl_activated=pos.trailing_sl_activated,
+                trigger_pct=self.cfg.trailing_sl_trigger_pct,
+                step_pct=self.cfg.trailing_sl_step_pct,
+                hard_floor_pct=sl_floor_pct,
+            )
+            pos.trailing_sl_level = new_level
+            pos.trailing_sl_activated = new_activated
+            if action:
+                sl_display = f"${new_level:,.2f}" if new_level is not None else "hard floor"
+                logging.info(f"🔻 {pos.symbol} trailing SL triggered | Price: ${price:,.2f} | SL: {sl_display}")
+                return "trailing_sl"
             return None
 
-        # ── Legacy mode: flat trailing TP/SL ──
-        # Update high water mark (for trailing TP)
-        trailing_just_activated = False
+        # ── Legacy mode: trailing SL only (no trailing TP) ──
+        # Update high water mark
         if pos.side == "long" and price > pos.high_water_mark:
             pos.high_water_mark = price
-            # Keep DSL state in sync for potential mode switch
             if pos.dsl_state:
                 pos.dsl_state.high_water_price = pos.high_water_mark
                 pos.dsl_state.high_water_time = datetime.now(timezone.utc)
-            if not pos.trailing_active:
-                trigger = pos.entry_price * (1 + self.cfg.trailing_tp_trigger_pct / 100)
-                if price >= trigger:
-                    pos.trailing_active = True
-                    trailing_just_activated = True
-                    logging.info(f"🎯 {pos.symbol} trailing TP ACTIVE at ${price:,.2f}")
         elif pos.side == "short" and price < pos.high_water_mark:
             pos.high_water_mark = price
-            # Keep DSL state in sync for potential mode switch
             if pos.dsl_state:
                 pos.dsl_state.high_water_price = pos.high_water_mark
                 pos.dsl_state.high_water_time = datetime.now(timezone.utc)
-            if not pos.trailing_active:
-                trigger = pos.entry_price * (1 - self.cfg.trailing_tp_trigger_pct / 100)
-                if price <= trigger:
-                    pos.trailing_active = True
-                    trailing_just_activated = True
-                    logging.info(f"🎯 {pos.symbol} trailing TP ACTIVE at ${price:,.2f}")
 
-        # Update trailing stop loss (ratchets up on longs, down on shorts — never reverses)
-        sl_pct = self._get_sl_pct(pos)
-        if pos.side == "long":
-            candidate = price * (1 - sl_pct / 100)
-            if pos.trailing_sl_level is None or candidate > pos.trailing_sl_level:
-                old = pos.trailing_sl_level
-                pos.trailing_sl_level = candidate
-                if old is not None:
-                    logging.info(f"🛡️ {pos.symbol} trailing SL advanced: ${old:,.2f} → ${candidate:,.2f}")
-        else:
-            candidate = price * (1 + sl_pct / 100)
-            if pos.trailing_sl_level is None or candidate < pos.trailing_sl_level:
-                old = pos.trailing_sl_level
-                pos.trailing_sl_level = candidate
-                if old is not None:
-                    logging.info(f"🛡️ {pos.symbol} trailing SL advanced: ${old:,.2f} → ${candidate:,.2f}")
-
-        # Alert on trailing TP activation
-        if trailing_just_activated:
-            pnl_pct = ((price - pos.entry_price) / pos.entry_price * 100) if pos.side == "long" \
-                else ((pos.entry_price - price) / pos.entry_price * 100)
-            return ("trailing_activated", {
-                "price": price,
-                "roe": pnl_pct * self.cfg.dsl_leverage,
-                "pnl": pnl_pct,
-            })
-
-        # Check triggers
-        sl_price = self.compute_sl_price(pos)
-        tp_price = self.compute_tp_price(pos)
-        pnl_pct = (price - pos.entry_price) / pos.entry_price * 100 if pos.side == "long" \
-            else (pos.entry_price - price) / pos.entry_price * 100
-
-        if pos.side == "long":
-            if price <= sl_price:
-                return "stop_loss"
-            if pos.trailing_active and tp_price and price <= tp_price and pnl_pct > 0:
-                return "trailing_take_profit"
-        else:
-            if price >= sl_price:
-                return "stop_loss"
-            if pos.trailing_active and tp_price and price >= tp_price and pnl_pct > 0:
-                return "trailing_take_profit"
-
+        # Evaluate trailing SL
+        sl_floor_pct = pos.sl_pct if pos.sl_pct is not None else self.cfg.hard_sl_pct
+        action, new_level, new_activated = evaluate_trailing_sl(
+            side=pos.side,
+            entry_price=pos.entry_price,
+            price=price,
+            high_water_price=pos.high_water_mark,
+            trailing_sl_level=pos.trailing_sl_level,
+            trailing_sl_activated=pos.trailing_sl_activated,
+            trigger_pct=self.cfg.trailing_sl_trigger_pct,
+            step_pct=self.cfg.trailing_sl_step_pct,
+            hard_floor_pct=sl_floor_pct,
+        )
+        pos.trailing_sl_level = new_level
+        pos.trailing_sl_activated = new_activated
+        if action:
+            sl_display = f"${new_level:,.2f}" if new_level is not None else "hard floor"
+            logging.info(f"🔻 {pos.symbol} trailing SL triggered | Price: ${price:,.2f} | SL: {sl_display}")
+            return "trailing_sl"
         return None
 
     def add_position(self, market_id: int, symbol: str, side: str, entry: float, size: float, leverage: float = None, sl_pct: float = None):

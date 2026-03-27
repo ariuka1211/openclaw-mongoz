@@ -171,3 +171,77 @@ def evaluate_dsl(state: DSLState, price: float, cfg: DSLConfig) -> str | None:
             return "stagnation"
 
     return None
+
+
+def evaluate_trailing_sl(
+    side: str,
+    entry_price: float,
+    price: float,
+    high_water_price: float,
+    trailing_sl_level: float | None,
+    trailing_sl_activated: bool,
+    trigger_pct: float,
+    step_pct: float,
+    hard_floor_pct: float,
+) -> tuple[str | None, float | None, bool]:
+    """
+    Evaluate trailing stop loss for one tick.
+
+    Returns (action, new_trailing_sl_level, new_trailing_sl_activated).
+    action is "trailing_sl" or None.
+
+    The trailing SL ratchets UP (for longs) from the high water mark.
+    It only activates after price moves trigger_pct above entry.
+    The hard floor is an absolute stop at entry * (1 - hard_floor_pct/100).
+    """
+    activated = trailing_sl_activated
+
+    if side == "long":
+        # 1. Hard floor check
+        hard_floor = entry_price * (1 - hard_floor_pct / 100)
+        if price <= hard_floor:
+            return ("trailing_sl", None, False)
+
+        # 2. Activation
+        if not activated:
+            trigger_level = entry_price * (1 + trigger_pct / 100)
+            if high_water_price >= trigger_level:
+                activated = True
+
+        # 3. Ratchet
+        new_level = trailing_sl_level
+        if activated and high_water_price > 0:
+            candidate = high_water_price * (1 - step_pct / 100)
+            new_level = max(trailing_sl_level or 0, candidate)
+
+        # 4. Trigger
+        if activated and new_level is not None and price <= new_level:
+            return ("trailing_sl", new_level, True)
+
+        # 5. Otherwise
+        return (None, new_level, activated)
+
+    else:  # short
+        # 1. Hard floor check
+        hard_floor = entry_price * (1 + hard_floor_pct / 100)
+        if price >= hard_floor:
+            return ("trailing_sl", None, False)
+
+        # 2. Activation
+        if not activated:
+            trigger_level = entry_price * (1 - trigger_pct / 100)
+            if high_water_price <= trigger_level:
+                activated = True
+
+        # 3. Ratchet
+        new_level = trailing_sl_level
+        if activated and high_water_price > 0:
+            candidate = high_water_price * (1 + step_pct / 100)
+            new_level = min(trailing_sl_level or float("inf"), candidate)
+
+        # 4. Trigger
+        if activated and new_level is not None and price >= new_level:
+            return ("trailing_sl", new_level, True)
+
+        # 5. Otherwise
+        return (None, new_level, activated)

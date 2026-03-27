@@ -2,7 +2,8 @@
 
 **Created:** 2026-03-26
 **Updated:** 2026-03-26 — re-verified against full codebase
-**Status:** Ready for implementation
+**Updated:** 2026-03-26 18:38 MDT — code review issues documented, implementation started
+**Status:** In progress (Phase 1-2 config+models done, subagents running for core logic)
 **Scope:** Bot only — scanner and ai-decisions have zero references to DSL/trailing/SL/TP. No cross-service impact.
 
 ---
@@ -43,6 +44,35 @@ The AI outputs `stop_loss_pct` per decision. Currently in DSL mode this value is
 **Fix:** The new trailing SL hard floor uses per-position `sl_pct` when set (AI override), falls back to `cfg.hard_sl_pct`. DSL's `hard_sl` check stays unchanged (config-based absolute floor, ROE-based). Two floors are intentional:
 - DSL hard_sl: config-based, ROE calculation (e.g., -12.5% ROE at 10x leverage) — the "nuclear option"
 - Trailing SL hard floor: per-position sl_pct or config fallback, raw price % — respects AI risk assessment
+
+---
+
+## Code Review Issues (18:38 MDT)
+
+Found during pre-implementation review against actual codebase:
+
+### Issue 1: step_pct=0.95% doesn't guarantee profit at first activation
+
+**Math:** With trigger=0.5% and step=0.95%, the first trailing SL fires at:
+- entry × 1.005 × 0.9905 = entry × 0.9955 → **-0.45% loss**
+- Required step to break even: 0.4975% (step < trigger/(1+trigger))
+- Required step to guarantee +0.1% profit: 0.398%
+
+**Impact:** For small moves (+0.5%), trailing SL gives back more than the gain. Only on bigger runs (+2%+) does it lock meaningful profit. For positions that never reach +0.5%, the hard floor (-1.25%) is the only exit.
+
+**Decision:** Acceptable by design. Trailing SL catches big pullbacks after significant runs. Small moves fall through to hard floor. Tightening step to ~0.4% would guarantee small profit at first activation but might trigger on normal noise. Keep 0.95% for now; John can adjust if too loose in practice.
+
+### Issue 2: stagnation_minutes = 90 (not 60)
+
+Config.yml had 60, plan says 90. Confirmed: changing to 90 as planned (loosened from original 60 to avoid premature exits).
+
+### Issue 3: Bot.py logging locations
+
+TP logging was only in the legacy `else` branch, not in the DSL branch. Added trailing SL logging to the DSL branch (3 locations: DSL mode startup, legacy mode startup, Telegram alert).
+
+### Issue 4: config.example.yml stale
+
+Still has `max_position_usd` (old field from position sizing refactor). Not fixing in this change — separate cleanup.
 
 ---
 

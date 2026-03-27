@@ -130,17 +130,23 @@ class SafetyLayer:
         if self.required_stop_loss and (not sl_pct or sl_pct < self.min_stop_loss_pct):
             reasons.append(f"stop loss {sl_pct}% invalid (min {self.min_stop_loss_pct}%)")
 
-        # Rule 4: Max 15% total exposure
-        current_exposure = sum(
-            # MED-26: Canonical field is 'position_size_usd' (written by bot's _write_ai_result)
-            abs(p.get("position_size_usd", p.get("size_usd", 0))) for p in positions
-        )
-        new_exposure = equity * size_pct / 100
-        total_exposure_pct = (current_exposure + new_exposure) / equity * 100
-        if total_exposure_pct > self.max_total_exposure_pct:
-            reasons.append(
-                f"total exposure {total_exposure_pct:.1f}% > max {self.max_total_exposure_pct}%"
-            )
+        # Rule 4: Max 15% total exposure (margin-based, not notional)
+        # Guard: can't calculate exposure without valid equity
+        if equity <= 0:
+            reasons.append("cannot calculate exposure: equity <= 0")
+        else:
+            # Convert each position's notional to margin used = notional / leverage
+            current_margin = 0.0
+            for p in positions:
+                notional = abs(p.get("position_size_usd", p.get("size_usd", 0)))
+                leverage = p.get("leverage", 1) or 1  # DB fallback positions may lack leverage
+                current_margin += notional / leverage
+            new_margin = equity * size_pct / 100
+            total_exposure_pct = (current_margin + new_margin) / equity * 100
+            if total_exposure_pct > self.max_total_exposure_pct:
+                reasons.append(
+                    f"total exposure {total_exposure_pct:.1f}% > max {self.max_total_exposure_pct}%"
+                )
 
         # Rule 5: Daily drawdown check
         daily_pnl = self.db.get_daily_pnl()

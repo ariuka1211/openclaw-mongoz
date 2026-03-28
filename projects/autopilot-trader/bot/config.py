@@ -19,7 +19,7 @@ class BotConfig:
 
     # Trailing stop loss (downside protection, works alongside DSL)
     trailing_sl_trigger_pct: float = 0.5   # Start trailing after +0.5% price move
-    trailing_sl_step_pct: float = 0.95     # Trail by 0.95% from new high
+    trailing_sl_step_pct: float = 1.5      # Trail by 1.5% from new high
 
     # Hard stop loss
     hard_sl_pct: float = 1.25              # Hard stop loss at -1.25% from entry

@@ -1,22 +1,26 @@
-# Session Handoff — 2026-03-28 12:12 MDT
+# Session Handoff — 2026-03-28 15:36 MDT
 
 ## Session Summary
-- Built the entire V2 autopilot-trader project from scratch in a separate repo
-- 6 phases: interfaces → exit strategies → bot core → scanner → AI engine → orchestrator
-- All phases verified with import checks + behavioral tests
-- 39 Python files, 6 commits, separate git repo at `projects/autopilot-trader-v2/`
-- V2 is NOT tracked in the main openclaw-mongoz repo (added to .gitignore)
+- Reviewed V2 codebase against all 5 plan files — confirmed full plan compliance
+- Verified modular architecture: clean ABC interfaces, no cross-module leaks, config-driven
+- Built comprehensive test suite: 11 files, 100 tests, all passing
+- Fixed bug in SmartEngine._liquidity_sweep (lower wick calculation was inverted)
+- Pushed to GitHub: `ariuka1211/autopilot-trader-v2` (7 commits total)
+- Also had DSL/trailing SL analysis and config change earlier this session
 
 ## Current State
-- All 6 phases complete and verified
-- Repo is local only — no remote set up yet (needs separate GitHub repo)
+- V2: 39 source files + 11 test files, all 100 tests green
+- GitHub remote live at `https://github.com/ariuka1211/autopilot-trader-v2`
 - V1 bot keeps running untouched
 
-## Pending
-- Create GitHub repo for v2 (e.g., `ariuka1211/autopilot-trader-v2`)
-- Add remote + push
-- Future phases: real Lighter API in data collector, tests, migration from v1
+## Still Missing (ordered by priority)
+1. **DataCollector** — mocked, needs real Lighter REST + WebSocket
+2. **Telegram alerts** — config exists, bot/alerts/telegram.py not built
+3. **AIDecisionEngine** — stub delegates to RuleBasedEngine, needs real LLM call
+4. **TradingView webhook** — planned, not built (aiohttp server)
+5. **README.md**
 
 ## Key Files
 - `projects/autopilot-trader-v2/v2/plan*.md` — architecture plans
 - `projects/autopilot-trader-v2/config.example.yml` — full example config
+- `projects/autopilot-trader-v2/tests/` — 11 test files, 100 tests

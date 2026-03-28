@@ -22,16 +22,9 @@ When bypassed, the bot receives the Signal directly and makes sizing/risk decisi
 class DecisionEngine(ABC):
     @abstractmethod
     async def evaluate(self, signal: Signal, context: MarketContext) -> Decision: ...
-
-@dataclass
-class MarketContext:
-    """Everything the AI needs to make a decision."""
-    signal: Signal
-    open_positions: list[Position]    # current positions
-    balance: float                    # available balance
-    recent_outcomes: list[Outcome]    # last N trade results
-    market_volatility: dict[str, float]  # symbol → ATR/volatility
 ```
+
+> **Note:** `MarketContext`, `Outcome`, `Decision`, `Signal`, `Position` are all defined in `interfaces/types.py`. The AI module imports them from there — no local redefinition.
 
 ## Implementation 1: AI Decision Engine (current logic)
 
@@ -109,13 +102,15 @@ The `custom_exit_strategy` field is key — the AI can say "use ATR strategy for
 
 ## Context Building
 
-The AI engine needs a `MarketContext`. The bot builds this:
+The AI engine needs a `MarketContext`. The `ContextBuilder` builds this.
+
+> **Dependency note:** `ContextBuilder` lives in `ai/` but needs access to DB, balance provider, and position store. Dependencies are injected at construction time (not imported directly). The bot's `PositionManager` provides position data; the exchange executor provides balance; the DB layer provides trade history. This is acceptable coupling at the wiring layer — `ContextBuilder` doesn't import concrete classes.
 
 ```python
 class ContextBuilder:
     """Builds MarketContext for the AI engine."""
 
-    def __init__(self, db: TradeDB, balance_provider, position_store):
+    def __init__(self, db, balance_provider, position_store):
         ...
 
     async def build(self, signal: Signal) -> MarketContext:

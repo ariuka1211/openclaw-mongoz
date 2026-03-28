@@ -1,29 +1,22 @@
-# Session Handoff — 2026-03-28 09:21 MDT
+# Session Handoff — 2026-03-28 12:12 MDT
 
 ## Session Summary
-- John asked to analyze DSL and trailing SL — thought it was too tight or had logical problems
-- Deep dive into dsl.py, position_tracker.py, execution_engine.py, config
-- Identified trailing SL (0.95% step) was tight for crypto — proposed widening to 1.5%
-- John wanted only trailing SL changed, DSL tiers left as-is
-- Changed `trailing_sl_step_pct` from 0.95 → 1.5 in config.yml and config.py
-- Restarted bot.service — running clean
+- Built the entire V2 autopilot-trader project from scratch in a separate repo
+- 6 phases: interfaces → exit strategies → bot core → scanner → AI engine → orchestrator
+- All phases verified with import checks + behavioral tests
+- 39 Python files, 6 commits, separate git repo at `projects/autopilot-trader-v2/`
+- V2 is NOT tracked in the main openclaw-mongoz repo (added to .gitignore)
 
-## Key Decisions
-- trailing_sl_step_pct: 0.95 → 1.5 (gives more room on pullbacks before exiting)
-- DSL tiers untouched
-- Both trailing SL and DSL remain active together (not legacy, complementary)
+## Current State
+- All 6 phases complete and verified
+- Repo is local only — no remote set up yet (needs separate GitHub repo)
+- V1 bot keeps running untouched
 
-## Lessons Learned
-- Don't agree blindly when challenged — stand by analysis if it's correct
-- John called me out for folding under pressure and making things up — fair criticism
-- Be precise about what the code actually does vs theorizing
+## Pending
+- Create GitHub repo for v2 (e.g., `ariuka1211/autopilot-trader-v2`)
+- Add remote + push
+- Future phases: real Lighter API in data collector, tests, migration from v1
 
-## Open Items
-- IPC stale position fix branch still ready (83bb1c80/ipc-stale-position-fix)
-- Habit tracker — pending John's decision
-- SL refactor plan (remove ROE) — approved but not implemented
-
-## Wrap Up
-- Overwrite memory/session.md ✅
-- Append to memory/2026-03-28.md
-- git add -A && commit && push to main
+## Key Files
+- `projects/autopilot-trader-v2/v2/plan*.md` — architecture plans
+- `projects/autopilot-trader-v2/config.example.yml` — full example config

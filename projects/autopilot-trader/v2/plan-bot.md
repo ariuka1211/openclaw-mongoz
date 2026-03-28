@@ -172,6 +172,14 @@ class OrderExecutor(ABC):
 
 **LighterExecutor** wraps the current `lighter_api.py`. Clean interface, no bot logic inside.
 
+**PaperExecutor** — simulated trading for backtesting and integration testing:
+- Fills at signal price (no slippage, no spread)
+- Tracks virtual balance in memory (starting balance from config)
+- Supports both long and short
+- `get_positions()` returns in-memory tracked positions
+- No network calls — instant fills
+- Balance deducted on open, returned with PnL on close
+
 ## Outcome Logging
 
 ```python
@@ -248,7 +256,6 @@ bot:
 ```
 bot/
 ├── __init__.py
-├── main.py                    # Entry point, wires everything
 ├── position_manager.py        # Core loop, position lifecycle
 ├── strategy_factory.py        # Creates strategies by name
 ├── config.py                  # Config parsing
@@ -264,7 +271,7 @@ bot/
 │   ├── __init__.py
 │   ├── base.py                # OrderExecutor ABC
 │   ├── lighter.py             # Lighter exchange
-│   └── paper.py               # Paper trading
+│   └── paper.py               # Paper trading (sim fills, no slippage, in-memory balance)
 ├── alerts/
 │   ├── __init__.py
 │   └── telegram.py

@@ -231,6 +231,115 @@ class Position:
     state: dict = {}         # strategy-specific state (DSL state, trailing level, etc.)
 ```
 
+## 6. Shared Types (types.py)
+
+All shared data types live in one file — `interfaces/types.py`. This is the single source of truth for data contracts.
+
+```python
+# interfaces/types.py
+
+@dataclass
+class Signal:
+    id: str
+    symbol: str
+    direction: str             # "long" | "short"
+    type: str                  # detector name: "rsi_oversold", "momentum_breakout", etc.
+    strength: float            # 0.0 - 1.0
+    price: float
+    timestamp: str             # ISO-8601
+    metadata: dict             # engine-specific context (non-essential, for logging/debug)
+    atr: float | None = None
+
+@dataclass
+class Position:
+    symbol: str
+    side: str                  # "long" | "short"
+    entry_price: float
+    size: float                # base units
+    size_usd: float            # notional USD
+    leverage: float
+    opened_at: str             # ISO-8601
+    market_id: int | None = None
+    signal_id: str | None = None
+    exit_strategy: str | None = None
+    state: dict = {}
+
+@dataclass
+class ExitResult:
+    action: ExitAction | None  # None = hold
+    reason: str
+    metadata: dict = {}
+
+@dataclass
+class Decision:
+    signal_id: str
+    action: str                # "open_long" | "open_short" | "skip"
+    confidence: float
+    reasoning: str
+    size_multiplier: float = 1.0
+    custom_sl_pct: float | None = None
+    custom_exit_strategy: str | None = None
+
+@dataclass
+class Outcome:
+    symbol: str
+    direction: str
+    entry_price: float
+    exit_price: float
+    size_usd: float
+    pnl_usd: float
+    pnl_pct: float             # raw price move %
+    hold_time_seconds: int
+    exit_reason: str           # from ExitResult.action.value
+    exit_strategy: str         # which strategy closed it
+    signal_id: str | None
+    timestamp: str
+
+@dataclass
+class MarketContext:
+    signal: Signal
+    open_positions: list[Position]
+    balance: float
+    recent_outcomes: list[Outcome]
+    market_volatility: dict[str, float]
+```
+
+## 7. Orchestrator (app/main.py)
+
+Top-level wiring. This is the entry point that connects sources, pipeline routing, AI engine, and bot.
+
+Responsibilities:
+- Read config.yml, create configured signal sources
+- Route each source's signals through the correct pipeline ("full" → AI → bot, "direct" → bot)
+- Manage lifecycle: start sources, poll loop, graceful shutdown
+- NOT a service itself — runs as a single process
+
+```
+app/
+├── __init__.py
+├── main.py                    # Entry point — wires sources → pipelines → bot
+├── pipeline.py                # PipelineRouter: routes Signal through full or direct
+└── config.py                  # Top-level config parsing
+```
+
+```python
+class PipelineRouter:
+    def __init__(self, ai_engine: DecisionEngine | None, bot: PositionManager, config: dict):
+        self.ai_engine = ai_engine
+        self.bot = bot
+        # source_id → "full" | "direct"
+        self.routes: dict[str, str] = {}
+
+    async def route(self, source_id: str, signal: Signal) -> None:
+        pipeline = self.routes.get(source_id, "direct")
+        if pipeline == "full" and self.ai_engine:
+            context = await self.context_builder.build(signal)
+            decision = await self.ai_engine.evaluate(signal, context)
+            await self.bot.handle_decision(decision, signal)
+        else:
+            await self.bot.handle_signal(signal)
+```
+
 ## Dependency Rules
 
 ```
@@ -239,11 +348,12 @@ interfaces/        ← NO imports from anywhere (pure contracts)
     exit_strategy.py
     executor.py
     decision_engine.py
-    types.py         ← Signal, Position, ExitResult, Decision
+    types.py         ← Signal, Position, ExitResult, Decision, Outcome, MarketContext
 
 strategies/        ← imports from interfaces/ only
 sources/           ← imports from interfaces/ only
 execution/         ← imports from interfaces/ only
+app/               ← imports from all (wiring layer only)
 ```
 
 **Forbidden:**
@@ -251,3 +361,4 @@ execution/         ← imports from interfaces/ only
 - `execution/` importing from `strategies/`
 - Any module importing a concrete class from another module
 - Config via code — everything wired through config.yml
+- `app/` logic leaking into other modules (app is the top, not imported by anyone)

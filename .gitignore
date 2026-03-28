@@ -75,6 +75,9 @@ projects/autopilot-trader/ipc/ai-decision.json
 projects/autopilot-trader/ipc/ai-result.json
 projects/autopilot-trader/oi-snapshot.json
 
+# V2 separate repo — not tracked here
+projects/autopilot-trader-v2/
+
 # Secrets
 auth-profiles.json
 models.json

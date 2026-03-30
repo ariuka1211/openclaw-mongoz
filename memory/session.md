@@ -1,51 +1,42 @@
-# Session Handoff — 2026-03-29 23:34 MDT
+# Session Handoff - 2026-03-30
 
-## Session Summary
-- Connected V2 DataCollector to Lighter REST API (raw JSON parsing, SDK model is broken)
-- Discovered WebSocket works with `?readonly=true` — built custom WS client
-- WS provides real-time: ticker, market_stats (OI, funding), trades, order_book
-- Built ws_client.py with reconnect + exponential backoff
-- Smoke test passed: WS + REST both working, 100 tests green
-- Researched Senpi-ai/senpi-skills — studied their liquidation cascade detection
-- Researched top GitHub crypto trading bots — saved findings to memory/2026-03-29-research.md
-- Discussed AI engine architecture — concluded AI layer is unnecessary if scanner does scoring
-- Discussed edge honestly — no proven edge yet, need backtesting to validate hypotheses
-- John going to sleep — research saved for morning
+## What We Built
+- **TradingView Webhook Receiver** for autopilot-trader-v2
+  - File: `sources/webhook_receiver.py` - aiohttp server on port 8099
+  - File: `tests/test_webhook_receiver.py` - 23 tests (all passing)
+  - Wired into `app/main.py` as a source type
+  - Added to `config.example.yml`
+
+## What We Deployed
+- **Production bot running** via systemd: `autopilot-trader-v2.service`
+- **nginx reverse proxy** on port 80 → 8099 (TradingView requires port 80/443)
+- Config: `/root/.openclaw/workspace/projects/autopilot-trader-v2/config.production.yml`
+- Webhook URL: `http://93.188.165.223:80/webhook`
+- Token stored in: `/root/.openclaw/workspace/projects/.env`
+
+## User's Setup
+- TradingView Premium plan ($25/mo)
+- Strategy: "Trendline Break Strategy (15, 15, 2, 2)" on BTCUSDT 5min
+- Alert configured with webhook + JSON message format
+- Paper trading mode ($1000 balance, $10 per trade)
 
 ## Current State
-- V2: real Lighter data via REST (candles) + WebSocket (live price, OI, funding, trades)
-- SDK: lighter-sdk 1.0.7 (latest)
-- Config: uses env vars from workspace .env, config.yml in .gitignore
-- 100 tests passing
-- Proxy disabled (direct connection works from server)
-
-## Key Fixes Today
-1. Lighter candlestick SDK Pydantic model broken → parse raw JSON via `candles_without_preload_content()`
-2. Resolution map was wrong ("5" not "5m") → fixed to "5m" format
-3. WebSocket fails without auth → `?readonly=true` solves it
-4. SDK WsClient missing readonly param → wrote custom ws_client.py
-
-## Still Missing
-1. **Telegram alerts** — config exists, not built
-2. **AI engine** — decided it's unnecessary, scanner should do scoring instead
-3. **TradingView webhook** — planned, not built
-4. **Backtesting engine** — need to validate signal hypotheses
-5. **README**
-
-## Research Findings (saved)
-- Top GitHub repos: Freqtrade (FreqAI/ML), Hummingbot (Avellaneda-Stoikov), Jesse (backtesting)
-- Quick wins to add: time-of-day filtering, relative volume, ATR sizing, funding percentile
-- V2 gaps: volatility sizing, regime detection, session filtering, performance metrics
+- Bot running, no real TradingView signals received yet
+- 4 test positions opened (BTC, ETH, SOL, DOGE) from our testing
+- All services healthy: autopilot-trader-v2.service + nginx
 
 ## Key Files
-- `projects/autopilot-trader-v2/sources/scanner_v2/data_collector.py` — REST candles from Lighter
-- `projects/autopilot-trader-v2/sources/scanner_v2/ws_client.py` — WebSocket client (NEW)
-- `projects/autopilot-trader-v2/sources/scanner_v2/scanner.py` — orchestrates WS + REST
-- `memory/2026-03-29-research.md` — GitHub repo research findings
-- `memory/2026-03-29.md` — daily notes
+- `/root/.openclaw/workspace/projects/autopilot-trader-v2/sources/webhook_receiver.py`
+- `/root/.openclaw/workspace/projects/autopilot-trader-v2/app/main.py` (modified)
+- `/root/.openclaw/workspace/projects/autopilot-trader-v2/config.production.yml`
+- `/root/.openclaw/workspace/projects/autopilot-trader-v2/bot/position_manager.py` (added set_price for PaperExecutor)
 
-## ⚠️ LESSONS LEARNED
-- NEVER guess when you can search or check existing code first
-- ALWAYS use subagents for research and implementation work
-- DO NOT jump to conclusions (Coinalyze) when Lighter already works
-- VERIFY before implementing — check V1 code, check SDK source, check raw API responses
+## Freqtrade Research
+- Tested Freqtrade Docker setup
+- Lighter exchange NOT fully supported in CCXT (missing fetchOrder, fetchTrades)
+- User decided to stick with V2 bot + TradingView Premium instead
+
+## User Feedback
+- User frustrated with long responses and feature suggestions
+- Keep it simple, answer what's asked
+- User interested in AI memory concepts but not for trading yet

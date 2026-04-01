@@ -1,0 +1,15 @@
+[Unit]
+Description=BTC Smart Grid Bot
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/.openclaw/workspace/projects/btc-grid-bot
+ExecStart=/usr/bin/python3 -u main.py
+Restart=on-failure
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

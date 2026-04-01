@@ -1,0 +1,39 @@
+bot:
+  account_id: 719758
+  margin_mode: cross
+
+capital:
+  starting_equity: 1000
+  max_exposure_multiplier: 3.0
+  margin_reserve_pct: 0.20
+
+grid:
+  reset_time_utc: "06:00"
+  min_levels: 4
+  max_levels: 8
+  poll_interval_seconds: 30
+
+risk:
+  daily_loss_limit_pct: 0.08
+
+llm:
+  model: "xiaomi/mimo-v2-pro"
+  max_tokens: 8192
+  temperature: 0.1
+
+data:
+  timeframes: ["15m", "30m"]
+  candles_lookback: 200
+
+telegram:
+  daily_pnl_time_utc: "23:30"
+
+coinalyze:
+  api_key: "0b84b892-eec9-4629-b55c-54adc3639ae9"
+
+indicators:
+  bb_period: 20
+  bb_std: 2.0
+  atr_period: 14
+  atr_multiplier: 0.5
+  adx_period: 14

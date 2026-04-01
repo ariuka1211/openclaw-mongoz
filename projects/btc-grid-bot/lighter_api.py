@@ -199,15 +199,35 @@ class LighterAPI:
         if isinstance(result, tuple):
             if len(result) >= 3 and result[2] is not None:
                 raise RuntimeError(f"Order rejected: {result[2]}")
-            # The exchange assigns order_index server-side, not returned in create_order.
-            # Return client_order_index for tracking; get_open_orders provides real order_ids.
+        
+        # Wait a moment and then fetch the order to get the real order_id
+        # The exchange assigns order_index server-side; we need to retrieve it
+        await asyncio.sleep(0.1)  # small delay to allow exchange to process
+        
+        # Try to get the order we just placed by matching side/price
+        try:
+            orders = await self.get_open_orders()
+            # Find the order that matches side and price (it should be the one we just placed)
+            for o in orders:
+                if o["side"] == side and abs(o["price"] - price) < 0.01:
+                    # Found our order
+                    return {
+                        "order_id": o["order_id"],
+                        "price": price,
+                        "side": side,
+                        "size": size,
+                    }
+        except Exception:
+            # If we can't find the order, fall back to client_order_index
+            logging.warning("Could not retrieve real order_id after placement, using client_order_index")
             return {
                 "order_id": str(self._client_order_index),
                 "price": price,
                 "side": side,
                 "size": size,
             }
-        raise RuntimeError(f"Unexpected response type: {type(result)}")
+        
+        raise RuntimeError(f"Failed to place order: order not found after creation")
 
     async def cancel_order(self, order_id: str) -> bool:
         """Cancel a single order by order_id (order_index)."""

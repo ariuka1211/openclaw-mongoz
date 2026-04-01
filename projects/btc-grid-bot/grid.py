@@ -332,15 +332,18 @@ class GridManager:
         }
 
     async def roll_grid(self, current_price: float):
-        """
-        Roll the grid to follow price when it hits band edges.
-        
-        1. Get fresh candle data
-        2. Recalculate Bollinger Bands centered on current price
-        3. Cancel old orders
-        4. Deploy new grid
+        """Roll the grid to follow price when it hits band edges.
+
+        - Cancel old orders (backup state first)
+        - Fetch fresh candle data and calculate indicators
+        - Generate new grid levels from bands + ATR + skew
+        - Deploy new grid
+        - If any step fails, revert to previous grid state
         """
         logging.info(f"Rolling grid at ${current_price:,.0f}")
+        
+        # Backup current state in case we need to revert
+        backup_state = self.state.copy()
         
         # Cancel existing orders first
         cancelled = await self.api.cancel_all_orders()
@@ -362,44 +365,82 @@ class GridManager:
             skew = indicators["skew"]
         except Exception as e:
             logging.error(f"Failed to fetch indicators for roll: {e}")
-            await send_alert(f"⚠️ Grid roll failed: {e}. Pausing.")
-            self.state["paused"] = True
-            self.state["pause_reason"] = f"Roll failed: {e}"
-            self.state["active"] = False
-            self._save_state()
+            await send_alert(f"⚠️ Grid roll failed: {e}. Reverting to previous grid.")
+            await self._redeploy_backup(backup_state)
             return
         
         # Generate new levels from bands + ATR + skew
         new_levels = self.generate_levels_from_bands(bands, atr, skew, current_price)
         
         if not new_levels["buy_levels"] or not new_levels["sell_levels"]:
-            logging.warning("Roll generated empty levels — pausing")
-            await send_alert("⚠️ Grid roll generated no levels. Pausing.")
-            self.state["paused"] = True
-            self.state["active"] = False
-            self._save_state()
+            logging.warning("Roll generated empty levels — reverting")
+            await send_alert("⚠️ Grid roll generated no levels. Reverting to previous grid.")
+            await self._redeploy_backup(backup_state)
             return
         
         # Get equity for sizing
-        equity = await self.api.get_equity()
+        try:
+            equity = await self.api.get_equity()
+        except Exception as e:
+            logging.error(f"Failed to get equity for roll: {e}")
+            await send_alert(f"⚠️ Grid roll failed to fetch equity: {e}. Reverting.")
+            await self._redeploy_backup(backup_state)
+            return
         
         # Deploy new grid (reuses the deploy method)
-        await self.deploy(new_levels, equity, current_price)
+        try:
+            await self.deploy(new_levels, equity, current_price)
+        except Exception as e:
+            logging.error(f"Failed to deploy new grid: {e}")
+            await send_alert(f"⚠️ Grid roll failed to deploy: {e}. Reverting to previous grid.")
+            await self._redeploy_backup(backup_state)
+            return
         
         # Track roll
         self.state["roll_count"] = self.state.get("roll_count", 0) + 1
         self.state["last_roll"] = datetime.now(timezone.utc).isoformat()
         self._save_state()
         
-        direction = "⬆️" if current_price > self.state.get("range_low", 0) else "⬇️"
         await send_alert(
-            f"🔄 Grid rolled {direction} · BTC @ ${current_price:,.0f}\n"
-            f"New range: ${min(new_levels['buy_levels']):,.0f} – ${max(new_levels['sell_levels']):,.0f}\n"
-            f"Skew: {skew['buy_pct']}% buy / {skew['sell_pct']}% sell\n"
-            f"Spacing: ${atr['suggested_spacing']:,.0f} (ATR-based)"
+            (
+                f"🔄 Grid rolled {direction} · BTC @ ${current_price:,.0f}\n"
+                f"New range: ${min(new_levels['buy_levels']):,.0f} – ${max(new_levels['sell_levels']):,.0f}\n"
+                f"Skew: {skew['buy_pct']}% buy / {skew['sell_pct']}% sell\n"
+                f"Spacing: ${atr['suggested_spacing']:,.0f} (ATR-based)"
+            )
         )
 
-    # ── Pause / Resume ───────────────────────────────────────────
+
+
+    async def _redeploy_backup(self, backup_state: dict):
+        """Redeploy the grid from a backup state (used when roll fails)."""
+        logging.info("Reverting to backup grid state")
+        
+        # Cancel any current orders (if any)
+        try:
+            await self.api.cancel_all_orders()
+        except Exception as e:
+            logging.error(f"Failed to cancel orders during revert: {e}")
+            # Continue anyway - we'll try to redeploy on top of possibly existing orders
+        
+        # Restore state from backup
+        self.state = backup_state.copy()
+        
+        # Redeploy using the backup levels and size
+        try:
+            await self.deploy(
+                {"buy_levels": backup_state["levels"]["buy"], "sell_levels": backup_state["levels"]["sell"], "range_low": backup_state["range_low"], "range_high": backup_state["range_high"]},
+                backup_state["equity_at_reset"] if "equity_at_reset" in backup_state else await self.api.get_equity(),
+                await self.api.get_btc_price()
+            )
+        except Exception as e:
+            logging.error(f"Failed to redeploy backup grid: {e}")
+            await send_alert(f"⚠️ Failed to restore grid after roll failure: {e}")
+            # If we can't redeploy, pause the bot
+            self.state["paused"] = True
+            self.state["active"] = False
+            self.state["pause_reason"] = f"Backup redeploy failed: {e}"
+            self._save_state()
 
     async def _pause(self, reason: str):
         """Cancel all orders and pause the grid."""

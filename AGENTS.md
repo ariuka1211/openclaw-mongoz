@@ -30,7 +30,7 @@
 **Start:**
 1. `memory/session.md` → handoff
 2. `MEMORY.md` → long-term context
-3. `projects/autopilot-trader/docs/cheatsheet.md` → file map
+3. `projects/btc-grid-bot/docs/cheatsheet.md` → grid bot quick reference
 4. Today's daily file in `memory/`
 
 **End (🔴 WRAP UP):**

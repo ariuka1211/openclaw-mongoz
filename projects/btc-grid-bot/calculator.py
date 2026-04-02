@@ -5,6 +5,9 @@ def calculate_grid(
     num_sell_levels: int,
     max_exposure_mult: float = 3.0,
     margin_reserve_pct: float = 0.20,
+    atr_pct: float = None,     # NEW: ATR as % of price
+    atr_spacing: float = None, # NEW: ATR-based spacing in USD
+    vol_cfg: dict = None,      # NEW: volatility config overrides
 ) -> dict:
     """
     Returns:
@@ -21,14 +24,36 @@ def calculate_grid(
         "adjusted_num_sell_levels": int or None,
     }
     """
+    # ── Volatility-adaptive sizing ─────────────────────────────
+    vol_adj = 1.0  # default: no adjustment
+    if atr_pct is not None and atr_pct > 0:
+        # Read thresholds from config or use defaults
+        if vol_cfg is None:
+            vol_cfg = {}
+        baseline = vol_cfg.get("baseline_pct", 0.005)      # 0.5% ATR = neutral
+        high_threshold = vol_cfg.get("high_threshold_pct", 0.015)  # 1.5% ATR = start reducing
+        max_increase = vol_cfg.get("max_increase", 0.20)   # max 20% size increase
+        max_decrease = vol_cfg.get("max_decrease", 0.40)   # max 40% size decrease
+
+        if atr_pct < baseline:
+            vol_adj = 1.0 + (baseline - atr_pct) / baseline * max_increase
+        elif atr_pct > high_threshold:
+            vol_adj = 1.0 - (atr_pct - high_threshold) / high_threshold * max_decrease
+        # between baseline and high_threshold: vol_adj stays at 1.0
+
+    # Log the adjustment
+    if vol_adj != 1.0 and atr_pct:
+        print(f"Volatility adj: {vol_adj:.2f}x (ATR: {atr_pct:.2%})")
+
     max_notional = account_equity * max_exposure_mult
     reserved = account_equity * margin_reserve_pct
     available = max_notional - reserved
     total_levels = num_buy_levels + num_sell_levels
-    
+
     safety_factor = 0.90
     safe_available = available * safety_factor
     size_per_level = (safe_available / total_levels) / btc_price
+    size_per_level *= vol_adj  # Apply vol adjustment to size
     adjusted_num_buy = None
     adjusted_num_sell = None
     
@@ -51,11 +76,14 @@ def calculate_grid(
                     "reason": "Equity too low to place even minimum size orders",
                     "adjusted_num_buy_levels": None,
                     "adjusted_num_sell_levels": None,
+                    "vol_adj": round(vol_adj, 2),
+                    "atr_pct": round(atr_pct, 4) if atr_pct else None,
                 }
             adjusted_num_buy = max(1, int(num_buy_levels * (max_levels / total_levels)))
             adjusted_num_sell = max(1, int(num_sell_levels * (max_levels / total_levels)))
             total_levels = adjusted_num_buy + adjusted_num_sell
             size_per_level = (available * safety_factor) / (total_levels * btc_price)
+            size_per_level *= vol_adj  # Re-apply vol adjustment after min size fix
     
     worst_case_notional = total_levels * size_per_level * btc_price
 
@@ -71,6 +99,8 @@ def calculate_grid(
         "reason": "" if safe else f"Worst case ${worst_case_notional:.0f} exceeds available ${available:.0f}",
         "adjusted_num_buy_levels": adjusted_num_buy,
         "adjusted_num_sell_levels": adjusted_num_sell,
+        "vol_adj": round(vol_adj, 2),
+        "atr_pct": round(atr_pct, 4) if atr_pct else None,
     }
 
 
@@ -89,6 +119,9 @@ def print_safety_table(equity, btc_price, num_buy, num_sell, result, max_exposur
     print()
     print(f"  Grid: {num_buy} buy + {num_sell} sell levels")
     print(f"  Size per level:      {result['size_per_level']:.6f} BTC  (${result['size_per_level_usd']:,.0f}/level)")
+    if result.get("vol_adj") is not None and result["vol_adj"] != 1.0:
+        atr_str = f" (ATR: {result['atr_pct']:.2%})" if result.get("atr_pct") else ""
+        print(f"  Volatility adj:    {result['vol_adj']:.2f}x{atr_str}")
     print(f"  Worst case (all levels fill): ${result['worst_case_notional']:,.0f}")
     print()
     if result["safe"]:
@@ -113,10 +146,14 @@ async def main():
     num_buy = cfg["grid"]["max_levels"] // 2
     num_sell = cfg["grid"]["max_levels"] // 2
 
+    # Load volatility config section if present
+    vol_cfg = cfg.get("volatility", {})
     result = calculate_grid(
         equity, btc_price, num_buy, num_sell,
         cfg["capital"]["max_exposure_multiplier"],
         cfg["capital"]["margin_reserve_pct"],
+        atr_pct=None,  # Standalone mode: no ATR passed
+        vol_cfg=vol_cfg,
     )
     print_safety_table(equity, btc_price, num_buy, num_sell, result)
 

@@ -130,10 +130,25 @@ async def handle_resume(gm, api, cfg):
 
     num_buy = len(old_buy)
     num_sell = len(old_sell)
+
+    # Compute ATR for volatility-adaptive sizing
+    atr_pct = None
+    try:
+        candles_15m = await fetch_candles("15m", limit=100)
+        from indicators import calc_atr
+        atr_data = calc_atr(candles_15m, period=14)
+        if atr_data.get("atr", 0) > 0 and price > 0:
+            atr_pct = atr_data["atr"] / price
+    except Exception:
+        pass
+
+    vol_cfg = cfg.get("volatility", {})
     calc = calculate_grid(
         equity, price, num_buy, num_sell,
         cfg["capital"]["max_exposure_multiplier"],
         cfg["capital"]["margin_reserve_pct"],
+        atr_pct=atr_pct,
+        vol_cfg=vol_cfg,
     )
     if not calc["safe"]:
         msg = f"❌ Safety check failed — cannot resume: {calc['reason']}"
@@ -236,11 +251,25 @@ async def startup(cfg: dict) -> tuple[LighterAPI, GridManager, dict]:
         await send_alert(msg)
         sys.exit(1)
 
+    # Compute ATR for volatility-adaptive sizing
+    atr_pct = None
+    try:
+        candles_15m = await fetch_candles("15m", limit=100)
+        from indicators import calc_atr
+        atr_data = calc_atr(candles_15m, period=14)
+        if atr_data.get("atr", 0) > 0 and price > 0:
+            atr_pct = atr_data["atr"] / price
+    except Exception:
+        pass
+
+    vol_cfg = cfg.get("volatility", {})
     # Safety-check against the REAL level count
     calc = calculate_grid(
         equity, price, num_buy, num_sell,
         cfg["capital"]["max_exposure_multiplier"],
         cfg["capital"]["margin_reserve_pct"],
+        atr_pct=atr_pct,
+        vol_cfg=vol_cfg,
     )
     if not calc["safe"]:
         msg = f"❌ Safety check failed: {calc['reason']}"

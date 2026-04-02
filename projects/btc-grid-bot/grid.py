@@ -106,11 +106,26 @@ class GridManager:
         if total > max_levels:
             logging.warning(f"Grid levels exceed max ({total} > {max_levels}) — deploying anyway")
 
+        # Compute ATR for volatility-adaptive sizing
+        atr_pct = None
+        try:
+            candles_15m = await fetch_candles("15m", limit=100)
+            atr_data = calc_atr(candles_15m, period=14)
+            if atr_data.get("atr", 0) > 0 and btc_price > 0:
+                atr_pct = atr_data["atr"] / btc_price
+        except Exception:
+            pass  # Fall back to non-adaptive sizing
+
+        # Load vol config from main config if present
+        vol_cfg = self.cfg.get("volatility", {})
+
         # Run capital calculator
         calc = calculate_grid(
             equity, btc_price, num_buy, num_sell,
             self.cfg["capital"]["max_exposure_multiplier"],
             self.cfg["capital"]["margin_reserve_pct"],
+            atr_pct=atr_pct,
+            vol_cfg=vol_cfg,
         )
         if not calc["safe"]:
             msg = f"🚨 Capital check FAILED: {calc['reason']}. Grid not deployed."
@@ -169,10 +184,15 @@ class GridManager:
             self.state.update(roll_info)
         self._save_state()
 
+        vol_info = ""
+        if calc.get("vol_adj") is not None and calc["vol_adj"] != 1.0:
+            atr_pct_val = calc.get("atr_pct", 0)
+            vol_info = f"\nVol adj: {calc['vol_adj']:.2f}x (ATR {atr_pct_val:.2%})"
+
         alert = (
             f"📊 Grid deployed · BTC @ ${btc_price:,.0f}\n"
             f"Range: ${min(buy_levels):,.0f} – ${max(sell_levels):,.0f}\n"
-            f"{num_buy} buys + {num_sell} sells · {size:.5f} BTC/level"
+            f"{num_buy} buys + {num_sell} sells · {size:.5f} BTC/level{vol_info}"
         )
         await send_alert(alert)
 

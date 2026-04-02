@@ -84,33 +84,117 @@ async def fetch_candles(timeframe: str, limit: int = 200) -> list[dict]:
     return candles
 
 
-def _candles_to_csv(candles: list[dict]) -> str:
-    """Format candles as compact CSV (timestamp,open,high,low,close,vol)."""
-    lines = ["timestamp,open,high,low,close,vol"]
-    for c in candles:
-        lines.append(f"{c['ts']},{c['o']},{c['h']},{c['l']},{c['c']},{c['v']}")
-    return "\n".join(lines)
+def find_swing_points(candles: list[dict], order: int = 3) -> dict:
+    """Identify swing highs, swing lows, and OHLCV statistics from candles.
 
+    Uses the 'order' parameter — a point is a local high/low if it is the
+    highest/lowest among `order` candles on each side.
 
-def build_prompt(candles_15m: list[dict], candles_30m: list[dict], market_intel: str = "", indicators: str = "") -> str:
-    """Build the LLM prompt for swing-level analysis.
-
-    Uses last 96 candles of 15m (~24h) and last 48 candles of 30m (~24h).
+    Returns:
+        {
+            "swing_highs": [{"index": i, "price": float, "ts": int}, ...],
+            "swing_lows": [{"index": i, "price": float, "ts": int}, ...],
+            "stats": {"high": float, "low": float, "avg_vol": float, ...},
+            "current_price": float,
+        }
     """
-    # Trim to lookback windows
-    c15 = candles_15m[-96:] if len(candles_15m) > 96 else candles_15m
-    c30 = candles_30m[-48:] if len(candles_30m) > 48 else candles_30m
+    if len(candles) < 2 * order + 1:
+        return {
+            "swing_highs": [],
+            "swing_lows": [],
+            "stats": {},
+            "current_price": candles[-1]["c"] if candles else 0,
+        }
 
-    csv_15m = _candles_to_csv(c15)
-    csv_30m = _candles_to_csv(c30)
+    swing_highs = []
+    swing_lows = []
+
+    for i in range(order, len(candles) - order):
+        price = candles[i]["h"]  # use high for swing highs
+        is_high = all(candles[i + j]["h"] <= price for j in range(-order, 0)) and \
+                  all(candles[i + j]["h"] <= price for j in range(1, order + 1))
+        if is_high:
+            swing_highs.append({"index": i, "price": round(price, 2), "ts": candles[i]["ts"]})
+
+        price = candles[i]["l"]  # use low for swing lows
+        is_low = all(candles[i + j]["l"] >= price for j in range(-order, 0)) and \
+                 all(candles[i + j]["l"] >= price for j in range(1, order + 1))
+        if is_low:
+            swing_lows.append({"index": i, "price": round(price, 2), "ts": candles[i]["ts"]})
+
+    # Stats
+    highs = [c["h"] for c in candles]
+    lows = [c["l"] for c in candles]
+    closes = [c["c"] for c in candles]
+    volumes = [c["v"] for c in candles]
+
+    stats = {
+        "highest": round(max(highs), 2),
+        "lowest": round(min(lows), 2),
+        "current": round(closes[-1], 2),
+        "avg_vol": round(sum(volumes) / len(volumes), 2),
+        "candle_count": len(candles),
+    }
+
+    return {
+        "swing_highs": swing_highs,
+        "swing_lows": swing_lows,
+        "stats": stats,
+        "current_price": stats["current"],
+    }
+
+
+def build_prompt(swing_15m: dict, swing_30m: dict, market_intel: str = "", indicators: str = "") -> str:
+    """Build the LLM prompt for swing-level analysis using pre-computed swing points.
+
+    Replaces raw CSV candle data with condensed swing point summaries
+    to reduce token usage by 70-80%.
+    """
+    # Format swing points compactly
+    highs_15 = swing_15m.get("swing_highs", [])
+    lows_15 = swing_15m.get("swing_lows", [])
+    highs_30 = swing_30m.get("swing_highs", [])
+    lows_30 = swing_30m.get("swing_lows", [])
+    stats_15 = swing_15m.get("stats", {})
+    stats_30 = swing_30m.get("stats", {})
+
+    # Format: time, price pairs for swing points
+    def format_swings(swings: list[dict]) -> str:
+        if not swings:
+            return "  (no clear swings detected)"
+        lines = []
+        for s in swings[-15:]:  # cap at 15 most recent
+            from datetime import datetime, timezone
+            t = datetime.fromtimestamp(s["ts"] / 1000, timezone.utc).strftime("%H:%M")
+            lines.append(f"  {t}: ${s['price']:,.0f}")
+        return "\n".join(lines[-8:])  # show last 8 max
+
+    price = stats_15.get("current", 0)
 
     prompt = f"""You are a BTC market structure analyst for a grid trading bot.
 
-Below are BTC 15-minute and 30-minute OHLCV candles for the last 24 hours.
+Below are pre-computed swing points from BTC 15-minute and 30-minute candles.
 
 {indicators}
 
 {market_intel}
+
+## Market Summary
+- Current price: ${price:,.0f}
+- 15m range: ${stats_15.get('lowest', 0):,.0f} – ${stats_15.get('highest', 0):,.0f} ({stats_15.get('candle_count', 0)} candles)
+- 30m range: ${stats_30.get('lowest', 0):,.0f} – ${stats_30.get('highest', 0):,.0f} ({stats_30.get('candle_count', 0)} candles)
+
+## Swing Highs (resistance candidates)
+15m:
+{format_swings(highs_15)}
+30m:
+{format_swings(highs_30)}
+
+## Swing Lows (support candidates)
+15m:
+{format_swings(lows_15)}
+30m:
+{format_swings(lows_30)}
 
 Your job: identify the key swing highs and swing lows that price has clearly reversed from. These will be used as grid order levels.
 
@@ -119,8 +203,7 @@ Rules:
 - 4 to 8 sell levels (resistance / swing highs) — above current price
 - Only include levels where price visibly reversed or consolidated
 - Round levels to nearest $50 for BTC
-- Do not invent levels — only use what the chart shows
-- Current price is the last close in the 15m data
+- Do not invent levels — only use what the data shows
 - Consider market intel: high funding + crowded positions = potential liquidation cascades
 
 Return ONLY valid JSON, no commentary:
@@ -137,12 +220,6 @@ Return ONLY valid JSON, no commentary:
 
 If you cannot identify clear structure (e.g. strongly trending, not enough data):
 set "pause": true and explain in "pause_reason".
-
-15m candles (last {len(c15)}, oldest first):
-{csv_15m}
-
-30m candles (last {len(c30)}, oldest first):
-{csv_30m}
 """
     return prompt
 
@@ -273,12 +350,16 @@ async def run_analyst(cfg: dict) -> dict:
     # Fetch market intelligence data
     market_intel_data = await gather_all_intel(cfg)
     market_intel_text = market_intel_data.get("formatted", "")
-    
+
     # Calculate indicators
     indicators_data = gather_indicators(candles_15m, candles_30m, candles_4h, market_intel_data)
     indicators_text = indicators_data.get("formatted", "")
 
-    prompt = build_prompt(candles_15m, candles_30m, market_intel_text, indicators_text)
+    # Pre-compute swing points to replace raw CSV (saves 70-80% tokens)
+    swing_15m = find_swing_points(candles_15m, order=3)
+    swing_30m = find_swing_points(candles_30m, order=2)
+
+    prompt = build_prompt(swing_15m, swing_30m, market_intel_text, indicators_text)
     result = await call_llm(prompt, cfg)
 
     # Validate output

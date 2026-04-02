@@ -95,6 +95,58 @@ def set_loss_lockout(reason: str):
     logging.warning(f"Loss lockout set until {unlock_at.isoformat()}")
 
 
+async def handle_resume(gm, api, cfg):
+    """Resume a paused grid without running fresh AI analysis.
+
+    If valid levels exist in state, clear pause and redeploy.
+    If state is empty (first run / crash), fall back to full startup.
+    """
+    try:
+        equity = await api.get_equity()
+        price = await api.get_btc_price()
+    except Exception as e:
+        await send_alert(f"⚠️ Resume failed — cannot fetch equity/price: {e}")
+        return
+
+    state = gm.state
+    old_buy = state.get("levels", {}).get("buy", [])
+    old_sell = state.get("levels", {}).get("sell", [])
+
+    if not old_buy or not old_sell:
+        log.info("No existing levels in state — running full AI analysis")
+        await send_alert("🔄 No existing grid — running fresh AI analysis...")
+        new_api, new_gm, new_levels = await startup(cfg)
+        gm.state.update(new_gm.state)
+        gm._save_state()
+        return
+
+    levels = {
+        "buy_levels": old_buy,
+        "sell_levels": old_sell,
+        "range_low": state.get("range_low", min(old_buy)),
+        "range_high": state.get("range_high", max(old_sell)),
+    }
+
+    num_buy = len(old_buy)
+    num_sell = len(old_sell)
+    calc = calculate_grid(
+        equity, price, num_buy, num_sell,
+        cfg["capital"]["max_exposure_multiplier"],
+        cfg["capital"]["margin_reserve_pct"],
+    )
+    if not calc["safe"]:
+        msg = f"❌ Safety check failed — cannot resume: {calc['reason']}"
+        await send_alert(msg)
+        return
+
+    # Cancel old orders and redeploy same levels
+    await gm.cancel_all()
+    gm.state["paused"] = False
+    gm.state["pause_reason"] = ""
+    await gm.deploy(levels, equity, price)
+    await send_alert(f"🟢 Grid resumed (same levels) · BTC @ ${price:,.0f}")
+
+
 async def startup(cfg: dict) -> tuple[LighterAPI, GridManager, dict]:
     api = LighterAPI(cfg)
     equity = await api.get_equity()
@@ -181,12 +233,12 @@ async def run_loop(api: LighterAPI, gm: GridManager, levels: dict, cfg: dict):
             gm._save_state()
             return
         elif cmd == "resume":
-            log.info("Restarting bot for fresh grid deployment...")
-            await send_alert("🟢 Restarting with fresh grid analysis...")
-            await gm.cancel_all()
-            await api.close()
-            api, gm, levels = await startup(cfg)
-            # Continue with new grid in the loop below
+            await handle_resume(gm, api, cfg)
+            log.info("Grid resumed — continuing with existing levels")
+
+        # Skip this cycle if resume redeployed (state changed mid-cycle)
+        if cmd in ("resume",):
+            continue
 
         try:
             price = await api.get_btc_price()

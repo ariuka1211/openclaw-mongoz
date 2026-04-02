@@ -92,23 +92,36 @@ def format_status(state: dict) -> str:
 
 def format_pnl(state: dict) -> str:
     equity_reset = state.get("equity_at_reset", 0.0)
-    pnl = state.get("daily_pnl", 0.0)
+    realized_pnl = state.get("realized_pnl", 0.0)
+    equity_pnl = state.get("equity_pnl", 0.0)
+    trades = state.get("trades", [])
     fills = state.get("fill_count", 0)
     rolls = state.get("roll_count", 0)
     size = state.get("size_per_level", 0)
+    pending = len(state.get("pending_buys", []))
 
-    pnl_emoji = "📈" if pnl >= 0 else "📉"
-    pnl_pct = f"({pnl/equity_reset*100:.1f}%)" if equity_reset > 0 else ""
+    pnl_emoji = "📈" if realized_pnl >= 0 else "📉"
 
     lines = [
         "📊 PnL Report",
         "",
         f"Equity at reset: ${equity_reset:.2f}",
-        f"Current PnL: {pnl_emoji} ${pnl:.2f} {pnl_pct}",
+        f"Realized PnL: {pnl_emoji} ${realized_pnl:.2f}",
+        f"Equity delta: {pnl_emoji} ${equity_pnl:.2f}",
         f"Fill count: {fills}",
+        f"Completed trades: {len(trades)}",
+        f"Pending buy closes: {pending}",
         f"Roll count: {rolls}",
         f"Size per level: {size:.6f} BTC",
     ]
+
+    if trades:
+        last_trades = trades[-3:]  # show last 3
+        lines.append("")
+        lines.append("Last trades:")
+        for t in last_trades:
+            emoji = "✅" if t.get("pnl", 0) >= 0 else "❌"
+            lines.append(f"  {emoji} Buy ${t['buy_price']:,.0f} → Sell ${t['sell_price']:,.0f} | PnL ${t['pnl']:.2f}")
 
     if rolls > 0:
         last_roll = state.get("last_roll", "never")

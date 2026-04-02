@@ -25,7 +25,8 @@ from calculator import calculate_grid
 from grid import GridManager
 from lighter_api import LighterAPI
 from telegram import send_alert
-from analyst import run_analyst
+from analyst import run_analyst, fetch_candles
+from indicators import calc_ema_single
 
 load_dotenv()
 
@@ -147,6 +148,50 @@ async def handle_resume(gm, api, cfg):
     await send_alert(f"🟢 Grid resumed (same levels) · BTC @ ${price:,.0f}")
 
 
+async def check_trend(cfg: dict, price: float):
+    """Check 4H EMA(50) trend filter before grid deployment.
+
+    Returns True if safe to deploy, False if we should abort.
+    """
+    trend_cfg = cfg.get("trend", {})
+    ema_period = trend_cfg.get("ema_period", 50)
+    pause_threshold = trend_cfg.get("pause_threshold_pct", 0.03)
+    warning_threshold = trend_cfg.get("warning_threshold_pct", 0.01)
+
+    try:
+        candles_4h = await fetch_candles("4H", limit=100)
+        ema_50 = calc_ema_single(candles_4h, ema_period)
+    except Exception as e:
+        log.error(f"Trend check failed, proceeding anyway: {e}")
+        return True
+
+    if ema_50 is None:
+        log.warning("Not enough 4H candles for EMA calculation — proceeding without trend filter")
+        return True
+
+    pct_below = (ema_50 - price) / ema_50
+
+    if pct_below > pause_threshold:
+        msg = (
+            f"⚠️ Strong downtrend detected. BTC ${price:,.0f} >{pause_threshold:.0%} below "
+            f"4H EMA(50) ${ema_50:,.0f}. Grid deployment paused.\n"
+            f"Price is too far from fair value for safe grid trading."
+        )
+        log.error(msg)
+        await send_alert(msg)
+        return False
+    elif pct_below > warning_threshold:
+        msg = (
+            f"⚠️ Mild downtrend: BTC ${price:,.0f} is {pct_below:.1%} below "
+            f"4H EMA(50) ${ema_50:,.0f}. Grid deployed but monitor closely."
+        )
+        log.warning(msg)
+        await send_alert(msg)
+        return True
+    else:
+        return True
+
+
 async def startup(cfg: dict) -> tuple[LighterAPI, GridManager, dict]:
     api = LighterAPI(cfg)
     equity = await api.get_equity()
@@ -163,6 +208,12 @@ async def startup(cfg: dict) -> tuple[LighterAPI, GridManager, dict]:
 
     await send_alert("🔍 Running market analysis...")
     levels = await run_analyst(cfg)
+
+    # Trend filter check — after analyst, before capital check
+    if not levels.get("pause"):
+        trend_ok = await check_trend(cfg, price)
+        if not trend_ok:
+            sys.exit(1)
 
     # Validate analyst output against config min/max
     num_buy = len(levels["buy_levels"])
@@ -250,13 +301,17 @@ async def run_loop(api: LighterAPI, gm: GridManager, levels: dict, cfg: dict):
                 try:
                     equity = await api.get_equity()
                     equity_at_reset = gm.state.get("equity_at_reset", equity)
-                    pnl = equity - equity_at_reset
+                    realized_pnl = gm.state.get("realized_pnl", 0.0)
+                    trades_count = len(gm.state.get("trades", []))
+                    pending_buys = len(gm.state.get("pending_buys", []))
+                    pnl_pct_str = f"{realized_pnl/equity_at_reset*100:.1f}%" if equity_at_reset > 0 else "0.0%"
                     await send_alert(
                         (
                             f"📊 Daily PnL Report · {now.strftime('%Y-%m-%d %H:%M UTC')}\n"
                             f"Starting Equity: ${equity_at_reset:.2f}\n"
                             f"Current Equity: ${equity:.2f}\n"
-                            f"Daily PnL: ${pnl:.2f} ({pnl/equity_at_reset*100:.1f}%)\n"
+                            f"Realized PnL: ${realized_pnl:.2f} ({pnl_pct_str}%)\n"
+                            f"Completed trades: {trades_count} | Pending buys: {pending_buys}\n"
                             f"Grid Range: ${gm.state['range_low']:.0f}–${gm.state['range_high']:.0f}"
                         )
                     )

@@ -115,7 +115,7 @@ def calc_atr(candles: List[Dict], period: int = 14) -> Dict:
 
 
 def calc_ema(values: List[float], period: int) -> List[float]:
-    """Exponential moving average."""
+    """Exponential moving average (returns series)."""
     if len(values) < period:
         return [float("nan")] * len(values)
 
@@ -129,6 +129,27 @@ def calc_ema(values: List[float], period: int) -> List[float]:
         result.append(ema)
 
     return result
+
+
+def calc_ema_single(candles: List[Dict], period: int) -> float | None:
+    """Calculate Exponential Moving Average from candle data.
+
+    candles: list of dicts with 'c' (close) key, in chronological order.
+    period: EMA period (e.g., 50).
+    Returns the latest EMA value, or None if not enough data.
+    Requires at least `period` candles.
+    """
+    closes = [c["c"] for c in candles]
+    if len(closes) < period:
+        return None
+
+    multiplier = 2.0 / (period + 1)
+    ema = sum(closes[:period]) / period  # SMA as initial
+
+    for price in closes[period:]:
+        ema = (price - ema) * multiplier + ema
+
+    return round(ema, 2)
 
 
 def calc_adx(candles: List[Dict], period: int = 14) -> Dict:
@@ -402,13 +423,37 @@ def gather_indicators(candles_15m: List[Dict], candles_30m: List[Dict],
     atr = calc_atr(candles_15m)
     adx = calc_adx(candles_15m)
     skew = calc_trend_skew(candles_15m, candles_4h, market_intel)
-    formatted = format_indicators(bands, atr, skew)
+
+    # 4H EMA(50) trend filter
+    ema_50_4h = calc_ema_single(candles_4h, 50)
+    current_price = candles_15m[-1]["c"]
+
+    if ema_50_4h is not None:
+        pct_diff = (current_price - ema_50_4h) / ema_50_4h
+        if pct_diff > 0.01:  # price >1% above ema
+            trend = "uptrend"
+        elif pct_diff < -0.01:  # price <1% below ema
+            trend = "downtrend"
+        else:
+            trend = "neutral"
+    else:
+        trend = "no_data"
+
+    # Append trend info to formatted output
+    base_formatted = format_indicators(bands, atr, skew)
+    if ema_50_4h is not None:
+        trend_line = f"\n📈 4H EMA(50): ${ema_50_4h:,.0f} | Trend: {trend}"
+    else:
+        trend_line = f"\n📈 4H EMA(50): N/A | Trend: no_data"
+    formatted = base_formatted + trend_line
 
     return {
         "bollinger": bands,
         "atr": atr,
         "adx": adx,
         "skew": skew,
+        "ema_50_4h": ema_50_4h,
+        "trend": trend,
         "formatted": formatted,
     }
 

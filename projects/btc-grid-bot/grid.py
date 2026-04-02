@@ -21,7 +21,8 @@ from pathlib import Path
 from lighter_api import LighterAPI
 from calculator import calculate_grid
 from telegram import send_alert
-from indicators import calc_bollinger_bands, calc_atr, calc_trend_skew
+from indicators import calc_bollinger_bands, calc_atr, calc_trend_skew, calc_ema_single
+from analyst import fetch_candles
 
 STATE_FILE = Path("state/grid_state.json")
 
@@ -56,6 +57,10 @@ class GridManager:
             "equity_at_reset": 0.0,
             "roll_count": 0,
             "last_roll": None,
+            "realized_pnl": 0.0,
+            "trades": [],
+            "pending_buys": [],
+            "equity_pnl": 0.0,
         }
 
     def _save_state(self):
@@ -221,6 +226,28 @@ class GridManager:
             sell_levels = self.state["levels"].get("sell", [])
             size = self.state["size_per_level"]
 
+        # ── Trend-based pause check (sustained downtrend) ────────────
+        try:
+            candles_4h = await fetch_candles("4H", limit=100)
+            ema_50 = calc_ema_single(candles_4h, 50)
+            trend_cfg = self.cfg.get("trend", {})
+            if ema_50 is not None:
+                pct_below = (ema_50 - btc_price) / ema_50
+                pause_threshold = trend_cfg.get("pause_threshold_pct", 0.03)
+                if pct_below > pause_threshold:
+                    count = self.state.get("trend_warning_count", 0) + 1
+                    self.state["trend_warning_count"] = count
+                    self._save_state()
+                    if count >= 4:  # 4 cycles = 2 minutes sustained
+                        await self._pause(f"Strong downtrend: price {pct_below:.1%} below 4h EMA(50)")
+                        await send_alert("📉 Strong Downtrend. Grid paused.")
+                        return
+                else:
+                    self.state["trend_warning_count"] = 0
+                    self._save_state()
+        except Exception:
+            pass  # Don't break the loop if trend check fails
+
         # Get current open orders from exchange
         live_orders = await self.api.get_open_orders()
 
@@ -257,15 +284,47 @@ class GridManager:
                     f"✅ {order['side'].upper()} filled @ ${order['price']:,.0f} · {size:.5f} BTC"
                 )
 
+        # Track buy fills for PnL matching
+        for order in fills_processed:
+            if order["side"] == "buy":
+                self.state.setdefault("pending_buys", [])
+                self.state["pending_buys"].append({
+                    "price": order["price"],
+                    "size": self.state.get("size_per_level", 0),
+                    "ts": datetime.now(timezone.utc).isoformat(),
+                })
+                self._save_state()
+
+        # Match sell fills to pending buys for realized PnL
+        for order in fills_processed:
+            if order["side"] == "sell":
+                pending = self.state.get("pending_buys", [])
+                if pending:
+                    buy = pending.pop(0)
+                    buy_size = buy.get("size", self.state.get("size_per_level", 0))
+                    pnl = (order["price"] - buy["price"]) * buy_size
+                    self.state["realized_pnl"] = round(self.state.get("realized_pnl", 0) + pnl, 2)
+                    trade = {
+                        "buy_price": buy["price"],
+                        "sell_price": order["price"],
+                        "size": buy_size,
+                        "pnl": round(pnl, 2),
+                        "ts": datetime.now(timezone.utc).isoformat(),
+                    }
+                    self.state.setdefault("trades", []).append(trade)
+                    self.state["pending_buys"] = pending
+                    self._save_state()
+
         # Place replacements for each fill
         for order in fills_processed:
             await self._place_replacement(order, buy_levels, sell_levels, size, open_prices)
 
-        # Update daily PnL from equity delta
+        # Update PnL metrics
         try:
             equity = await self.api.get_equity()
             equity_at_reset = self.state.get("equity_at_reset", equity)
-            self.state["daily_pnl"] = round(equity - equity_at_reset, 2)
+            self.state["equity_pnl"] = round(equity - equity_at_reset, 2)
+            self.state["daily_pnl"] = round(self.state.get("realized_pnl", 0.0), 2)
         except Exception:
             pass  # Skip PnL update if equity fetch fails
 
@@ -618,12 +677,16 @@ class GridManager:
         open_orders = [o for o in s["orders"] if o["status"] == "open"]
         status = "PAUSED" if s["paused"] else "ACTIVE"
         rolls = s.get("roll_count", 0)
+        realized_pnl = s.get("realized_pnl", 0.0)
+        pending = len(s.get("pending_buys", []))
+        trades = len(s.get("trades", []))
         return (
             f"Grid: {status}\n"
             f"Range: ${s['range_low']:,.0f}–${s['range_high']:,.0f}\n"
             f"Open orders: {len(open_orders)}\n"
             f"Fills today: {s.get('fill_count', 0)}\n"
-            f"Daily PnL: ${s['daily_pnl']:.2f}\n"
+            f"Realized PnL: ${realized_pnl:.2f}\n"
+            f"Completed trades: {trades} · Pending: {pending}\n"
             f"Rolls: {rolls}\n"
             f"Last reset: {s['last_reset']}"
         )

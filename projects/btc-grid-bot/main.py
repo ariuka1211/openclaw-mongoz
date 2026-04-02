@@ -12,6 +12,7 @@ Flow:
 """
 
 import asyncio
+import json
 import logging
 import sys
 from pathlib import Path
@@ -38,22 +39,40 @@ def load_config() -> dict:
         return yaml.safe_load(f)
 
 
+def check_loss_lockout() -> str | None:
+    """Check if we're in a loss lockout period. Returns reason or None."""
+    lockout_file = Path("state/loss_lockout.json")
+    if not lockout_file.exists():
+        return None
+    with open(lockout_file) as f:
+        data = json.load(f)
+    unlock_at = datetime.fromisoformat(data["unlock_at"])
+    if datetime.now(timezone.utc) >= unlock_at:
+        lockout_file.unlink()  # lockout expired, clean up
+        return None
+    return data["reason"]
+
+
+def set_loss_lockout(reason: str):
+    """Set a 24-hour loss lockout."""
+    lockout_file = Path("state/loss_lockout.json")
+    lockout_file.parent.mkdir(exist_ok=True)
+    unlock_at = datetime.now(timezone.utc) + timedelta(hours=24)
+    with open(lockout_file, "w") as f:
+        json.dump({"unlock_at": unlock_at.isoformat(), "reason": reason}, f, indent=2)
+    logging.warning(f"Loss lockout set until {unlock_at.isoformat()}")
+
+
 async def startup(cfg: dict) -> tuple[LighterAPI, GridManager, dict]:
     api = LighterAPI(cfg)
     equity = await api.get_equity()
     price = await api.get_btc_price()
     log.info(f"Account equity: ${equity:.2f} | BTC: ${price:,.0f}")
 
-    # Safety check before deploying anything
-    calc = calculate_grid(
-        equity, price,
-        cfg["grid"].get("num_buy_levels", 4),
-        cfg["grid"].get("num_sell_levels", 4),
-        cfg["capital"]["max_exposure_multiplier"],
-        cfg["capital"]["margin_reserve_pct"],
-    )
-    if not calc["safe"]:
-        msg = f"❌ Safety check failed: {calc['reason']}"
+    # Check for active loss lockout (added for Fix #11)
+    lockout_reason = check_loss_lockout()
+    if lockout_reason:
+        msg = f"🔒 Bot locked: {lockout_reason}"
         log.error(msg)
         await send_alert(msg)
         sys.exit(1)
@@ -61,9 +80,36 @@ async def startup(cfg: dict) -> tuple[LighterAPI, GridManager, dict]:
     await send_alert("🔍 Running market analysis...")
     levels = await run_analyst(cfg)
 
+    # Validate analyst output against config min/max
+    num_buy = len(levels["buy_levels"])
+    num_sell = len(levels["sell_levels"])
+    min_levels = cfg["grid"].get("min_levels", 2)
+    max_levels = cfg["grid"].get("max_levels", 8)
+    if not levels.get("pause"):
+        if num_buy < min_levels:
+            levels["pause"] = True
+            levels["pause_reason"] = f"Too few buy levels ({num_buy} < {min_levels} min)"
+        elif num_sell < min_levels:
+            levels["pause"] = True
+            levels["pause_reason"] = f"Too few sell levels ({num_sell} < {min_levels} min)"
+        elif num_buy + num_sell > max_levels:
+            logging.warning(f"Grid levels exceed max ({num_buy + num_sell} > {max_levels}) — deploying anyway")
+
     if levels["pause"]:
         msg = f"⏸ Analyst paused: {levels['pause_reason']}"
         log.warning(msg)
+        await send_alert(msg)
+        sys.exit(1)
+
+    # Safety-check against the REAL level count
+    calc = calculate_grid(
+        equity, price, num_buy, num_sell,
+        cfg["capital"]["max_exposure_multiplier"],
+        cfg["capital"]["margin_reserve_pct"],
+    )
+    if not calc["safe"]:
+        msg = f"❌ Safety check failed: {calc['reason']}"
+        log.error(msg)
         await send_alert(msg)
         sys.exit(1)
 
@@ -83,6 +129,7 @@ async def startup(cfg: dict) -> tuple[LighterAPI, GridManager, dict]:
 
 async def run_loop(api: LighterAPI, gm: GridManager, levels: dict, cfg: dict):
     poll_interval = cfg["grid"]["poll_interval_seconds"]
+    pnl_reported_today = False
 
     while True:
         await asyncio.sleep(poll_interval)
@@ -93,24 +140,27 @@ async def run_loop(api: LighterAPI, gm: GridManager, levels: dict, cfg: dict):
 
             # Check if it's time for daily PnL report (23:30 UTC)
             now = datetime.now(timezone.utc)
-            if now.hour == 23 and now.minute == 30:
+            if now.hour == 23 and 30 <= now.minute <= 31 and not pnl_reported_today:
                 try:
                     equity = await api.get_equity()
-                    pnl = equity - cfg["capital"]["starting_equity"]
+                    equity_at_reset = gm.state.get("equity_at_reset", equity)
+                    pnl = equity - equity_at_reset
                     await send_alert(
                         (
                             f"📊 Daily PnL Report · {now.strftime('%Y-%m-%d %H:%M UTC')}\n"
-                            f"Starting Equity: ${cfg['capital']['starting_equity']:.2f}\n"
+                            f"Starting Equity: ${equity_at_reset:.2f}\n"
                             f"Current Equity: ${equity:.2f}\n"
-                            f"Daily PnL: ${pnl:.2f} ({pnl/cfg['capital']['starting_equity']*100:.1f}%)\n"
+                            f"Daily PnL: ${pnl:.2f} ({pnl/equity_at_reset*100:.1f}%)\n"
                             f"Grid Range: ${gm.state['range_low']:.0f}–${gm.state['range_high']:.0f}"
                         )
                     )
-                    # Wait until the next day to avoid duplicate reports
-                    tomorrow = now.replace(hour=23, minute=30, second=0, microsecond=0) + timedelta(days=1)
-                    await asyncio.sleep((tomorrow - now).total_seconds())
+                    pnl_reported_today = True
                 except Exception as e:
                     logging.error(f"Failed to send daily PnL report: {e}")
+
+            # Reset daily PnL flag at midnight UTC
+            if now.hour == 0:
+                pnl_reported_today = False
 
             # Check daily loss limit (8% drop from equity at reset)
             if gm.state["active"] and not gm.state["paused"]:
@@ -118,11 +168,14 @@ async def run_loop(api: LighterAPI, gm: GridManager, levels: dict, cfg: dict):
                 equity_at_reset = gm.state.get("equity_at_reset", equity)
                 loss_pct = (equity_at_reset - equity) / equity_at_reset
                 if loss_pct > cfg["risk"]["daily_loss_limit_pct"]:
-                    await gm._pause(f"Daily loss limit hit: {loss_pct:.1%} drop from reset equity")
+                    loss_reason = f"Daily loss limit hit: {loss_pct:.1%} drop from reset equity"
+                    set_loss_lockout(loss_reason)
+                    await gm._pause(loss_reason)
                     await send_alert(
                         f"🚨 Daily loss limit reached!\n"
                         f"Equity dropped {loss_pct:.1%} from reset.\n"
-                        f"Starting: ${equity_at_reset:.2f} → Now: ${equity:.2f}"
+                        f"Starting: ${equity_at_reset:.2f} → Now: ${equity:.2f}\n"
+                        f"🔒 Locked for 24h — delete state/loss_lockout.json to override"
                     )
                     return
 

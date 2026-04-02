@@ -10,11 +10,12 @@ Responsibilities:
 """
 
 import asyncio
+import copy
 import json
 import logging
 import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 from lighter_api import LighterAPI
@@ -51,6 +52,7 @@ class GridManager:
             "orders": [],
             "last_reset": None,
             "daily_pnl": 0.0,
+            "fill_count": 0,
             "equity_at_reset": 0.0,
             "roll_count": 0,
             "last_roll": None,
@@ -87,6 +89,17 @@ class GridManager:
         sell_levels = sorted(levels["sell_levels"])  # ascending
         num_buy = len(buy_levels)
         num_sell = len(sell_levels)
+
+        min_levels = self.cfg["grid"].get("min_levels", 2)
+        max_levels = self.cfg["grid"].get("max_levels", 8)
+        total = num_buy + num_sell
+        if total < min_levels:
+            msg = f"Too few grid levels ({total} < {min_levels} min). Grid not deployed."
+            logging.error(msg)
+            await send_alert(msg)
+            return
+        if total > max_levels:
+            logging.warning(f"Grid levels exceed max ({total} > {max_levels}) — deploying anyway")
 
         # Run capital calculator
         calc = calculate_grid(
@@ -145,6 +158,7 @@ class GridManager:
             "last_reset": datetime.now(timezone.utc).isoformat(),
             "equity_at_reset": equity,
             "daily_pnl": 0.0,
+            "fill_count": 0,
         })
         self._save_state()
 
@@ -173,8 +187,21 @@ class GridManager:
         range_low = self.state["range_low"]
         range_high = self.state["range_high"]
         
-        # Use 2% buffer inside the range — roll before price fully exits
-        buffer = (range_high - range_low) * 0.02
+        # Use 5% buffer inside the range — roll before price fully exits
+        buffer = (range_high - range_low) * 0.10  # 10% of range
+        
+        # Enforce minimum 5-minute cooldown between rolls
+        last_roll = self.state.get("last_roll")
+        if last_roll:
+            try:
+                from datetime import datetime
+                last_roll_time = datetime.fromisoformat(last_roll)
+                if datetime.now(timezone.utc) - last_roll_time < timedelta(minutes=5):
+                    logging.info("Roll cooldown active — skipping roll check")
+                    return  # Don't roll yet
+            except Exception:
+                pass  # If parsing fails, allow roll
+        
         near_top = btc_price >= range_high - buffer
         near_bottom = btc_price <= range_low + buffer
         
@@ -226,14 +253,35 @@ class GridManager:
         for order in fills_processed:
             await self._place_replacement(order, buy_levels, sell_levels, size, open_prices)
 
+        # Update daily PnL from equity delta
+        try:
+            equity = await self.api.get_equity()
+            equity_at_reset = self.state.get("equity_at_reset", equity)
+            self.state["daily_pnl"] = round(equity - equity_at_reset, 2)
+        except Exception:
+            pass  # Skip PnL update if equity fetch fails
+
+        # Increment fill count
+        self.state["fill_count"] = self.state.get("fill_count", 0) + len(fills_processed)
+
         # Remove filled orders from state to prevent re-detection
         self.state["orders"] = [o for o in self.state["orders"] if o.get("status") != "filled"]
         self._save_state()
 
     async def _place_replacement(self, filled_order: dict, buy_levels: list, sell_levels: list, size: float, open_prices: set):
-        """After a fill, place the next order in the grid."""
+        """After a fill, place the next order in the grid.
+
+        Implements retry logic with exponential backoff (up to 3 retries) and cancels the filled order
+        if all retries fail to prevent unintended positions.
+        """
         filled_price = filled_order["price"]
         filled_side = filled_order["side"]
+        filled_order_id = filled_order.get("order_id")
+
+        # If we don't have the filled order ID, we can't cancel it later — abort
+        if not filled_order_id:
+            logging.error("Cannot cancel filled order: missing order_id")
+            return
 
         try:
             if filled_side == "buy":
@@ -247,7 +295,35 @@ class GridManager:
                 if ("sell", round(target_price, 0)) in open_prices:
                     logging.info(f"Sell already open at ${target_price:,.0f}, skipping replacement")
                     return
-                new_order = await self.api.place_limit_order("sell", target_price, size)
+                # Retry placing the sell order up to 3 times with exponential backoff
+                max_retries = 3
+                for attempt in range(max_retries + 1):
+                    if attempt > 0:
+                        wait_time = 2 ** attempt  # exponential backoff: 2, 4, 8 seconds
+                        logging.info(f"Retrying replacement sell order (attempt {attempt}/{max_retries})")
+                        await asyncio.sleep(wait_time)
+                    try:
+                        new_order = await self.api.place_limit_order("sell", target_price, size)
+                        new_order["status"] = "open"
+                        new_order["layer"] = "grid"
+                        self.state["orders"].append(new_order)
+                        self._save_state()
+                        break  # success, exit retry loop
+                    except Exception as e:
+                        logging.error(f"Attempt {attempt + 1} failed: {e}")
+                        if attempt == max_retries:
+                            # All retries failed — bot now holds an unhedged long position.
+                            # The buy already filled (removed from the book), cancel can't close it.
+                            logging.error(f"All {max_retries} retries failed for sell replacement after BUY fill @ ${filled_price:,.0f}. Position is now UNHEDGED.")
+                            await send_alert(
+                                f"🚨 UNHEDGED POSITION · BUY filled @ ${filled_price:,.0f}\n"
+                                f"SELL replacement failed after {max_retries} retries.\n"
+                                f"Position is open — manual intervention required."
+                            )
+                        # Continue to next retry attempt
+                else:
+                    # Retry loop exited without success
+                    logging.info("Retry loop exited without success")
             else:
                 # Sell filled → place buy at next level down
                 lower = [p for p in buy_levels if p < filled_price]
@@ -259,25 +335,38 @@ class GridManager:
                 if ("buy", round(target_price, 0)) in open_prices:
                     logging.info(f"Buy already open at ${target_price:,.0f}, skipping replacement")
                     return
-                new_order = await self.api.place_limit_order("buy", target_price, size)
-
-            new_order["status"] = "open"
-            new_order["layer"] = "grid"
-            self.state["orders"].append(new_order)
-            logging.info(f"Replacement: {new_order['side'].upper()} @ ${target_price:,.0f}")
-            await send_alert(
-                f"↩️ Replacement {new_order['side'].upper()} @ ${target_price:,.0f} placed"
-            )
+                # Retry placing the buy order up to 3 times with exponential backoff
+                max_retries = 3
+                for attempt in range(max_retries + 1):
+                    if attempt > 0:
+                        wait_time = 2 ** attempt  # exponential backoff: 2, 4, 8 seconds
+                        logging.info(f"Retrying replacement buy order (attempt {attempt}/{max_retries})")
+                        await asyncio.sleep(wait_time)
+                    try:
+                        new_order = await self.api.place_limit_order("buy", target_price, size)
+                        new_order["status"] = "open"
+                        new_order["layer"] = "grid"
+                        self.state["orders"].append(new_order)
+                        self._save_state()
+                        break  # success, exit retry loop
+                    except Exception as e:
+                        logging.error(f"Attempt {attempt + 1} failed: {e}")
+                        if attempt == max_retries:
+                            # All retries failed — log error but do NOT cancel the filled sell order
+                            # (since a filled sell closes a position, not opens one)
+                            logging.error(f"All {max_retries} retries failed for buy replacement after SELL fill")
+                            await send_alert(
+                                f"⚠️ BUY REPLACEMENT FAILED · SELL filled @ ${filled_price:,.0f} · Replacement order failed"
+                            )
         except Exception as e:
-            logging.error(f"Failed to place replacement order: {e}")
-            await send_alert(f"⚠️ Failed to place replacement order after fill @ ${filled_price:,.0f}: {e}")
+            logging.error(f"Unexpected error in _place_replacement: {e}")
+            await send_alert(f"⚠️ Unexpected error in _place_replacement: {e}")
 
     # ── Rolling Grid ─────────────────────────────────────────────
 
     @staticmethod
     def generate_levels_from_bands(bands: dict, atr: dict, skew: dict, current_price: float) -> dict:
-        """
-        Generate grid levels from Bollinger Bands + ATR + Trend Skew.
+        """Generate grid levels from Bollinger Bands + ATR + Trend Skew.
         
         Returns same format as analyst output:
         {"buy_levels": [...], "sell_levels": [...], "range_low": X, "range_high": Y}
@@ -343,7 +432,7 @@ class GridManager:
         logging.info(f"Rolling grid at ${current_price:,.0f}")
         
         # Backup current state in case we need to revert
-        backup_state = self.state.copy()
+        backup_state = copy.deepcopy(self.state)
         
         # Cancel existing orders first
         cancelled = await self.api.cancel_all_orders()
@@ -356,10 +445,11 @@ class GridManager:
             from indicators import gather_indicators
             
             candles_15m = await fetch_candles("15m", limit=200)
+            candles_30m = await fetch_candles("30m", limit=200)
             candles_4h = await fetch_candles("4H", limit=48)
             market_intel = await gather_all_intel(self.cfg)
             
-            indicators = gather_indicators(candles_15m, candles_15m, candles_4h, market_intel)
+            indicators = gather_indicators(candles_15m, candles_30m, candles_4h, market_intel)
             bands = indicators["bollinger"]
             atr = indicators["atr"]
             skew = indicators["skew"]
@@ -470,6 +560,7 @@ class GridManager:
             f"Grid: {status}\n"
             f"Range: ${s['range_low']:,.0f}–${s['range_high']:,.0f}\n"
             f"Open orders: {len(open_orders)}\n"
+            f"Fills today: {s.get('fill_count', 0)}\n"
             f"Daily PnL: ${s['daily_pnl']:.2f}\n"
             f"Rolls: {rolls}\n"
             f"Last reset: {s['last_reset']}"

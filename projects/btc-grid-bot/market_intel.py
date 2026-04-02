@@ -16,7 +16,7 @@ import logging
 import os
 import time
 from typing import Dict, List, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 
 import httpx
 
@@ -107,7 +107,7 @@ class CoinalyzeClient:
     
     async def get_liquidation_history(self, hours: int = 48) -> List[Dict]:
         """Fetch liquidation history for last N hours."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         from_time = now - timedelta(hours=hours)
         
         params = {
@@ -136,7 +136,7 @@ class CoinalyzeClient:
     
     async def get_long_short_ratio(self, hours: int = 48) -> List[Dict]:
         """Fetch long/short ratio history."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         from_time = now - timedelta(hours=hours)
         
         params = {
@@ -164,7 +164,7 @@ class CoinalyzeClient:
     
     async def get_oi_history(self, hours: int = 48) -> List[Dict]:
         """Fetch open interest history."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         from_time = now - timedelta(hours=hours)
         
         params = {
@@ -192,7 +192,7 @@ class CoinalyzeClient:
     
     async def get_higher_tf_candles(self, interval: str = "4hour", hours: int = 168) -> List[Dict]:
         """Fetch higher timeframe candles for major S/R identification."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         from_time = now - timedelta(hours=hours)
         
         params = {

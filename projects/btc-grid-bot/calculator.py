@@ -16,7 +16,9 @@ def calculate_grid(
         "available_notional": float,
         "worst_case_notional": float,
         "buffer": float,
-        "reason": str                  # if not safe, explains why
+        "reason": str,                 # if not safe, explains why
+        "adjusted_num_buy_levels": int or None,
+        "adjusted_num_sell_levels": int or None,
     }
     """
     max_notional = account_equity * max_exposure_mult
@@ -24,21 +26,18 @@ def calculate_grid(
     available = max_notional - reserved
     total_levels = num_buy_levels + num_sell_levels
     
-    # Size per level with 10% safety margin (never use 100% of available)
     safety_factor = 0.90
     safe_available = available * safety_factor
     size_per_level = (safe_available / total_levels) / btc_price
+    adjusted_num_buy = None
+    adjusted_num_sell = None
     
-    # Enforce minimum order size of 0.001 BTC (~$66 at current prices)
     min_size = 0.001
     if size_per_level < min_size:
         size_per_level = min_size
-        # Reduce number of levels to fit within available equity
         total_levels = num_buy_levels + num_sell_levels
-        # Recalculate safe levels based on min size
         max_notional_for_min = size_per_level * btc_price * total_levels
         if max_notional_for_min > available:
-            # Still exceeds, need to reduce levels
             max_levels = int(available / (size_per_level * btc_price))
             if max_levels < 2:
                 return {
@@ -49,13 +48,13 @@ def calculate_grid(
                     "available_notional": 0,
                     "worst_case_notional": 0,
                     "buffer": 0,
-                    "reason": "Equity too low to place even minimum size orders"
+                    "reason": "Equity too low to place even minimum size orders",
+                    "adjusted_num_buy_levels": None,
+                    "adjusted_num_sell_levels": None,
                 }
-            # Adjust levels proportionally
-            num_buy_levels = max(1, int(num_buy_levels * (max_levels / total_levels)))
-            num_sell_levels = max(1, int(num_sell_levels * (max_levels / total_levels)))
-            total_levels = num_buy_levels + num_sell_levels
-            # Recalculate size with adjusted levels
+            adjusted_num_buy = max(1, int(num_buy_levels * (max_levels / total_levels)))
+            adjusted_num_sell = max(1, int(num_sell_levels * (max_levels / total_levels)))
+            total_levels = adjusted_num_buy + adjusted_num_sell
             size_per_level = (available * safety_factor) / (total_levels * btc_price)
     
     worst_case_notional = total_levels * size_per_level * btc_price
@@ -69,7 +68,9 @@ def calculate_grid(
         "available_notional": round(available, 2),
         "worst_case_notional": round(worst_case_notional, 2),
         "buffer": round(available - worst_case_notional, 2),
-        "reason": "" if safe else f"Worst case ${worst_case_notional:.0f} exceeds available ${available:.0f}"
+        "reason": "" if safe else f"Worst case ${worst_case_notional:.0f} exceeds available ${available:.0f}",
+        "adjusted_num_buy_levels": adjusted_num_buy,
+        "adjusted_num_sell_levels": adjusted_num_sell,
     }
 
 

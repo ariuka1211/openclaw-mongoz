@@ -9,15 +9,15 @@ capital:
 
 grid:
   reset_time_utc: "06:00"
-  min_levels: 4
-  max_levels: 4
+  min_levels: 2
+  max_levels: 8
   poll_interval_seconds: 30
 
 risk:
   daily_loss_limit_pct: 0.08
 
 llm:
-  model: "openrouter/free"
+  model: "qwen/qwen3.6-plus:free"
   max_tokens: 8192
   temperature: 0.1
 

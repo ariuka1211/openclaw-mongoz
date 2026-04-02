@@ -69,6 +69,85 @@ class GridManager:
         with open(STATE_FILE, "w") as f:
             json.dump(self.state, f, indent=2)
 
+    # ── Order reconciliation ────────────────────────────────────
+
+    async def adopt_existing_orders(self, btc_price: float) -> bool:
+        """Check for existing grid orders on the exchange and adopt them into our state.
+
+        If valid grid orders exist, reconstruct state from them.
+        Returns True if orders were adopted, False if no valid orders found.
+        """
+        try:
+            live_orders = await self.api.get_open_orders()
+        except Exception as e:
+            logging.error(f"Failed to fetch open orders on startup: {e}")
+            return False
+
+        # Filter to grid-layer orders (orders that look like ours based on side/price patterns)
+        # Since we didn't have order tagging before, we detect by structure:
+        # Grid orders should have multiple orders on each side at regular-ish intervals
+        buy_orders = [o for o in live_orders if o["side"] == "buy"]
+        sell_orders = [o for o in live_orders if o["side"] == "sell"]
+
+        # Need at least 2 buy + 2 sell orders to consider it a valid grid
+        if len(buy_orders) < 2 or len(sell_orders) < 2:
+            logging.info(f"Existing orders don't look like a grid ({len(buy_orders)} buy, {len(sell_orders)} sell) — will deploy new")
+            return False
+
+        # Reconstruct levels and order state
+        orders = []
+        for o in buy_orders:
+            o["status"] = "open"
+            o["layer"] = "grid"  # tag them
+            orders.append(o)
+        for o in sell_orders:
+            o["status"] = "open"
+            o["layer"] = "grid"  # tag them
+            orders.append(o)
+
+        buy_prices = sorted([o["price"] for o in buy_orders])
+        sell_prices = sorted([o["price"] for o in sell_orders])
+
+        # Calculate range
+        range_low = min(buy_prices)
+        range_high = max(sell_prices)
+
+        # Detect size_per_level (all orders should have same size in a grid)
+        all_sizes = [o["size"] for o in orders]
+        avg_size = sum(all_sizes) / len(all_sizes) if all_sizes else 0
+
+        equity = self.state.get("equity_at_reset", 0)
+        if equity == 0:
+            try:
+                equity = await self.api.get_equity()
+            except Exception:
+                pass
+
+        # Update state
+        self.state.update({
+            "active": True,
+            "paused": False,
+            "pause_reason": "",
+            "levels": {"buy": buy_prices, "sell": sell_prices},
+            "range_low": range_low,
+            "range_high": range_high,
+            "size_per_level": round(avg_size, 6),
+            "orders": orders,
+            "equity_at_reset": equity,
+            "realized_pnl": self.state.get("realized_pnl", 0.0),
+            "trades": self.state.get("trades", []),
+            "pending_buys": self.state.get("pending_buys", []),
+            "trend_warning_count": 0,
+            "roll_count": self.state.get("roll_count", 0),
+        })
+        # Don't overwrite last_reset — it's still the original deployment time
+
+        self._save_state()
+
+        num_adopted = len(orders)
+        logging.info(f"Adopted {num_adopted} existing orders ({len(buy_orders)} buy + {len(sell_orders)} sell)")
+        return True
+
     # ── Grid deployment ─────────────────────────────────────────
 
     async def deploy(self, levels: dict, equity: float, btc_price: float, roll_info: dict | None = None):

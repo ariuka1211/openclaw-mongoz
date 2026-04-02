@@ -213,7 +213,7 @@ async def startup(cfg: dict) -> tuple[LighterAPI, GridManager, dict]:
     price = await api.get_btc_price()
     log.info(f"Account equity: ${equity:.2f} | BTC: ${price:,.0f}")
 
-    # Check for active loss lockout (added for Fix #11)
+    # Check for active loss lockout
     lockout_reason = check_loss_lockout()
     if lockout_reason:
         msg = f"🔒 Bot locked: {lockout_reason}"
@@ -221,6 +221,25 @@ async def startup(cfg: dict) -> tuple[LighterAPI, GridManager, dict]:
         await send_alert(msg)
         sys.exit(1)
 
+    # ── Order reconciliation: check for existing grid orders ───────
+    gm = GridManager(cfg, api)
+    if await gm.adopt_existing_orders(price):
+        levels = {
+            "buy_levels": gm.state["levels"]["buy"],
+            "sell_levels": gm.state["levels"]["sell"],
+            "range_low": gm.state["range_low"],
+            "range_high": gm.state["range_high"],
+        }
+        num_orders = len(gm.state["orders"])
+        await send_alert(
+            f"♻️ Resumed existing grid · {num_orders} orders adopted\n"
+            f"Buy: {levels['buy_levels']}\n"
+            f"Sell: {levels['sell_levels']}\n"
+            f"Equity: ${equity:.2f}"
+        )
+        return api, gm, levels
+
+    # ── No existing orders — fresh deploy ──────────────────────────
     await send_alert("🔍 Running market analysis...")
     levels = await run_analyst(cfg)
 

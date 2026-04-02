@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 BTC Grid Bot — Lighter.xyz API wrapper.
 
@@ -78,13 +79,14 @@ class LighterAPI:
     async def _fetch_market_decimals(self):
         """Fetch supported_size_decimals and supported_price_decimals from exchange."""
         await self._ensure_client()
-        books = await self._order_api.order_books()
-        for b in books.order_books:
-            if b.market_id == BTC_MARKET_ID:
-                self._size_decimals = int(b.supported_size_decimals)
-                self._price_decimals = int(b.supported_price_decimals)
-                logging.info(f"Market decimals: size={self._size_decimals}, price={self._price_decimals}")
-                return
+        if self._size_decimals is None:
+            books = await self._order_api.order_books()
+            for b in books.order_books:
+                if b.market_id == BTC_MARKET_ID:
+                    self._size_decimals = int(b.supported_size_decimals)
+                    self._price_decimals = int(b.supported_price_decimals)
+                    logging.info(f"Market decimals: size={self._size_decimals}, price={self._price_decimals}")
+                    return
         raise RuntimeError(f"Market {BTC_MARKET_ID} not found in order_books")
 
     async def _ensure_client(self):
@@ -184,6 +186,7 @@ class LighterAPI:
 
         base_amount = self._to_lighter_amount(size, self._size_decimals)
         price_int = self._to_lighter_amount(price, self._price_decimals)
+        logging.info(f"Placing order: side={side}, price={price}, size={size}, base_amount={base_amount}, price_int={price_int}")
         is_ask = (side == "sell")
 
         result = await self._signer.create_order(
@@ -195,39 +198,40 @@ class LighterAPI:
             order_type=lighter.SignerClient.ORDER_TYPE_LIMIT,
             time_in_force=lighter.SignerClient.ORDER_TIME_IN_FORCE_GOOD_TILL_TIME,
         )
+        logging.info(f"Order placement result: {result}")
 
         if isinstance(result, tuple):
             if len(result) >= 3 and result[2] is not None:
                 raise RuntimeError(f"Order rejected: {result[2]}")
         
-        # Wait a moment and then fetch the order to get the real order_id
-        # The exchange assigns order_index server-side; we need to retrieve it
-        await asyncio.sleep(0.1)  # small delay to allow exchange to process
-        
-        # Try to get the order we just placed by matching side/price
-        try:
-            orders = await self.get_open_orders()
-            # Find the order that matches side and price (it should be the one we just placed)
-            for o in orders:
-                if o["side"] == side and abs(o["price"] - price) < 0.01:
-                    # Found our order
-                    return {
-                        "order_id": o["order_id"],
-                        "price": price,
-                        "side": side,
-                        "size": size,
-                    }
-        except Exception:
-            # If we can't find the order, fall back to client_order_index
-            logging.warning("Could not retrieve real order_id after placement, using client_order_index")
-            return {
-                "order_id": str(self._client_order_index),
-                "price": price,
-                "side": side,
-                "size": size,
-            }
-        
-        raise RuntimeError(f"Failed to place order: order not found after creation")
+        # Wait for exchange to process and make order visible
+        # Try up to 3 times with 1 second delay between attempts
+        for attempt in range(3):
+            await asyncio.sleep(1.0)  # 1 second delay
+            try:
+                orders = await self.get_open_orders()
+                # Find the order that matches side and price (it should be the one we just placed)
+                for o in orders:
+                    if o["side"] == side and abs(o["price"] - price) < 0.01:
+                        # Found our order
+                        return {
+                            "order_id": o["order_id"],
+                            "price": price,
+                            "side": side,
+                            "size": size,
+                        }
+            except Exception:
+                pass  # continue to next attempt
+            logging.info(f"Attempt {attempt+1}: order not yet visible, retrying...")
+
+        # If we still can't find the order after 3 attempts, fall back to client_order_index
+        logging.warning("Could not retrieve real order_id after placement, using client_order_index")
+        return {
+            "order_id": str(self._client_order_index),
+            "price": price,
+            "side": side,
+            "size": size,
+        }
 
     async def cancel_order(self, order_id: str) -> bool:
         """Cancel a single order by order_id (order_index)."""

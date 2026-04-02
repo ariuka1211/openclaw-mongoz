@@ -1,10 +1,3 @@
-# calculator.py
-
-import asyncio
-import yaml
-from lighter_api import LighterAPI
-
-
 def calculate_grid(
     account_equity: float,
     btc_price: float,
@@ -36,7 +29,35 @@ def calculate_grid(
     safe_available = available * safety_factor
     size_per_level = (safe_available / total_levels) / btc_price
     
-    # Worst case: all orders fill simultaneously (cross-margin perps)
+    # Enforce minimum order size of 0.001 BTC (~$66 at current prices)
+    min_size = 0.001
+    if size_per_level < min_size:
+        size_per_level = min_size
+        # Reduce number of levels to fit within available equity
+        total_levels = num_buy_levels + num_sell_levels
+        # Recalculate safe levels based on min size
+        max_notional_for_min = size_per_level * btc_price * total_levels
+        if max_notional_for_min > available:
+            # Still exceeds, need to reduce levels
+            max_levels = int(available / (size_per_level * btc_price))
+            if max_levels < 2:
+                return {
+                    "safe": False,
+                    "size_per_level": 0,
+                    "size_per_level_usd": 0,
+                    "max_notional": 0,
+                    "available_notional": 0,
+                    "worst_case_notional": 0,
+                    "buffer": 0,
+                    "reason": "Equity too low to place even minimum size orders"
+                }
+            # Adjust levels proportionally
+            num_buy_levels = max(1, int(num_buy_levels * (max_levels / total_levels)))
+            num_sell_levels = max(1, int(num_sell_levels * (max_levels / total_levels)))
+            total_levels = num_buy_levels + num_sell_levels
+            # Recalculate size with adjusted levels
+            size_per_level = (available * safety_factor) / (total_levels * btc_price)
+    
     worst_case_notional = total_levels * size_per_level * btc_price
 
     safe = worst_case_notional <= available

@@ -181,7 +181,7 @@ class GridManager:
         if near_top or near_bottom:
             direction = "up" if near_top else "down"
             logging.info(f"Price ${btc_price:,.0f} near {direction} band edge — triggering grid roll")
-            await self.roll_grid(btc_price)
+            await self.roll_grid(btc_price, direction)
             return
 
         # Get current open orders from exchange
@@ -331,7 +331,7 @@ class GridManager:
             "range_high": upper,
         }
 
-    async def roll_grid(self, current_price: float):
+    async def roll_grid(self, current_price: float, direction: str):
         """Roll the grid to follow price when it hits band edges.
 
         - Cancel old orders (backup state first)

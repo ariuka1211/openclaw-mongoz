@@ -189,8 +189,8 @@ class GridManager:
         range_low = self.state["range_low"]
         range_high = self.state["range_high"]
         
-        # Use 5% buffer inside the range — roll before price fully exits
-        buffer = (range_high - range_low) * 0.10  # 10% of range
+        # Use 3% buffer inside the range — roll before price fully exits
+        buffer = (range_high - range_low) * 0.03  # 3% of range — only roll when price is truly at the edge
         
         # Enforce minimum 5-minute cooldown between rolls
         last_roll = self.state.get("last_roll")
@@ -199,7 +199,7 @@ class GridManager:
                 from datetime import datetime
                 last_roll_time = datetime.fromisoformat(last_roll)
                 if datetime.now(timezone.utc) - last_roll_time < timedelta(minutes=5):
-                    logging.info("Roll cooldown active — skipping roll check")
+                    logging.info("Roll cooldown active — skipping roll check (less than 5 min since last roll)")
                     return  # Don't roll yet
             except Exception:
                 pass  # If parsing fails, allow roll
@@ -427,6 +427,9 @@ class GridManager:
     @staticmethod
     def generate_levels_from_bands(bands: dict, atr: dict, skew: dict, current_price: float) -> dict:
         """Generate grid levels from Bollinger Bands + ATR + Trend Skew.
+
+        Levels are anchored to band edges (lower for buys, upper for sells),
+        not current_price — ensuring deterministic output for the same bands.
         
         Returns same format as analyst output:
         {"buy_levels": [...], "sell_levels": [...], "range_low": X, "range_high": Y}
@@ -434,45 +437,56 @@ class GridManager:
         spacing = atr["suggested_spacing"]
         if spacing <= 0:
             spacing = current_price * 0.002  # fallback: 0.2% of price
-        
+
         upper = bands["upper"]
         lower = bands["lower"]
         middle = bands["middle"]
-        
+
         buy_pct = skew.get("buy_pct", 50) / 100.0
         sell_pct = skew.get("sell_pct", 50) / 100.0
-        
-        # Total levels: how many fit in the band range with ATR spacing
+
         total_range = upper - lower
         total_levels = max(4, min(12, int(total_range / spacing)))  # 4-12 levels max
-        
+
         num_buys = max(2, int(total_levels * buy_pct))
         num_sells = max(2, int(total_levels * sell_pct))
-        
-        # Generate buy levels below current price (extend to lower band if needed)
+
+        # Generate buy levels starting from LOWER band going upward toward price
         buy_levels = []
-        price = current_price - spacing
-        while len(buy_levels) < num_buys and price >= lower:
-            buy_levels.append(round(price / 50) * 50)  # round to $50
-            price -= spacing
-        buy_levels.sort()
-        
-        # Generate sell levels above current price (extend to upper band if needed)
-        sell_levels = []
-        price = current_price + spacing
-        while len(sell_levels) < num_sells and price <= upper:
-            sell_levels.append(round(price / 50) * 50)  # round to $50
+        price = lower + spacing
+        while len(buy_levels) < num_buys and price < current_price:
+            rounded = round(price / 50) * 50  # round to $50
+            # Avoid exact duplicates
+            if rounded not in buy_levels:
+                buy_levels.append(rounded)
             price += spacing
+        buy_levels.sort()
+
+        # Generate sell levels starting from UPPER band going downward toward price
+        sell_levels = []
+        price = upper - spacing
+        while len(sell_levels) < num_sells and price > current_price:
+            rounded = round(price / 50) * 50  # round to $50
+            # Avoid exact duplicates
+            if rounded not in sell_levels:
+                sell_levels.append(rounded)
+            price -= spacing
         sell_levels.sort()
-        
-        # If we couldn't fit enough levels due to band constraints, place some at the edge
+
+        # Fallback: if we couldn't fit levels, place some at band edges  
         if len(buy_levels) < 2 and current_price > lower:
-            buy_levels = [round(lower / 50) * 50, round((current_price - spacing/2) / 50) * 50]
-            buy_levels = sorted(set(buy_levels))
+            for i in range(1, 3):
+                p = round((lower + spacing * i) / 50) * 50
+                if p < current_price and p not in buy_levels:
+                    buy_levels.append(p)
+            buy_levels.sort()
         if len(sell_levels) < 2 and current_price < upper:
-            sell_levels = [round(upper / 50) * 50, round((current_price + spacing/2) / 50) * 50]
-            sell_levels = sorted(set(sell_levels))
-        
+            for i in range(1, 3):
+                p = round((upper - spacing * i) / 50) * 50
+                if p > current_price and p not in sell_levels:
+                    sell_levels.append(p)
+            sell_levels.sort()
+
         return {
             "buy_levels": buy_levels,
             "sell_levels": sell_levels,

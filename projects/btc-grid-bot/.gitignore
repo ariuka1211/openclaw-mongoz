@@ -1,0 +1,10 @@
+# Secrets
+config.yml
+
+# Runtime state (never commit)
+state/
+logs/
+__pycache__/
+*.pyc
+.env
+*.log

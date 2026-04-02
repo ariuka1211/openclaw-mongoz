@@ -31,6 +31,38 @@ load_dotenv()
 
 log = logging.getLogger("btc-grid")
 
+# Telegram bot command interface
+COMMAND_FILE = Path("state/bot_command.json")
+
+
+def check_telegram_commands(gm):
+    """Check for commands written by telegram_bot.py. Returns command name or None."""
+    if not COMMAND_FILE.exists():
+        return None
+    try:
+        with open(COMMAND_FILE) as f:
+            data = json.load(f)
+        cmd = data.get("command")
+        if cmd == "pause":
+            reason = data.get("reason", "User requested pause")
+            log.info(f"Telegram pause command: {reason}")
+            gm.state["paused"] = True
+            gm.state["pause_reason"] = reason
+            gm._save_state()
+            COMMAND_FILE.unlink()
+            return "pause"
+        elif cmd == "cancel_all":
+            log.info("Telegram emergency cancel command")
+            COMMAND_FILE.unlink()
+            return "cancel_all"
+        elif cmd == "resume":
+            log.info("Telegram resume command received — will redeploy fresh grid")
+            COMMAND_FILE.unlink()
+            return "resume"
+    except Exception as e:
+        log.error(f"Error reading telegram command: {e}")
+    return None
+
 
 def load_config() -> dict:
     base_dir = Path(__file__).parent
@@ -133,6 +165,28 @@ async def run_loop(api: LighterAPI, gm: GridManager, levels: dict, cfg: dict):
 
     while True:
         await asyncio.sleep(poll_interval)
+
+        # Check for telegram bot commands (pause, cancel, resume)
+        cmd = check_telegram_commands(gm)
+        if cmd == "pause":
+            log.warning("Bot paused by telegram command")
+            await send_alert("⏸️ Grid paused via Telegram.")
+            return  # exit loop (finally block cancels orders)
+        elif cmd == "cancel_all":
+            log.warning("Bot cancelled by telegram command")
+            await send_alert("🚨 All orders cancelled via Telegram.")
+            await gm.cancel_all()
+            gm.state["paused"] = True
+            gm.state["pause_reason"] = "Manual cancel"
+            gm._save_state()
+            return
+        elif cmd == "resume":
+            log.info("Restarting bot for fresh grid deployment...")
+            await send_alert("🟢 Restarting with fresh grid analysis...")
+            await gm.cancel_all()
+            await api.close()
+            api, gm, levels = await startup(cfg)
+            # Continue with new grid in the loop below
 
         try:
             price = await api.get_btc_price()

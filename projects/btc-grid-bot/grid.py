@@ -66,7 +66,7 @@ class GridManager:
 
     # ── Grid deployment ─────────────────────────────────────────
 
-    async def deploy(self, levels: dict, equity: float, btc_price: float):
+    async def deploy(self, levels: dict, equity: float, btc_price: float, roll_info: dict | None = None):
         """
         Deploy a new grid from AI analyst output.
 
@@ -160,6 +160,8 @@ class GridManager:
             "daily_pnl": 0.0,
             "fill_count": 0,
         })
+        if roll_info:
+            self.state.update(roll_info)
         self._save_state()
 
         alert = (
@@ -208,8 +210,16 @@ class GridManager:
         if near_top or near_bottom:
             direction = "up" if near_top else "down"
             logging.info(f"Price ${btc_price:,.0f} near {direction} band edge — triggering grid roll")
-            await self.roll_grid(btc_price, direction)
-            return
+            rolled = await self.roll_grid(btc_price, direction)
+            # After roll, check_fills below will work with the new order state
+            # Update local state refs in case roll changed the state
+            buy_levels = self.state["levels"].get("buy", [])
+            sell_levels = self.state["levels"].get("sell", [])
+            size = self.state["size_per_level"]
+        else:
+            buy_levels = self.state["levels"].get("buy", [])
+            sell_levels = self.state["levels"].get("sell", [])
+            size = self.state["size_per_level"]
 
         # Get current open orders from exchange
         live_orders = await self.api.get_open_orders()
@@ -228,9 +238,7 @@ class GridManager:
                         order["order_id"] = lo["order_id"]  # update with real exchange order_id
                         break
 
-        buy_levels = self.state["levels"]["buy"]
-        sell_levels = self.state["levels"]["sell"]
-        size = self.state["size_per_level"]
+
 
         # Collect existing open prices to avoid duplicate replacements
         open_prices = {(o["side"], round(o["price"], 0)) for o in live_orders}
@@ -267,6 +275,58 @@ class GridManager:
         # Remove filled orders from state to prevent re-detection
         self.state["orders"] = [o for o in self.state["orders"] if o.get("status") != "filled"]
         self._save_state()
+
+    async def _compute_candidate_levels(self, current_price: float) -> dict | None:
+        """Fetch candles and indicators, generate candidate grid levels.
+
+        Returns None on any error (do not proceed with roll).
+        Returns dict: {"buy_levels": [...], "sell_levels": [...], "range_low": X, "range_high": Y}
+        """
+        try:
+            from analyst import fetch_candles
+            from market_intel import gather_all_intel
+            from indicators import gather_indicators
+
+            candles_15m = await fetch_candles("15m", limit=200)
+            candles_30m = await fetch_candles("30m", limit=200)
+            candles_4h = await fetch_candles("4H", limit=48)
+            market_intel = await gather_all_intel(self.cfg)
+
+            indicators = gather_indicators(candles_15m, candles_30m, candles_4h, market_intel)
+            bands = indicators["bollinger"]
+            atr = indicators["atr"]
+            skew = indicators["skew"]
+
+            return self.generate_levels_from_bands(bands, atr, skew, current_price)
+        except Exception as e:
+            logging.error(f"Failed to compute candidate levels for roll: {e}")
+            return None
+
+    @staticmethod
+    def _levels_overlap(old_buy: list, old_sell: list, new_buy: list, new_sell: list) -> float:
+        """Compute Jaccard-style overlap between old and new grid levels.
+
+        Two levels 'match' if they are within 0.15% of each other.
+        Returns overlap ratio: 0.0 = no overlap, 1.0 = identical.
+        """
+        def match_price(p):
+            def matches(q):
+                return abs(p - q) / max(p, q) < 0.0015  # 0.15% tolerance
+            return matches
+
+        old_all = old_buy + old_sell
+        new_all = new_buy + new_sell
+
+        if not old_all or not new_all:
+            return 0.0
+
+        # Count how many new levels match an old level
+        matched_new = 0
+        for np in new_all:
+            if any(match_price(np)(op) for op in old_all):
+                matched_new += 1
+
+        return matched_new / len(new_all)
 
     async def _place_replacement(self, filled_order: dict, buy_levels: list, sell_levels: list, size: float, open_prices: set):
         """After a fill, place the next order in the grid.
@@ -420,54 +480,41 @@ class GridManager:
             "range_high": upper,
         }
 
-    async def roll_grid(self, current_price: float, direction: str):
+    async def roll_grid(self, current_price: float, direction: str) -> bool:
         """Roll the grid to follow price when it hits band edges.
 
-        - Cancel old orders (backup state first)
-        - Fetch fresh candle data and calculate indicators
-        - Generate new grid levels from bands + ATR + skew
-        - Deploy new grid
-        - If any step fails, revert to previous grid state
+        Returns True if a roll was performed, False if skipped.
         """
         logging.info(f"Rolling grid at ${current_price:,.0f}")
-        
-        # Backup current state in case we need to revert
+
+        # Backup current state
         backup_state = copy.deepcopy(self.state)
-        
-        # Cancel existing orders first
+
+        # Fetch candidate levels first (before canceling anything)
+        new_levels = await self._compute_candidate_levels(current_price)
+        if new_levels is None:
+            logging.error("Failed to compute candidate levels for roll — skipping")
+            return False
+
+        # Check if levels would meaningfully change
+        old_buy = self.state["levels"].get("buy", [])
+        old_sell = self.state["levels"].get("sell", [])
+        new_buy = new_levels["buy_levels"]
+        new_sell = new_levels["sell_levels"]
+
+        if not new_buy or not new_sell:
+            logging.warning("Roll generated empty levels — skipping")
+            return False
+
+        overlap = self._levels_overlap(old_buy, old_sell, new_buy, new_sell)
+        if overlap > 0.80:
+            logging.info(f"New grid levels {overlap:.0%} overlap with current — skipping roll, levels too similar")
+            return False
+
+        # Cancel existing orders
         cancelled = await self.api.cancel_all_orders()
         logging.info(f"Cancelled {cancelled} old orders for roll")
-        
-        # Fetch fresh candles for indicator recalculation
-        try:
-            from analyst import fetch_candles
-            from market_intel import gather_all_intel
-            from indicators import gather_indicators
-            
-            candles_15m = await fetch_candles("15m", limit=200)
-            candles_30m = await fetch_candles("30m", limit=200)
-            candles_4h = await fetch_candles("4H", limit=48)
-            market_intel = await gather_all_intel(self.cfg)
-            
-            indicators = gather_indicators(candles_15m, candles_30m, candles_4h, market_intel)
-            bands = indicators["bollinger"]
-            atr = indicators["atr"]
-            skew = indicators["skew"]
-        except Exception as e:
-            logging.error(f"Failed to fetch indicators for roll: {e}")
-            await send_alert(f"⚠️ Grid roll failed: {e}. Reverting to previous grid.")
-            await self._redeploy_backup(backup_state)
-            return
-        
-        # Generate new levels from bands + ATR + skew
-        new_levels = self.generate_levels_from_bands(bands, atr, skew, current_price)
-        
-        if not new_levels["buy_levels"] or not new_levels["sell_levels"]:
-            logging.warning("Roll generated empty levels — reverting")
-            await send_alert("⚠️ Grid roll generated no levels. Reverting to previous grid.")
-            await self._redeploy_backup(backup_state)
-            return
-        
+
         # Get equity for sizing
         try:
             equity = await self.api.get_equity()
@@ -475,30 +522,31 @@ class GridManager:
             logging.error(f"Failed to get equity for roll: {e}")
             await send_alert(f"⚠️ Grid roll failed to fetch equity: {e}. Reverting.")
             await self._redeploy_backup(backup_state)
-            return
-        
-        # Deploy new grid (reuses the deploy method)
+            return False
+
+        # Deploy new grid using pre-computed levels
+        roll_info = {
+            "roll_count": self.state.get("roll_count", 0) + 1,
+            "last_roll": datetime.now(timezone.utc).isoformat(),
+        }
         try:
-            await self.deploy(new_levels, equity, current_price)
+            await self.deploy(new_levels, equity, current_price, roll_info=roll_info)
         except Exception as e:
             logging.error(f"Failed to deploy new grid: {e}")
             await send_alert(f"⚠️ Grid roll failed to deploy: {e}. Reverting to previous grid.")
             await self._redeploy_backup(backup_state)
-            return
-        
-        # Track roll
-        self.state["roll_count"] = self.state.get("roll_count", 0) + 1
-        self.state["last_roll"] = datetime.now(timezone.utc).isoformat()
-        self._save_state()
-        
+            return False
+
         await send_alert(
             (
                 f"🔄 Grid rolled {direction} · BTC @ ${current_price:,.0f}\n"
-                f"New range: ${min(new_levels['buy_levels']):,.0f} – ${max(new_levels['sell_levels']):,.0f}\n"
-                f"Skew: {skew['buy_pct']}% buy / {skew['sell_pct']}% sell\n"
-                f"Spacing: ${atr['suggested_spacing']:,.0f} (ATR-based)"
+                f"New range: ${min(new_buy):,.0f} – ${max(new_sell):,.0f}\n"
+                f"Overlap was {overlap:.0%} — levels changed meaningfully\n"
+                f"Roll #{self.state['roll_count']}"
             )
         )
+
+        return True
 
 
 

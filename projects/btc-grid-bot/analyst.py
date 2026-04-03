@@ -17,7 +17,7 @@ from pathlib import Path
 import httpx
 import yaml
 from market_intel import gather_all_intel, format_market_intel
-from indicators import gather_indicators, _format_regime, funding_rate_adjustment
+from indicators import gather_indicators, _format_regime, funding_rate_adjustment, calc_atr
 
 # Load .env from workspace root
 _ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
@@ -478,12 +478,15 @@ async def run_analyst(cfg: dict, equity: float = 0, btc_price: float = 0, grid_m
     except Exception:
         pass
 
-    min_spacing = max(atr_value * 0.5, btc_price * 0.002) if btc_price > 0 else 0
+    min_spacing = max(atr_value * 1.0, btc_price * 0.003) if btc_price > 0 else 0
+    min_grid_range = atr_value * 5.0  # Minimum grid span: 5 ATRs
     spacing_guidance = f"""## Spacing Guidance
 - Current 15m ATR(14): ${atr_value:,.0f} ({atr_pct:.2%} of price)
-- Minimum level spacing: ${min_spacing:,.0f} (50% ATR)
-- Ideal buy/sell spacing: ${atr_value:,.0f}–${atr_value*2:,.0f}
+- Minimum level spacing: ${min_spacing:,.0f} (1.0x ATR)
+- Ideal buy/sell spacing: ${atr_value*1.5:,.0f}–${atr_value*3:,.0f} (1.5-3x ATR)
 - Place levels at least ${min_spacing:,.0f} apart to avoid constant fills
+- MINIMUM GRID RANGE: ${min_grid_range:,.0f} (5 ATRs) — your buy_levels and sell_levels must span at least ${min_grid_range:,.0f} total range from lowest buy to highest sell
+- Wider grid = fewer fills but each fill is more profitable = better in trending markets
 """
 
     # Prepare account context
@@ -694,6 +697,33 @@ async def run_analyst(cfg: dict, equity: float = 0, btc_price: float = 0, grid_m
                 result["pause"] = True
                 result["direction"] = "pause"
                 result["pause_reason"] = f"Short grid: buy levels must be above current price {current_price}, got {invalid_buys}"
+                result["buy_levels"] = []
+                result["sell_levels"] = []
+                result["range_low"] = 0
+                result["range_high"] = 0
+                return result
+
+    # Validate minimum grid range (must span at least 5 ATRs)
+    if not result.get("pause") and current_price > 0:
+        buy = result.get("buy_levels", [])
+        sell = result.get("sell_levels", [])
+        if buy and sell:
+            grid_range = max(sell) - min(buy) if result["direction"] == "long" else max(buy) - min(sell)
+            atr_value = 0
+            try:
+                atr_data = calc_atr(candles_15m, period=14)
+                atr_value = atr_data.get("atr", 0)
+            except Exception:
+                pass
+            min_grid_range = atr_value * 5.0 if atr_value > 0 else 0
+
+            if min_grid_range > 0 and grid_range < min_grid_range:
+                result["pause"] = True
+                result["direction"] = "pause"
+                result["pause_reason"] = (
+                    f"Grid range too narrow: ${grid_range:,.0f} < ${min_grid_range:,.0f} "
+                    f"(minimum 5 ATRs). Grid must be wider to avoid runs."
+                )
                 result["buy_levels"] = []
                 result["sell_levels"] = []
                 result["range_low"] = 0

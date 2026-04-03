@@ -25,6 +25,8 @@ from indicators import calc_bollinger_bands, calc_atr, calc_trend_skew, calc_ema
 from analyst import fetch_candles
 
 STATE_FILE = Path("state/grid_state.json")
+DEPLOYMENT_LOG_DIR = Path("state/deployments")
+MAX_DEPLOYMENT_LOGS = 50  # default, can be overridden by config
 
 
 class GridManager:
@@ -68,6 +70,8 @@ class GridManager:
             "has_existing_position": False,
             "position_avg_price": 0.0,
             "grid_direction": "long",
+            "deployment_log_path": None,
+            "deploy_start_price": None,
         }
 
     def _save_state(self):
@@ -75,6 +79,131 @@ class GridManager:
         STATE_FILE.parent.mkdir(exist_ok=True)
         with open(STATE_FILE, "w") as f:
             json.dump(self.state, f, indent=2)
+
+    def _update_previous_deployment_results(self):
+        """Fill in results for the previous deployment log."""
+        try:
+            prev_log_path = self.state.get("deployment_log_path")
+            if not prev_log_path or not Path(prev_log_path).exists():
+                return  # No previous deployment to update
+
+            with open(prev_log_path) as f:
+                prev_log = json.load(f)
+
+            # If result section already filled, skip
+            if prev_log.get("result") is not None and prev_log["result"].get("realized_pnl") is not None:
+                return
+
+            # Gather results from current state
+            trades = self.state.get("trades", [])
+            win_rate = 0
+            if trades:
+                wins = sum(1 for t in trades if t.get("pnl", 0) >= 0)
+                win_rate = round(wins / len(trades) * 100, 1)
+
+            current_equity = self.state.get("equity_at_reset", 0)
+
+            # Price change during deployment
+            deploy_start_price = self.state.get("deploy_start_price")
+
+            # Number of rolls
+            roll_count = self.state.get("roll_count", 0)
+
+            prev_log["result"] = {
+                "realized_pnl": round(self.state.get("realized_pnl", 0), 2),
+                "trades": len(trades),
+                "win_rate": win_rate,
+                "roll_count": roll_count,
+                "final_equity": round(current_equity, 2),
+                "deploy_start_price": deploy_start_price,
+            }
+
+            with open(prev_log_path, "w") as f:
+                json.dump(prev_log, f, indent=2)
+            logging.info(f"Updated previous deployment log results: {prev_log_path}")
+        except Exception as e:
+            logging.error(f"Failed to update previous deployment log: {e}")
+
+    def _save_deployment_log(self, btc_price: float, equity: float, direction: str, signal_data: dict, levels: dict, size_per_level: float):
+        """Save a deployment snapshot to state/deployments/."""
+        try:
+            DEPLOYMENT_LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+            # Build market context from levels
+            market_context = {}
+            if levels:
+                market_context["num_buy_levels"] = len(levels.get("buy_levels", []))
+                market_context["num_sell_levels"] = len(levels.get("sell_levels", []))
+                market_context["range_low"] = levels.get("range_low", 0)
+                market_context["range_high"] = levels.get("range_high", 0)
+
+            # Build AI analyst summary
+            analyst_result = signal_data.get("analyst", {}) if signal_data else {}
+            ai_analyst = {
+                "direction": analyst_result.get("direction", "unknown"),
+                "pause": analyst_result.get("pause", False),
+                "note": analyst_result.get("pause_reason", ""),
+            }
+
+            # Build direction score summary
+            direction_score_data = signal_data.get("direction_score", {}) if signal_data else {}
+            direction_score_summary = {
+                "score": direction_score_data.get("score", 0),
+                "direction": direction_score_data.get("direction", "neutral"),
+                "confidence": direction_score_data.get("confidence", "low"),
+                "recommendation": direction_score_data.get("recommendation", "neutral_prefer_long"),
+                "breakdown": {},
+            }
+            breakdown = direction_score_data.get("breakdown", {})
+            for key, val in breakdown.items():
+                if isinstance(val, dict) and "score" in val:
+                    direction_score_summary["breakdown"][key] = round(val["score"], 1)
+                elif isinstance(val, (int, float)):
+                    direction_score_summary["breakdown"][key] = round(val, 1)
+
+            timestamp = datetime.now(timezone.utc).isoformat()
+            deployment_id = timestamp.replace(":", "-").replace(".", "_")
+            log_file = DEPLOYMENT_LOG_DIR / f"{deployment_id}.json"
+
+            deployment_data = {
+                "timestamp": timestamp,
+                "btc_price": btc_price,
+                "equity": round(equity, 2),
+                "direction": direction,
+                "direction_score": direction_score_summary,
+                "ai_analyst": ai_analyst,
+                "resolved_direction": signal_data.get("resolved_direction", direction) if signal_data else direction,
+                "market_context": market_context,
+                "grid_range": market_context.get("range_high", 0) - market_context.get("range_low", 0),
+                "num_levels": market_context.get("num_buy_levels", 0) + market_context.get("num_sell_levels", 0),
+                "size_per_level": size_per_level,
+                "result": None,
+            }
+
+            with open(log_file, "w") as f:
+                json.dump(deployment_data, f, indent=2)
+
+            self.state["deployment_log_path"] = str(log_file)
+            self.state["deploy_start_price"] = btc_price
+            self._save_state()
+
+            logging.info(f"Deployment log saved: {log_file}")
+            self._cleanup_deployment_logs()
+        except Exception as e:
+            logging.error(f"Failed to save deployment log: {e}")
+
+    def _cleanup_deployment_logs(self):
+        """Remove old deployment logs, keeping only the most recent MAX_DEPLOYMENT_LOGS."""
+        try:
+            if not DEPLOYMENT_LOG_DIR.exists():
+                return
+            log_files = sorted(DEPLOYMENT_LOG_DIR.glob("*.json"))
+            if len(log_files) > MAX_DEPLOYMENT_LOGS:
+                for old_log in log_files[:-MAX_DEPLOYMENT_LOGS]:
+                    old_log.unlink()
+                    logging.debug(f"Removed old deployment log: {old_log}")
+        except Exception as e:
+            logging.error(f"Failed to cleanup deployment logs: {e}")
 
     def _compounding_factor(self) -> float:
         """Calculate a compounding multiplier based on PnL history.
@@ -559,7 +688,7 @@ class GridManager:
 
     # ── Grid deployment ─────────────────────────────────────────
 
-    async def deploy(self, levels: dict, equity: float, btc_price: float, roll_info: dict | None = None, time_adj: float = 1.0, funding_adj: float = 1.0, direction: str = "long"):
+    async def deploy(self, levels: dict, equity: float, btc_price: float, roll_info: dict | None = None, time_adj: float = 1.0, funding_adj: float = 1.0, direction: str = "long", signal_data: dict | None = None):
         """
         Deploy a new grid from AI analyst output.
 
@@ -570,9 +699,10 @@ class GridManager:
             "range_high": 84200,
             "pause": False
         }
+        signal_data: dict with direction_score, analyst, resolved_direction
         """
         if direction == "short":
-            return await self.deploy_short_grid(levels, equity, btc_price, roll_info, time_adj, funding_adj)
+            return await self.deploy_short_grid(levels, equity, btc_price, roll_info, time_adj, funding_adj, signal_data)
         
         if levels.get("pause"):
             await send_alert(f"⚠️ AI Analyst recommends pause: {levels.get('pause_reason', 'no reason given')}")
@@ -683,6 +813,13 @@ class GridManager:
             self.state.update(roll_info)
         self._save_state()
 
+        # Log deployment snapshot
+        try:
+            self._update_previous_deployment_results()
+            self._save_deployment_log(btc_price, equity, direction, signal_data, levels, size)
+        except Exception as e:
+            logging.error(f"Deployment logging failed (non-fatal): {e}")
+
         vol_info = ""
         if calc.get("vol_adj") is not None and calc["vol_adj"] != 1.0:
             atr_pct_val = calc.get("atr_pct", 0)
@@ -696,7 +833,7 @@ class GridManager:
         )
         await send_alert(alert)
 
-    async def deploy_short_grid(self, levels: dict, equity: float, btc_price: float, roll_info: dict | None = None, time_adj: float = 1.0, funding_adj: float = 1.0):
+    async def deploy_short_grid(self, levels: dict, equity: float, btc_price: float, roll_info: dict | None = None, time_adj: float = 1.0, funding_adj: float = 1.0, signal_data: dict | None = None):
         """
         Deploy a short grid from AI analyst output.
         
@@ -704,6 +841,7 @@ class GridManager:
         - buy_levels should be ABOVE current price (to close shorts)
         - sell_levels should be BELOW current price (to open shorts)
         - Place sell orders first (shorts opening)
+        signal_data: dict with direction_score, analyst, resolved_direction
         """
         if levels.get("pause"):
             await send_alert(f"⚠️ AI Analyst recommends pause: {levels.get('pause_reason', 'no reason given')}")
@@ -815,6 +953,13 @@ class GridManager:
         if roll_info:
             self.state.update(roll_info)
         self._save_state()
+
+        # Log deployment snapshot
+        try:
+            self._update_previous_deployment_results()
+            self._save_deployment_log(btc_price, equity, "short", signal_data, levels, size)
+        except Exception as e:
+            logging.error(f"Deployment logging failed (non-fatal): {e}")
 
         vol_info = ""
         if calc.get("vol_adj") is not None and calc["vol_adj"] != 1.0:

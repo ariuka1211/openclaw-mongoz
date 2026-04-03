@@ -437,8 +437,13 @@ async def startup(cfg: dict) -> tuple[LighterAPI, GridManager, dict]:
         await send_alert(msg)
         sys.exit(1)
 
-    # Deploy with direction
-    await gm.deploy(levels, equity, price, time_adj=time_adj, funding_adj=funding_adj, direction=direction)
+    # Deploy with direction and signal data
+    signal_data = {
+        "direction_score": direction_result,
+        "analyst": levels,  # full run_analyst result before validation
+        "resolved_direction": direction,
+    }
+    await gm.deploy(levels, equity, price, time_adj=time_adj, funding_adj=funding_adj, direction=direction, signal_data=signal_data)
 
     open_count = sum(1 for o in gm.state["orders"] if o.get("status") == "open")
     direction_label = direction.upper()

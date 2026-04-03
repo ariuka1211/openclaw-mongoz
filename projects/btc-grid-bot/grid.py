@@ -60,12 +60,14 @@ class GridManager:
             "realized_pnl": 0.0,
             "trades": [],
             "pending_buys": [],
+            "pending_sells": [],
             "equity_pnl": 0.0,
             "recovering_position": False,
             "position_size_btc": 0.0,
             "position_value_usd": 0.0,
             "has_existing_position": False,
             "position_avg_price": 0.0,
+            "grid_direction": "long",
         }
 
     def _save_state(self):
@@ -353,7 +355,7 @@ class GridManager:
             {"buy_levels": [...], "sell_levels": [...], "reason": ""}
         """
         from analyst import run_analyst
-        from main import check_trend
+        from main import check_direction
 
         pos_value = btc_amount * btc_price
         pos_pct = pos_value / equity if equity > 0 else 0
@@ -370,15 +372,16 @@ class GridManager:
             logging.warning(f"AI recommends pause but position exists - deploying recovery instead")
             return await self.recover_position(btc_amount, btc_price, cfg)
 
-        # Trend check
-        trade_ok = True
+        # Multi-signal direction check
+        direction_ok = "pause"
         try:
-            trade_ok = await check_trend(cfg, btc_price)
+            dir_result = await check_direction(cfg, btc_price)
+            direction_ok = dir_result.get("recommendation", "neutral_prefer_long")
         except Exception:
             pass
-        if not trade_ok:
-            # Strong downtrend - better to close position than add more
-            logging.warning(f"Downtrend + position exists - deploying recovery instead")
+        if direction_ok == "pause":
+            # Strong bearish signals — better to close position than add more
+            logging.warning(f"Direction score says pause + position exists - deploying recovery instead")
             return await self.recover_position(btc_amount, btc_price, cfg)
 
         buy_levels = sorted(levels["buy_levels"])
@@ -556,7 +559,7 @@ class GridManager:
 
     # ── Grid deployment ─────────────────────────────────────────
 
-    async def deploy(self, levels: dict, equity: float, btc_price: float, roll_info: dict | None = None, time_adj: float = 1.0, funding_adj: float = 1.0):
+    async def deploy(self, levels: dict, equity: float, btc_price: float, roll_info: dict | None = None, time_adj: float = 1.0, funding_adj: float = 1.0, direction: str = "long"):
         """
         Deploy a new grid from AI analyst output.
 
@@ -568,6 +571,9 @@ class GridManager:
             "pause": False
         }
         """
+        if direction == "short":
+            return await self.deploy_short_grid(levels, equity, btc_price, roll_info, time_adj, funding_adj)
+        
         if levels.get("pause"):
             await send_alert(f"⚠️ AI Analyst recommends pause: {levels.get('pause_reason', 'no reason given')}")
             self.state["paused"] = True
@@ -671,6 +677,140 @@ class GridManager:
             "peak_equity": equity,  # starts at reset equity, only increases
             "daily_pnl": 0.0,
             "fill_count": 0,
+            "grid_direction": direction,
+        })
+        if roll_info:
+            self.state.update(roll_info)
+        self._save_state()
+
+        vol_info = ""
+        if calc.get("vol_adj") is not None and calc["vol_adj"] != 1.0:
+            atr_pct_val = calc.get("atr_pct", 0)
+            vol_info = f"\nVol adj: {calc['vol_adj']:.2f}x (ATR {atr_pct_val:.2%})"
+
+        direction_str = f" ({direction.upper()})" if direction != "long" else ""
+        alert = (
+            f"📊 Grid deployed{direction_str} · BTC @ ${btc_price:,.0f}\n"
+            f"Range: ${min(buy_levels):,.0f} - ${max(sell_levels):,.0f}\n"
+            f"{num_buy} buys + {num_sell} sells · {size:.5f} BTC/level{vol_info}"
+        )
+        await send_alert(alert)
+
+    async def deploy_short_grid(self, levels: dict, equity: float, btc_price: float, roll_info: dict | None = None, time_adj: float = 1.0, funding_adj: float = 1.0):
+        """
+        Deploy a short grid from AI analyst output.
+        
+        For short grids:
+        - buy_levels should be ABOVE current price (to close shorts)
+        - sell_levels should be BELOW current price (to open shorts)
+        - Place sell orders first (shorts opening)
+        """
+        if levels.get("pause"):
+            await send_alert(f"⚠️ AI Analyst recommends pause: {levels.get('pause_reason', 'no reason given')}")
+            self.state["paused"] = True
+            self.state["pause_reason"] = levels.get("pause_reason", "AI recommendation")
+            self._save_state()
+            return
+
+        # For short grids, buy_levels are above price, sell_levels are below
+        buy_levels = sorted([p for p in levels["buy_levels"] if p > btc_price])    # above price - close shorts
+        sell_levels = sorted([p for p in levels["sell_levels"] if p < btc_price])  # below price - open shorts
+        num_buy = len(buy_levels)
+        num_sell = len(sell_levels)
+
+        min_levels = self.cfg["grid"].get("min_levels", 2)
+        max_levels = self.cfg["grid"].get("max_levels", 8)
+        total = num_buy + num_sell
+        if total < min_levels:
+            msg = f"Too few short grid levels ({total} < {min_levels} min). Short grid not deployed."
+            logging.error(msg)
+            await send_alert(msg)
+            return
+        if total > max_levels:
+            logging.warning(f"Short grid levels exceed max ({total} > {max_levels}) - deploying anyway")
+
+        # Compute ATR for volatility-adaptive sizing
+        atr_pct = None
+        try:
+            candles_15m = await fetch_candles("15m", limit=100)
+            atr_data = calc_atr(candles_15m, period=14)
+            if atr_data.get("atr", 0) > 0 and btc_price > 0:
+                atr_pct = atr_data["atr"] / btc_price
+        except Exception:
+            pass  # Fall back to non-adaptive sizing
+
+        # Load vol config from main config if present
+        vol_cfg = self.cfg.get("volatility", {})
+
+        # Auto-compounding multiplier
+        compounding_mult = self._compounding_factor()
+
+        # Run capital calculator
+        calc = calculate_grid(
+            equity, btc_price, num_buy, num_sell,
+            self.cfg["capital"]["max_exposure_multiplier"],
+            self.cfg["capital"]["margin_reserve_pct"],
+            atr_pct=atr_pct,
+            vol_cfg=vol_cfg,
+            compounding_mult=compounding_mult,
+            time_adj=time_adj,
+            funding_adj=funding_adj,
+        )
+        if not calc["safe"]:
+            msg = f"🚨 Capital check FAILED: {calc['reason']}. Short grid not deployed."
+            logging.error(msg)
+            await send_alert(msg)
+            return
+
+        size = calc["size_per_level"]
+        logging.info(f"Deploying SHORT grid: {num_buy} buys + {num_sell} sells, size={size:.6f} BTC/level")
+
+        # Cancel existing orders first
+        cancelled = await self.api.cancel_all_orders()
+        if cancelled > 0:
+            logging.info(f"Cancelled {cancelled} existing orders")
+
+        # Place SELL orders first (opening shorts)
+        placed_orders = []
+        for price in sell_levels:
+            try:
+                order = await self.api.place_limit_order("sell", price, size)
+                order["status"] = "open"
+                order["layer"] = "grid"
+                placed_orders.append(order)
+                logging.info(f"Placed SHORT SELL @ ${price:,.0f}")
+                await asyncio.sleep(0.3)  # pace order placement
+            except Exception as e:
+                logging.error(f"Failed to place SHORT SELL @ ${price}: {e}")
+
+        # Then place BUY orders (closing shorts)
+        for price in buy_levels:
+            try:
+                order = await self.api.place_limit_order("buy", price, size)
+                order["status"] = "open"
+                order["layer"] = "grid"
+                placed_orders.append(order)
+                logging.info(f"Placed SHORT BUY @ ${price:,.0f}")
+                await asyncio.sleep(0.3)
+            except Exception as e:
+                logging.error(f"Failed to place SHORT BUY @ ${price}: {e}")
+
+        # Update state
+        self.state.update({
+            "active": True,
+            "paused": False,
+            "pause_reason": "",
+            "levels": {"buy": buy_levels, "sell": sell_levels},
+            "range_low": min(sell_levels) if sell_levels else btc_price - 1000,
+            "range_high": max(buy_levels) if buy_levels else btc_price + 1000,
+            "size_per_level": size,
+            "orders": placed_orders,
+            "last_reset": datetime.now(timezone.utc).isoformat(),
+            "equity_at_reset": equity,
+            "peak_equity": equity,  # starts at reset equity, only increases
+            "daily_pnl": 0.0,
+            "fill_count": 0,
+            "grid_direction": "short",
         })
         if roll_info:
             self.state.update(roll_info)
@@ -682,9 +822,9 @@ class GridManager:
             vol_info = f"\nVol adj: {calc['vol_adj']:.2f}x (ATR {atr_pct_val:.2%})"
 
         alert = (
-            f"📊 Grid deployed · BTC @ ${btc_price:,.0f}\n"
-            f"Range: ${min(buy_levels):,.0f} - ${max(sell_levels):,.0f}\n"
-            f"{num_buy} buys + {num_sell} sells · {size:.5f} BTC/level{vol_info}"
+            f"📊 Grid deployed (SHORT) · BTC @ ${btc_price:,.0f}\n"
+            f"Range: ${min(sell_levels):,.0f} - ${max(buy_levels):,.0f}\n"
+            f"{num_sell} sells (open) + {num_buy} buys (close) · {size:.5f} BTC/level{vol_info}"
         )
         await send_alert(alert)
 
@@ -841,36 +981,67 @@ class GridManager:
                     f"✅ {order['side'].upper()} filled @ ${order['price']:,.0f} · {size:.5f} BTC"
                 )
 
-        # Track buy fills for PnL matching
+        # Track buy fills for PnL matching (direction-dependent)
+        grid_direction = self.state.get("grid_direction", "long")
+        
         for order in fills_processed:
-            if order["side"] == "buy":
-                self.state.setdefault("pending_buys", [])
-                self.state["pending_buys"].append({
-                    "price": order["price"],
-                    "size": self.state.get("size_per_level", 0),
-                    "ts": datetime.now(timezone.utc).isoformat(),
-                })
-                self._save_state()
-
-        # Match sell fills to pending buys for realized PnL
-        for order in fills_processed:
-            if order["side"] == "sell":
-                pending = self.state.get("pending_buys", [])
-                if pending:
-                    buy = pending.pop(0)
-                    buy_size = buy.get("size", self.state.get("size_per_level", 0))
-                    pnl = (order["price"] - buy["price"]) * buy_size
-                    self.state["realized_pnl"] = round(self.state.get("realized_pnl", 0) + pnl, 2)
-                    trade = {
-                        "buy_price": buy["price"],
-                        "sell_price": order["price"],
-                        "size": buy_size,
-                        "pnl": round(pnl, 2),
+            if grid_direction == "long":
+                if order["side"] == "buy":
+                    self.state.setdefault("pending_buys", [])
+                    self.state["pending_buys"].append({
+                        "price": order["price"],
+                        "size": self.state.get("size_per_level", 0),
                         "ts": datetime.now(timezone.utc).isoformat(),
-                    }
-                    self.state.setdefault("trades", []).append(trade)
-                    self.state["pending_buys"] = pending
+                    })
                     self._save_state()
+            else:  # short grid
+                if order["side"] == "sell":
+                    self.state.setdefault("pending_sells", [])
+                    self.state["pending_sells"].append({
+                        "price": order["price"],
+                        "size": self.state.get("size_per_level", 0),
+                        "ts": datetime.now(timezone.utc).isoformat(),
+                    })
+                    self._save_state()
+
+        # Match fills for realized PnL (direction-dependent)
+        for order in fills_processed:
+            if grid_direction == "long":
+                if order["side"] == "sell":
+                    pending = self.state.get("pending_buys", [])
+                    if pending:
+                        buy = pending.pop(0)
+                        buy_size = buy.get("size", self.state.get("size_per_level", 0))
+                        pnl = (order["price"] - buy["price"]) * buy_size
+                        self.state["realized_pnl"] = round(self.state.get("realized_pnl", 0) + pnl, 2)
+                        trade = {
+                            "buy_price": buy["price"],
+                            "sell_price": order["price"],
+                            "size": buy_size,
+                            "pnl": round(pnl, 2),
+                            "ts": datetime.now(timezone.utc).isoformat(),
+                        }
+                        self.state.setdefault("trades", []).append(trade)
+                        self.state["pending_buys"] = pending
+                        self._save_state()
+            else:  # short grid
+                if order["side"] == "buy":
+                    pending = self.state.get("pending_sells", [])
+                    if pending:
+                        sell = pending.pop(0)
+                        sell_size = sell.get("size", self.state.get("size_per_level", 0))
+                        pnl = (sell["price"] - order["price"]) * sell_size  # PnL = (sell_entry - buy_exit) * size
+                        self.state["realized_pnl"] = round(self.state.get("realized_pnl", 0) + pnl, 2)
+                        trade = {
+                            "sell_price": sell["price"],  # short entry
+                            "buy_price": order["price"],   # short exit
+                            "size": sell_size,
+                            "pnl": round(pnl, 2),
+                            "ts": datetime.now(timezone.utc).isoformat(),
+                        }
+                        self.state.setdefault("trades", []).append(trade)
+                        self.state["pending_sells"] = pending
+                        self._save_state()
 
         # Place replacements for each fill
         for order in fills_processed:
@@ -979,6 +1150,7 @@ class GridManager:
         filled_price = filled_order["price"]
         filled_side = filled_order["side"]
         filled_order_id = filled_order.get("order_id")
+        grid_direction = self.state.get("grid_direction", "long")
 
         # If we don't have the filled order ID, we can't cancel it later - abort
         if not filled_order_id:
@@ -986,83 +1158,96 @@ class GridManager:
             return
 
         try:
-            if filled_side == "buy":
-                # Buy filled → place sell at next level up
-                higher = [p for p in sell_levels if p > filled_price]
-                if not higher:
-                    logging.info(f"No higher sell level after fill @ ${filled_price:,.0f}")
-                    return
-                target_price = min(higher)
-                # Skip if sell already exists at target price
-                if ("sell", round(target_price, 0)) in open_prices:
-                    logging.info(f"Sell already open at ${target_price:,.0f}, skipping replacement")
-                    return
-                # Retry placing the sell order up to 3 times with exponential backoff
-                max_retries = 3
-                for attempt in range(max_retries + 1):
-                    if attempt > 0:
-                        wait_time = 2 ** attempt  # exponential backoff: 2, 4, 8 seconds
-                        logging.info(f"Retrying replacement sell order (attempt {attempt}/{max_retries})")
-                        await asyncio.sleep(wait_time)
-                    try:
-                        new_order = await self.api.place_limit_order("sell", target_price, size)
-                        new_order["status"] = "open"
-                        new_order["layer"] = "grid"
-                        self.state["orders"].append(new_order)
-                        self._save_state()
-                        break  # success, exit retry loop
-                    except Exception as e:
-                        logging.error(f"Attempt {attempt + 1} failed: {e}")
-                        if attempt == max_retries:
-                            # All retries failed - bot now holds an unhedged long position.
-                            # The buy already filled (removed from the book), cancel can't close it.
-                            logging.error(f"All {max_retries} retries failed for sell replacement after BUY fill @ ${filled_price:,.0f}. Position is now UNHEDGED.")
-                            await send_alert(
-                                f"🚨 UNHEDGED POSITION · BUY filled @ ${filled_price:,.0f}\n"
-                                f"SELL replacement failed after {max_retries} retries.\n"
-                                f"Position is open - manual intervention required."
-                            )
-                        # Continue to next retry attempt
+            if grid_direction == "long":
+                if filled_side == "buy":
+                    # Long grid: Buy filled → place sell at next level up
+                    higher = [p for p in sell_levels if p > filled_price]
+                    if not higher:
+                        logging.info(f"No higher sell level after fill @ ${filled_price:,.0f}")
+                        return
+                    target_price = min(higher)
+                    # Skip if sell already exists at target price
+                    if ("sell", round(target_price, 0)) in open_prices:
+                        logging.info(f"Sell already open at ${target_price:,.0f}, skipping replacement")
+                        return
+                    # Place replacement sell order
+                    await self._place_order_with_retry("sell", target_price, size, filled_price)
                 else:
-                    # Retry loop exited without success
-                    logging.info("Retry loop exited without success")
-            else:
-                # Sell filled → place buy at next level down
-                lower = [p for p in buy_levels if p < filled_price]
-                if not lower:
-                    logging.info(f"No lower buy level after fill @ ${filled_price:,.0f}")
-                    return
-                target_price = max(lower)
-                # Skip if buy already exists at target price
-                if ("buy", round(target_price, 0)) in open_prices:
-                    logging.info(f"Buy already open at ${target_price:,.0f}, skipping replacement")
-                    return
-                # Retry placing the buy order up to 3 times with exponential backoff
-                max_retries = 3
-                for attempt in range(max_retries + 1):
-                    if attempt > 0:
-                        wait_time = 2 ** attempt  # exponential backoff: 2, 4, 8 seconds
-                        logging.info(f"Retrying replacement buy order (attempt {attempt}/{max_retries})")
-                        await asyncio.sleep(wait_time)
-                    try:
-                        new_order = await self.api.place_limit_order("buy", target_price, size)
-                        new_order["status"] = "open"
-                        new_order["layer"] = "grid"
-                        self.state["orders"].append(new_order)
-                        self._save_state()
-                        break  # success, exit retry loop
-                    except Exception as e:
-                        logging.error(f"Attempt {attempt + 1} failed: {e}")
-                        if attempt == max_retries:
-                            # All retries failed - log error but do NOT cancel the filled sell order
-                            # (since a filled sell closes a position, not opens one)
-                            logging.error(f"All {max_retries} retries failed for buy replacement after SELL fill")
-                            await send_alert(
-                                f"⚠️ BUY REPLACEMENT FAILED · SELL filled @ ${filled_price:,.0f} · Replacement order failed"
-                            )
+                    # Long grid: Sell filled → place buy at next level down
+                    lower = [p for p in buy_levels if p < filled_price]
+                    if not lower:
+                        logging.info(f"No lower buy level after fill @ ${filled_price:,.0f}")
+                        return
+                    target_price = max(lower)
+                    # Skip if buy already exists at target price
+                    if ("buy", round(target_price, 0)) in open_prices:
+                        logging.info(f"Buy already open at ${target_price:,.0f}, skipping replacement")
+                        return
+                    # Place replacement buy order
+                    await self._place_order_with_retry("buy", target_price, size, filled_price)
+            else:  # short grid
+                if filled_side == "sell":
+                    # Short grid: Sell filled (short opened) → place replacement sell further BELOW
+                    lower_sells = [p for p in sell_levels if p < filled_price]
+                    if not lower_sells:
+                        logging.info(f"No lower sell level after short fill @ ${filled_price:,.0f}")
+                        return
+                    target_price = max(lower_sells)  # closest below
+                    # Skip if sell already exists at target price
+                    if ("sell", round(target_price, 0)) in open_prices:
+                        logging.info(f"Sell already open at ${target_price:,.0f}, skipping replacement")
+                        return
+                    # Place replacement sell order
+                    await self._place_order_with_retry("sell", target_price, size, filled_price)
+                else:
+                    # Short grid: Buy filled (short closed) → place replacement buy further ABOVE
+                    higher_buys = [p for p in buy_levels if p > filled_price]
+                    if not higher_buys:
+                        logging.info(f"No higher buy level after short cover @ ${filled_price:,.0f}")
+                        return
+                    target_price = min(higher_buys)  # closest above
+                    # Skip if buy already exists at target price
+                    if ("buy", round(target_price, 0)) in open_prices:
+                        logging.info(f"Buy already open at ${target_price:,.0f}, skipping replacement")
+                        return
+                    # Place replacement buy order
+                    await self._place_order_with_retry("buy", target_price, size, filled_price)
         except Exception as e:
             logging.error(f"Unexpected error in _place_replacement: {e}")
             await send_alert(f"⚠️ Unexpected error in _place_replacement: {e}")
+
+    async def _place_order_with_retry(self, side: str, target_price: float, size: float, filled_price: float):
+        """Place an order with retry logic and error handling."""
+        max_retries = 3
+        for attempt in range(max_retries + 1):
+            if attempt > 0:
+                wait_time = 2 ** attempt  # exponential backoff: 2, 4, 8 seconds
+                logging.info(f"Retrying replacement {side} order (attempt {attempt}/{max_retries})")
+                await asyncio.sleep(wait_time)
+            try:
+                new_order = await self.api.place_limit_order(side, target_price, size)
+                new_order["status"] = "open"
+                new_order["layer"] = "grid"
+                self.state["orders"].append(new_order)
+                self._save_state()
+                logging.info(f"Placed replacement {side.upper()} @ ${target_price:,.0f}")
+                break  # success, exit retry loop
+            except Exception as e:
+                logging.error(f"Attempt {attempt + 1} failed: {e}")
+                if attempt == max_retries:
+                    # All retries failed
+                    if side == "sell":
+                        logging.error(f"All {max_retries} retries failed for sell replacement after {side.upper()} fill @ ${filled_price:,.0f}. Position is now UNHEDGED.")
+                        await send_alert(
+                            f"🚨 UNHEDGED POSITION · {side.upper()} filled @ ${filled_price:,.0f}\n"
+                            f"SELL replacement failed after {max_retries} retries.\n"
+                            f"Position is open - manual intervention required."
+                        )
+                    else:
+                        logging.error(f"All {max_retries} retries failed for buy replacement after {side.upper()} fill")
+                        await send_alert(
+                            f"⚠️ BUY REPLACEMENT FAILED · {side.upper()} filled @ ${filled_price:,.0f} · Replacement order failed"
+                        )
 
     # ── One-sided rolling ────────────────────────────────────────
 
@@ -1603,12 +1788,19 @@ class GridManager:
             return "Grid: not deployed"
         open_orders = [o for o in s["orders"] if o["status"] == "open"]
         status = "PAUSED" if s["paused"] else "ACTIVE"
+        grid_direction = s.get("grid_direction", "long").upper()
         rolls = s.get("roll_count", 0)
         realized_pnl = s.get("realized_pnl", 0.0)
-        pending = len(s.get("pending_buys", []))
+        
+        # Direction-specific pending count
+        if grid_direction == "SHORT":
+            pending = len(s.get("pending_sells", []))
+        else:
+            pending = len(s.get("pending_buys", []))
+        
         trades = len(s.get("trades", []))
         return (
-            f"Grid: {status}\n"
+            f"Grid: {status} ({grid_direction})\n"
             f"Range: ${s['range_low']:,.0f}-${s['range_high']:,.0f}\n"
             f"Open orders: {len(open_orders)}\n"
             f"Fills today: {s.get('fill_count', 0)}\n"

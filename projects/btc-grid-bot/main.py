@@ -27,7 +27,7 @@ from grid import GridManager
 from lighter_api import LighterAPI
 from tg_alerts import send_alert
 from analyst import run_analyst, fetch_candles
-from indicators import calc_ema_single, time_awareness_adjustment, funding_rate_adjustment
+from indicators import calc_ema_single, time_awareness_adjustment, funding_rate_adjustment, direction_score
 from market_intel import gather_all_intel
 
 load_dotenv()
@@ -161,6 +161,9 @@ async def handle_resume(gm, api, cfg):
     except Exception:
         pass  # Default to 1.0 if funding fetch fails
 
+    # Read direction from state, default to long for backward compat
+    direction = state.get("grid_direction", "long")
+
     calc = calculate_grid(
         equity, price, num_buy, num_sell,
         cfg["capital"]["max_exposure_multiplier"],
@@ -170,6 +173,7 @@ async def handle_resume(gm, api, cfg):
         compounding_mult=compounding_mult,
         time_adj=time_adj,
         funding_adj=funding_adj,
+        direction=direction,
     )
     if not calc["safe"]:
         msg = f"❌ Safety check failed — cannot resume: {calc['reason']}"
@@ -180,52 +184,58 @@ async def handle_resume(gm, api, cfg):
     await gm.cancel_all()
     gm.state["paused"] = False
     gm.state["pause_reason"] = ""
-    await gm.deploy(levels, equity, price, time_adj=time_adj, funding_adj=funding_adj)
-    await send_alert(f"🟢 Grid resumed (same levels) · BTC @ ${price:,.0f}")
+    await gm.deploy(levels, equity, price, time_adj=time_adj, funding_adj=funding_adj, direction=direction)
+    direction_label = direction.upper()
+    await send_alert(f"🟢 Grid resumed ({direction_label} · same levels) · BTC @ ${price:,.0f}")
 
 
-async def check_trend(cfg: dict, price: float):
-    """Check 4H EMA(50) trend filter before grid deployment.
-
-    Returns True if safe to deploy, False if we should abort.
+async def check_direction(cfg: dict, price: float) -> dict:
+    """Multi-signal direction check using all available indicators.
+    
+    Returns a dict with:
+      - "direction": "long" | "short" | "neutral"
+      - "score": int (-100 to +100)
+      - "confidence": "high" | "medium" | "low"
+      - "recommendation": "deploy_long" | "deploy_short" | "pause" | "neutral_prefer_long"
+      - "flags": list of safety override strings
     """
-    trend_cfg = cfg.get("trend", {})
-    ema_period = trend_cfg.get("ema_period", 50)
-    pause_threshold = trend_cfg.get("pause_threshold_pct", 0.03)
-    warning_threshold = trend_cfg.get("warning_threshold_pct", 0.01)
-
+    # Fetch candles
+    candles_15m = await fetch_candles("15m", limit=200)
+    candles_30m = await fetch_candles("30m", limit=200)
+    candles_4h = await fetch_candles("4H", limit=48)
     try:
-        candles_4h = await fetch_candles("4H", limit=100)
-        ema_50 = calc_ema_single(candles_4h, ema_period)
-    except Exception as e:
-        log.error(f"Trend check failed, proceeding anyway: {e}")
-        return True
-
-    if ema_50 is None:
-        log.warning("Not enough 4H candles for EMA calculation — proceeding without trend filter")
-        return True
-
-    pct_below = (ema_50 - price) / ema_50
-
-    if pct_below > pause_threshold:
-        msg = (
-            f"⚠️ Strong downtrend detected. BTC ${price:,.0f} >{pause_threshold:.0%} below "
-            f"4H EMA(50) ${ema_50:,.0f}. Grid deployment paused.\n"
-            f"Price is too far from fair value for safe grid trading."
-        )
-        log.error(msg)
-        await send_alert(msg)
-        return False
-    elif pct_below > warning_threshold:
-        msg = (
-            f"⚠️ Mild downtrend: BTC ${price:,.0f} is {pct_below:.1%} below "
-            f"4H EMA(50) ${ema_50:,.0f}. Grid deployed but monitor closely."
-        )
-        log.warning(msg)
-        await send_alert(msg)
-        return True
-    else:
-        return True
+        candles_1d = await fetch_candles("1D", limit=90)
+    except Exception:
+        candles_1d = []
+    
+    # Get market intel (funding, OI)
+    from market_intel import gather_all_intel
+    from indicators import gather_indicators
+    
+    market_intel = await gather_all_intel(cfg)
+    indicators = gather_indicators(candles_15m, candles_30m, candles_4h, market_intel, candles_1d)
+    
+    # Extract individual indicator components for direction_score
+    score_result = direction_score(
+        trend_skew=indicators["skew"],
+        oi_div=indicators["oi_divergence"],
+        adx_data=indicators["adx"],
+        funding_rate=market_intel.get("current", {}).get("funding_rate", 0),
+        volume_spike=indicators["volume_spike"],
+        regime=indicators["regime"],
+        ema_50_4h=indicators["ema_50_4h"],
+        ema_50_1d=indicators["ema_50_1d"],
+        ema_20_1d=indicators["ema_20_1d"],
+        current_price=price,
+    )
+    
+    # Log the result
+    log.info(f"Direction check: score={score_result['score']}, "
+             f"direction={score_result['direction']}, "
+             f"recommendation={score_result['recommendation']}, "
+             f"confidence={score_result['confidence']}")
+    
+    return score_result
 
 
 async def startup(cfg: dict) -> tuple[LighterAPI, GridManager, dict]:
@@ -251,16 +261,18 @@ async def startup(cfg: dict) -> tuple[LighterAPI, GridManager, dict]:
         log.error(f"Failed to check BTC balance: {e}")
         btc_balance = 0.0  # assume clean, proceed with caution
 
-    if btc_balance > 0:
-        pos_value = btc_balance * price
+    # Any non-zero position (long or short) needs recovery — flatten it
+    if btc_balance != 0:
+        pos_value = abs(btc_balance) * price
         pos_pct = pos_value / equity if equity > 0 else 0
+        side = "SHORT" if btc_balance < 0 else "LONG"
 
-        log.warning(f"⚠️ Found BTC position: {btc_balance:.6f} (${pos_value:.2f} = {pos_pct:.1%} equity)")
+        log.warning(f"⚠️ Found BTC {side}.position: {btc_balance:.6f} (${pos_value:.2f} = {pos_pct:.1%} equity)")
 
         if pos_pct < 0.10:
             # Small position — incorporate into fresh grid
             await send_alert(
-                f"📎 Small position detected: {btc_balance:.6f} BTC (${pos_value:.2f}, {pos_pct:.1%} equity)\n"
+                f"📎 Small {side} position detected: {btc_balance:.6f} BTC (${pos_value:.2f}, {pos_pct:.1%} equity)\n"
                 f"Building grid around position..."
             )
             # Compute funding adjustment
@@ -281,7 +293,7 @@ async def startup(cfg: dict) -> tuple[LighterAPI, GridManager, dict]:
             return api, gm, levels
         else:
             # Medium or large position — close it
-            await send_alert(f"⚠️ Found position to close: {btc_balance:.6f} BTC = ${pos_value:.2f} ({pos_pct:.1%} equity)")
+            await send_alert(f"⚠️ Found {side} position to close: {btc_balance:.6f} BTC = ${pos_value:.2f} ({pos_pct:.1%} equity)")
             result = await gm.recover_position(btc_balance, price, cfg)
             levels = {
                 "buy_levels": result["buy_levels"],
@@ -315,11 +327,48 @@ async def startup(cfg: dict) -> tuple[LighterAPI, GridManager, dict]:
     await send_alert("🔍 Running market analysis...")
     levels = await run_analyst(cfg, equity=equity, btc_price=price, grid_manager=gm)
 
-    # Trend filter check — after analyst, before capital check
+    # Direction score check — after analyst, before capital check
     if not levels.get("pause"):
-        trend_ok = await check_trend(cfg, price)
-        if not trend_ok:
+        direction_result = await check_direction(cfg, price)
+        score = direction_result["score"]
+        recommendation = direction_result["recommendation"]
+        flags = direction_result.get("flags", [])
+        
+        # Resolve direction from AI analyst + direction score
+        ai_direction = levels.get("direction", "long")
+        
+        # Safety overrides from flags
+        pause_flags = [f for f in flags if "no_" in f or "pa" in f.lower()]
+        
+        if ai_direction == "pause" or recommendation == "pause":
+            direction = "pause"
+        elif ai_direction == "short" and "no_shorts_during_capitulation" not in flags and "no_shorts_during_squeeze" not in flags:
+            # AI wants short + no flag preventing it
+            direction = "short"
+        elif ai_direction == "long":
+            # AI wants long, but direction score might suggest otherwise
+            direction = "long"
+        else:
+            # AI says nothing strong — defer to direction score
+            if recommendation == "deploy_short":
+                direction = "short"
+            elif recommendation == "deploy_long":
+                direction = "long"
+            else:
+                direction = "long"  # default
+        
+        # Log decision for transparency
+        log.info(f"Direction resolution: AI={ai_direction}, Score={score}, Result={direction}")
+
+        if direction == "pause":
+            msg = f"⚠️ Direction override: {direction} — pausing deployment"
+            log.error(msg)
+            await send_alert(msg)
             sys.exit(1)
+    else:
+        direction = "long"  # won't be used anyway since paused
+        score = 0
+        direction_result = {"score": 0, "confidence": "low", "recommendation": "neutral_prefer_long", "flags": []}
 
     # Validate analyst output against config min/max
     num_buy = len(levels["buy_levels"])
@@ -380,6 +429,7 @@ async def startup(cfg: dict) -> tuple[LighterAPI, GridManager, dict]:
         compounding_mult=compounding_mult,
         time_adj=time_adj,
         funding_adj=funding_adj,
+        direction=direction,
     )
     if not calc["safe"]:
         msg = f"❌ Safety check failed: {calc['reason']}"
@@ -387,12 +437,14 @@ async def startup(cfg: dict) -> tuple[LighterAPI, GridManager, dict]:
         await send_alert(msg)
         sys.exit(1)
 
-    # Deploy
-    await gm.deploy(levels, equity, price, time_adj=time_adj, funding_adj=funding_adj)
+    # Deploy with direction
+    await gm.deploy(levels, equity, price, time_adj=time_adj, funding_adj=funding_adj, direction=direction)
 
     open_count = sum(1 for o in gm.state["orders"] if o.get("status") == "open")
+    direction_label = direction.upper()
     await send_alert(
-        f"✅ Grid deployed · BTC @ ${price:,.0f}\n"
+        f"✅ Grid deployed ({direction_label}) · BTC @ ${price:,.0f}\n"
+        f"Direction score: {score:+d} ({direction_result['confidence']})\n"
         f"Buy: {levels['buy_levels']}\n"
         f"Sell: {levels['sell_levels']}\n"
         f"Orders placed: {open_count} · Equity: ${equity:.2f}"

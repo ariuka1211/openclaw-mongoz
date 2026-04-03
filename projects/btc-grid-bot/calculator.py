@@ -11,6 +11,7 @@ def calculate_grid(
     compounding_mult: float = 1.0,  # Auto-compounding multiplier
     time_adj: float = 1.0,          # Time-of-day adjustment multiplier
     funding_adj: float = 1.0,       # Funding rate adjustment multiplier
+    direction: str = "long",
 ) -> dict:
     """
     Returns:
@@ -47,6 +48,9 @@ def calculate_grid(
     # Log the adjustment
     if vol_adj != 1.0 and atr_pct:
         print(f"Volatility adj: {vol_adj:.2f}x (ATR: {atr_pct:.2%})")
+
+    if direction == "short":
+        print("Direction: short — margin calculation same but monitoring for short squeeze risk")
 
     max_notional = account_equity * max_exposure_mult
     reserved = account_equity * margin_reserve_pct
@@ -114,6 +118,7 @@ def calculate_grid(
         "compounding_mult": round(compounding_mult, 3),
         "time_adj": round(time_adj, 2),
         "funding_adj": round(funding_adj, 2),
+        "direction": direction,
     }
 
 

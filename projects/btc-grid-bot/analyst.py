@@ -247,30 +247,83 @@ for placing limit orders. Think about where price is LIKELY TO REVERSE, not wher
 
 {grid_history}
 
-## Rules for level selection:
+## Grid Direction Selection
+
+You MUST choose the GRID DIRECTION based on market conditions. This tells the bot
+which side of price to place orders on. There are THREE options:
+
+### "long" grid (default — buy low, sell high)
+- Buy orders placed BELOW current price (long entries at support)
+- Sell orders placed ABOVE current price (profit-taking above)
+- Use when: BTC is ranging, consolidating, or mildly bullish
+- Classic grid mode — profits from sideways volatility
+
+### "short" grid (mirror of long — sell low, buy high)
+- Sell orders placed BELOW current price (short entries on breakdowns)
+- Buy orders placed ABOVE current price (covering shorts at profit)
+- Use when: BTC is ranging but leaning bearish, or there's a confirmed downtrend
+- Profits when price drops — buy covers are cheaper than the initial short
+
+### "pause" (no grid at all)
+- Use ONLY in extreme conditions: violent trending with no reversals,
+  major news events, or when structure is completely unclear
+- This is a last resort — prefer "short" grid over "pause" in a downtrend
+
+## Open Interest Divergence — Critical for Direction Choice
+
+OI divergence tells you WHO is trapped and whether a short grid makes sense:
+
+- **capitulation** (price↓, OI↓): Longs getting liquidated already. RISKY to short here —
+  the flush may be ending. Consider "long" grid for a bounce or "pause".
+- **new_shorts** (price↓, OI↑): Fresh shorts piling in, trend confirmed. GOOD for "short" grid —
+  downside likely continues. Place sell entries at breakdown levels.
+- **long_squeeze** (price↑, OI↓): Shorts covering, price rising on liquidations.
+  DON'T short — dangerous squeeze. Use "pause" or cautiously use "long" grid.
+- **new_longs** (price↑, OI↑): Bullish conviction. Use "long" grid or "pause" if momentum is extreme.
+
+For short grids specifically:
+- Target breakdown levels where price failed to hold support
+- Look at failed bounce levels as short entry points
+- Buy levels (covers) should be at resistance zones where price is likely to stall
+- Avoid short grids during capitulation (OI↓ on price drops) — the move may be exhausted
+
+## Rules for level selection by direction:
+
+### For "long" grid:
 1. 4-8 buy levels BELOW current price (support zones)
 2. 4-8 sell levels ABOVE current price (resistance zones)
 3. Place levels at actual swing reversals — NOT evenly spaced
+
+### For "short" grid:
+1. 4-8 sell levels BELOW current price (short entries on breakdowns)
+2. 4-8 buy levels ABOVE current price (buy covers at resistance/profit zones)
+3. Mirror of long grid — think in reverse
+
+### General rules (all directions):
 4. Round to nearest $50
 5. Min spacing between levels: see guidance above
 6. Do NOT invent levels — only use what the data shows
 7. High funding rates / crowded longs = risk of liquidation cascades (avoid placing sells too close)
-8. If price is strongly trending (not ranging), set "pause": true
+8. Strongly trending with no reversals = "pause"
+9. In a downtrend, prefer "short" grid over "pause" if swing structure exists
 
 Return ONLY valid JSON, no markdown, no commentary:
 {{
-  "buy_levels": [82400, 81900, 81200],
-  "sell_levels": [83500, 84100, 84800],
-  "range_low": 82400,
+  "direction": "long",
+  "buy_levels": [83500, 84100, 84800],
+  "sell_levels": [82400, 81900, 81200],
+  "range_low": 81200,
   "range_high": 84800,
   "confidence": "high",
   "note": "brief explanation of structure",
-  "pause": false,
   "pause_reason": null
 }}
 
+For a short grid, note that sell_levels are BELOW current price and buy_levels are ABOVE.
+
 If you cannot identify clear structure (strongly trending, no reversals):
-set "pause": true and explain why in "pause_reason".
+set "direction": "pause" and explain why in "pause_reason".
+Use "pause" sparingly — prefer "short" grid in bearish conditions.
 """
     return prompt
 
@@ -520,6 +573,31 @@ async def run_analyst(cfg: dict, equity: float = 0, btc_price: float = 0, grid_m
             "note": "",
         }
 
+    # Backward compatibility: if LLM returns "pause": true but no direction field,
+    # map it to direction = "pause"
+    direction = result.get("direction")
+    if direction is None:
+        if result.get("pause") is True:
+            direction = "pause"
+        else:
+            direction = "long"  # default
+        result["direction"] = direction
+
+    # Validate direction is one of the allowed values
+    valid_directions = ("long", "short", "pause")
+    if direction not in valid_directions:
+        result["pause"] = True
+        result["pause_reason"] = f"Invalid direction: '{direction}'. Must be one of {valid_directions}"
+        result["buy_levels"] = []
+        result["sell_levels"] = []
+        result["range_low"] = 0
+        result["range_high"] = 0
+        return result
+
+    # Set pause true for backward compat if direction is pause
+    if direction == "pause":
+        result["pause"] = True
+
     # Ensure required fields exist
     for key, default in [
         ("buy_levels", []),
@@ -528,7 +606,6 @@ async def run_analyst(cfg: dict, equity: float = 0, btc_price: float = 0, grid_m
         ("range_high", 0),
         ("confidence", ""),
         ("note", ""),
-        ("pause", False),
     ]:
         if key not in result:
             result[key] = default
@@ -536,19 +613,92 @@ async def run_analyst(cfg: dict, equity: float = 0, btc_price: float = 0, grid_m
     if "pause_reason" not in result:
         result["pause_reason"] = None
 
+    # If direction is pause, clear levels
+    if direction == "pause":
+        result["buy_levels"] = []
+        result["sell_levels"] = []
+        result["range_low"] = 0
+        result["range_high"] = 0
+        return result
+
     # Validate levels are lists of numbers
-    if not result.get("pause"):
-        buy = result.get("buy_levels", [])
-        sell = result.get("sell_levels", [])
-        if not isinstance(buy, list) or not isinstance(sell, list):
-            result["pause"] = True
-            result["pause_reason"] = "buy_levels or sell_levels is not a list"
-        elif len(buy) < 1 or len(sell) < 1:
-            result["pause"] = True
-            result["pause_reason"] = "buy_levels or sell_levels is empty"
-        elif not all(isinstance(x, (int, float)) for x in buy + sell):
-            result["pause"] = True
-            result["pause_reason"] = "buy_levels or sell_levels contains non-numeric values"
+    buy = result.get("buy_levels", [])
+    sell = result.get("sell_levels", [])
+    if not isinstance(buy, list) or not isinstance(sell, list):
+        result["pause"] = True
+        result["direction"] = "pause"
+        result["pause_reason"] = "buy_levels or sell_levels is not a list"
+        result["buy_levels"] = []
+        result["sell_levels"] = []
+        result["range_low"] = 0
+        result["range_high"] = 0
+        return result
+    if len(buy) < 1 or len(sell) < 1:
+        result["pause"] = True
+        result["direction"] = "pause"
+        result["pause_reason"] = "buy_levels or sell_levels is empty"
+        result["buy_levels"] = []
+        result["sell_levels"] = []
+        result["range_low"] = 0
+        result["range_high"] = 0
+        return result
+    if not all(isinstance(x, (int, float)) for x in buy + sell):
+        result["pause"] = True
+        result["direction"] = "pause"
+        result["pause_reason"] = "buy_levels or sell_levels contains non-numeric values"
+        result["buy_levels"] = []
+        result["sell_levels"] = []
+        result["range_low"] = 0
+        result["range_high"] = 0
+        return result
+
+    # Direction-specific validation: check price levels are on correct side of current price
+    current_price = btc_price if btc_price > 0 else (swing_15m.get("current_price", 0) if swing_15m else 0)
+    if current_price > 0:
+        if direction == "long":
+            # Long grid: buys below price, sells above price
+            invalid_buys = [x for x in buy if x >= current_price]
+            invalid_sells = [x for x in sell if x <= current_price]
+            if invalid_buys:
+                result["pause"] = True
+                result["direction"] = "pause"
+                result["pause_reason"] = f"Long grid: buy levels must be below current price {current_price}, got {invalid_buys}"
+                result["buy_levels"] = []
+                result["sell_levels"] = []
+                result["range_low"] = 0
+                result["range_high"] = 0
+                return result
+            if invalid_sells:
+                result["pause"] = True
+                result["direction"] = "pause"
+                result["pause_reason"] = f"Long grid: sell levels must be above current price {current_price}, got {invalid_sells}"
+                result["buy_levels"] = []
+                result["sell_levels"] = []
+                result["range_low"] = 0
+                result["range_high"] = 0
+                return result
+        elif direction == "short":
+            # Short grid: sells below price (open shorts), buys above price (close shorts)
+            invalid_sells = [x for x in sell if x >= current_price]
+            invalid_buys = [x for x in buy if x <= current_price]
+            if invalid_sells:
+                result["pause"] = True
+                result["direction"] = "pause"
+                result["pause_reason"] = f"Short grid: sell levels must be below current price {current_price}, got {invalid_sells}"
+                result["buy_levels"] = []
+                result["sell_levels"] = []
+                result["range_low"] = 0
+                result["range_high"] = 0
+                return result
+            if invalid_buys:
+                result["pause"] = True
+                result["direction"] = "pause"
+                result["pause_reason"] = f"Short grid: buy levels must be above current price {current_price}, got {invalid_buys}"
+                result["buy_levels"] = []
+                result["sell_levels"] = []
+                result["range_low"] = 0
+                result["range_high"] = 0
+                return result
 
     return result
 

@@ -154,11 +154,17 @@ class GridManager:
     async def recover_position(self, btc_amount: float, btc_price: float, cfg: dict) -> dict:
         """Recover from a naked BTC long position.
 
-        Places sell orders above current price to exit the position,
-        and buy orders below for standard grid recovery.
+        ONLY places sell orders to exit the position. NO buy orders.
+        Once position is closed (all sells filled), the bot deploys a fresh grid
+        normally on the next cycle.
+
+        Position sizing tiers:
+        - <50% of equity: close fast, sells at/near current price
+        - 50-200% of equity: ladder sells above current price
+        - >200% of equity: aggressive exit — all sells at current price or below
 
         Returns:
-            {"safe": bool, "sell_levels": [...], "buy_levels": [...], "reason": ""}
+            {"safe": bool, "sell_levels": [...], "buy_levels": [], "reason": ""}
         """
         # First, cancel any existing stale orders
         await self.api.cancel_all_orders()
@@ -169,15 +175,7 @@ class GridManager:
 
         logging.info(f"Recovering position: {btc_amount:.6f} BTC = ${pos_value_usd:.2f} ({pos_pct:.1%} of equity)")
 
-        risk_cfg = cfg.get("risk", {})
-        # Safety: if position is >50% of equity, flag it
-        if pos_pct > 0.50:
-            msg = f"⚠️ Large position: {btc_amount:.6f} BTC (${pos_value_usd:.2f}) is {pos_pct:.1%} of equity. Recovery is risky."
-            logging.warning(msg)
-            # Still proceed - but warn
-
-        # Design recovery grid
-        # Use ATR-based spacing if available
+        # ── ATR-based spacing for sell laddering ───────────────────
         try:
             candles_15m = await fetch_candles("15m", limit=100)
             atr_data = calc_atr(candles_15m, period=14)
@@ -185,59 +183,74 @@ class GridManager:
         except Exception:
             atr = btc_price * 0.005  # fallback: 0.5% of price
 
-        # Split position into 3 sell levels
-        # First sell at current price (market-close soonest)
-        # Other sells at ATR intervals above to catch price dips
-        spacing = max(atr * 0.5, btc_price * 0.002)  # half ATR or 0.2%, whichever is larger
-        sell_size = btc_amount / 3
-
+        # ── Tier-based exit strategy ───────────────────────────────
+        spacing = max(atr * 0.5, btc_price * 0.002)  # half ATR or 0.2%
         sell_levels = []
-        for i in range(3):
-            sell_price = btc_price + (spacing * i)  # current, +spacing, +2*spacing
-            sell_levels.append(round(sell_price))
+        sell_sizes = []
 
-        # Place sell orders for the position
-        orders_to_place = []
-        for i, price in enumerate(sell_levels):
-            size = sell_size
-            if i == 2:
-                size = btc_amount - 2 * sell_size  # avoid rounding issues
-            orders_to_place.append(("sell", price, size))
+        if pos_pct > 2.0:
+            # Very large (>200% equity) — exit ASAP, sells at/below current price
+            num_sells = 3
+            sell_size = btc_amount / num_sells
+            for i in range(num_sells):
+                price = btc_price - (spacing * (num_sells - 1 - i))  # below, at, slightly above
+                sell_levels.append(round(price, 0))
+                sell_sizes.append(sell_size)
+            sell_sizes[-1] = btc_amount - sum(sell_sizes[:-1])  # fix rounding
+            msg = (
+                f"🚨 CRITICAL: Position {btc_amount:.6f} BTC (${pos_value_usd:.2f}) is {pos_pct:.0%} of equity\n"
+                f"Aggressive exit: {num_sells} sells below/at current price"
+            )
+        elif pos_pct > 0.50:
+            # Large (50-200% equity) — ladder sells above current price
+            num_sells = 4
+            sell_size = btc_amount / num_sells
+            for i in range(num_sells):
+                price = btc_price + (spacing * i * 0.7)  # tighter ladder
+                sell_levels.append(round(price, 0))
+                sell_sizes.append(sell_size)
+            sell_sizes[-1] = btc_amount - sum(sell_sizes[:-1])
+            msg = (
+                f"⚠️ Large position: {btc_amount:.6f} BTC (${pos_value_usd:.2f}) is {pos_pct:.0%} of equity\n"
+                f"Ladder exit: {num_sells} sells from ${sell_levels[0]:,.0f} to ${sell_levels[-1]:,.0f}"
+            )
+        else:
+            # Small (<50% equity) — close fast, 2 sells at current and slightly above
+            num_sells = 2
+            sell_size = btc_amount / num_sells
+            for i in range(num_sells):
+                price = btc_price + (spacing * 0.5 * i)
+                sell_levels.append(round(price, 0))
+                sell_sizes.append(sell_size)
+            sell_sizes[-1] = btc_amount - sum(sell_sizes[:-1])
+            msg = (
+                f"📉 Position: {btc_amount:.6f} BTC (${pos_value_usd:.2f}) is {pos_pct:.0%} of equity\n"
+                f"Quick exit: {num_sells} sells at ${sell_levels[0]:,.0f} / ${sell_levels[-1]:,.0f}"
+            )
 
-        # Place buy orders below for grid recovery
-        buy_levels = []
-        for i in range(3):
-            buy_price = btc_price - (spacing * (i + 1))
-            buy_level = round(buy_price)
-            buy_levels.append(buy_level)
-
-        buy_size = (equity * cfg["capital"]["max_exposure_multiplier"] * 0.1) / btc_price  # 10% of available
-
-        for price in buy_levels:
-            orders_to_place.append(("buy", price, buy_size))
-
-        # Place all orders
+        # ── Place ONLY sell orders (NO buys) ───────────────────────
         placed = []
-        for side, price, size in orders_to_place:
+        for i, (price, size) in enumerate(zip(sell_levels, sell_sizes)):
             try:
-                order = await self.api.place_limit_order(side, price, size)
+                order = await self.api.place_limit_order("sell", price, size)
                 order["status"] = "open"
-                order["layer"] = "recovery"  # tag as recovery orders
+                order["layer"] = "recovery"
+                order["exit_order"] = True  # mark as position exit, not grid
                 placed.append(order)
-                logging.info(f"Placed {side.upper()} @ ${price:,.0f} (recovery)")
+                logging.info(f"Placed EXIT SELL @ ${price:,.0f} · {size:.6f} BTC")
                 await asyncio.sleep(0.3)
             except Exception as e:
-                logging.error(f"Failed to place {side} @ ${price}: {e}")
+                logging.error(f"Failed to place exit sell @ ${price}: {e}")
 
-        # Update state
+        # ── State update: NO buy levels during recovery ────────────
         self.state.update({
             "active": True,
             "paused": False,
             "pause_reason": "",
-            "levels": {"buy": buy_levels, "sell": sell_levels},
-            "range_low": min(buy_levels),
+            "levels": {"buy": [], "sell": sell_levels},  # EMPTY buy list
+            "range_low": btc_price - spacing,  # approximate
             "range_high": max(sell_levels),
-            "size_per_level": sell_size,
+            "size_per_level": sell_sizes[0],
             "orders": placed,
             "equity_at_reset": equity,
             "recovering_position": True,
@@ -246,18 +259,12 @@ class GridManager:
         })
         self._save_state()
 
-        await send_alert(
-            f"♻️ Position recovery deployed\n"
-            f"Position: {btc_amount:.6f} BTC (${pos_value_usd:.2f})\n"
-            f"Sell levels: {sell_levels}\n"
-            f"Buy levels: {buy_levels}\n"
-            f"Equity: ${equity:.2f}"
-        )
+        await send_alert(f"♻️ Position recovery deployed\n{msg}")
 
         return {
             "safe": True,
             "sell_levels": sell_levels,
-            "buy_levels": buy_levels,
+            "buy_levels": [],  # NO buys during recovery
             "position_size": btc_amount,
             "position_value": pos_value_usd,
         }
@@ -530,6 +537,10 @@ class GridManager:
 
         # Place replacements for each fill
         for order in fills_processed:
+            # Skip replacement for recovery exit orders
+            if order.get("exit_order"):
+                logging.info(f"Exit order filled — no replacement (position being closed)")
+                continue
             await self._place_replacement(order, buy_levels, sell_levels, size, open_prices)
 
         # Update PnL metrics
@@ -547,6 +558,20 @@ class GridManager:
         # Remove filled orders from state to prevent re-detection
         self.state["orders"] = [o for o in self.state["orders"] if o.get("status") != "filled"]
         self._save_state()
+
+        # ── Check if position recovery is complete ──────────────────
+        if self.state.get("recovering_position") and self.state.get("position_size_btc", 0) > 0:
+            open_recovery_orders = [
+                o for o in self.state["orders"]
+                if o.get("layer") == "recovery" and o.get("status") == "open"
+            ]
+            if not open_recovery_orders:
+                # All exit sells filled — position is closed
+                self.state["recovering_position"] = False
+                self.state["position_size_btc"] = 0
+                self.state["position_value_usd"] = 0
+                self._save_state()
+                logging.info("Position recovery complete — all exit sells filled")
 
     async def _compute_candidate_levels(self, current_price: float) -> dict | None:
         """Fetch candles and indicators, generate candidate grid levels.

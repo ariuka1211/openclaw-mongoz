@@ -172,8 +172,8 @@ async def cmd_pause(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_resume(update: Update, context: ContextTypes.DEFAULT_TYPE):
     clear_command()
     STATE_DIR.mkdir(exist_ok=True)
-    with open(RESUME_FILE, "w") as f:
-        json.dump({"command": "resume", "ts": datetime.now(timezone.utc).isoformat()}, f)
+    with open(COMMAND_FILE, "w") as f:
+        json.dump({"command": "resume"}, f)
     await update.message.reply_text("🟢 Resume signal sent.\nThe bot will resume on next poll cycle (30s).")
 
 

@@ -17,7 +17,7 @@ from pathlib import Path
 import httpx
 import yaml
 from market_intel import gather_all_intel, format_market_intel
-from indicators import gather_indicators
+from indicators import gather_indicators, _format_regime
 
 # Load .env from workspace root
 _ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
@@ -168,6 +168,7 @@ def build_prompt(
     grid_history: str = "",
     account_context: str = "",
     spacing_guidance: str = "",
+    regime_label: str = "",
 ) -> str:
     """Build an enhanced LLM prompt with full context."""
     highs_15 = swing_15m.get("swing_highs", [])
@@ -205,6 +206,9 @@ for placing limit orders. Think about where price is LIKELY TO REVERSE, not wher
 {account_context}
 
 {indicators}
+
+## Market Regime Classification
+{regime_label}
 
 {market_intel}
 
@@ -368,6 +372,10 @@ async def run_analyst(cfg: dict, equity: float = 0, btc_price: float = 0, grid_m
         candles_15m = await fetch_candles("15m", limit=200)
         candles_30m = await fetch_candles("30m", limit=200)
         candles_4h = await fetch_candles("4H", limit=48)
+        try:
+            candles_1d = await fetch_candles("1D", limit=90)
+        except Exception:
+            candles_1d = []
     except Exception as e:
         return {
             "pause": True,
@@ -385,7 +393,7 @@ async def run_analyst(cfg: dict, equity: float = 0, btc_price: float = 0, grid_m
     market_intel_text = market_intel_data.get("formatted", "")
 
     # Calculate indicators
-    indicators_data = gather_indicators(candles_15m, candles_30m, candles_4h, market_intel_data)
+    indicators_data = gather_indicators(candles_15m, candles_30m, candles_4h, market_intel_data, candles_1d)
     indicators_text = indicators_data.get("formatted", "")
 
     # Pre-compute swing points to replace raw CSV (saves 70-80% tokens)
@@ -441,11 +449,14 @@ async def run_analyst(cfg: dict, equity: float = 0, btc_price: float = 0, grid_m
                 grid_history_text += f"  {emoji} Buy ${t['buy_price']:,.0f} → Sell ${t['sell_price']:,.0f} | PnL ${t['pnl']:.2f}\n"
 
     # Build prompt with all context
+    regime = indicators_data.get("regime", "unknown")
+    regime_label = _format_regime(regime)
     prompt = build_prompt(
         swing_15m, swing_30m, market_intel_text, indicators_text,
         grid_history=grid_history_text,
         account_context=account_context,
         spacing_guidance=spacing_guidance,
+        regime_label=regime_label,
     )
     result = await call_llm(prompt, cfg)
 

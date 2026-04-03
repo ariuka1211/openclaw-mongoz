@@ -8,6 +8,7 @@ def calculate_grid(
     atr_pct: float = None,     # NEW: ATR as % of price
     atr_spacing: float = None, # NEW: ATR-based spacing in USD
     vol_cfg: dict = None,      # NEW: volatility config overrides
+    compounding_mult: float = 1.0,  # Auto-compounding multiplier
 ) -> dict:
     """
     Returns:
@@ -54,6 +55,7 @@ def calculate_grid(
     safe_available = available * safety_factor
     size_per_level = (safe_available / total_levels) / btc_price
     size_per_level *= vol_adj  # Apply vol adjustment to size
+    size_per_level *= compounding_mult  # Apply auto-compounding
     adjusted_num_buy = None
     adjusted_num_sell = None
     
@@ -101,6 +103,7 @@ def calculate_grid(
         "adjusted_num_sell_levels": adjusted_num_sell,
         "vol_adj": round(vol_adj, 2),
         "atr_pct": round(atr_pct, 4) if atr_pct else None,
+        "compounding_mult": round(compounding_mult, 3),
     }
 
 
@@ -122,6 +125,8 @@ def print_safety_table(equity, btc_price, num_buy, num_sell, result, max_exposur
     if result.get("vol_adj") is not None and result["vol_adj"] != 1.0:
         atr_str = f" (ATR: {result['atr_pct']:.2%})" if result.get("atr_pct") else ""
         print(f"  Volatility adj:    {result['vol_adj']:.2f}x{atr_str}")
+    if result.get("compounding_mult") is not None and result["compounding_mult"] != 1.0:
+        print(f"  Compounding adj:   {result['compounding_mult']:.3f}x")
     print(f"  Worst case (all levels fill): ${result['worst_case_notional']:,.0f}")
     print()
     if result["safe"]:

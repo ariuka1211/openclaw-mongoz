@@ -14,6 +14,7 @@ Flow:
 import asyncio
 import json
 import logging
+import os
 import sys
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
@@ -24,7 +25,7 @@ from dotenv import load_dotenv
 from calculator import calculate_grid
 from grid import GridManager
 from lighter_api import LighterAPI
-from telegram import send_alert
+from tg_alerts import send_alert
 from analyst import run_analyst, fetch_candles
 from indicators import calc_ema_single
 
@@ -143,12 +144,17 @@ async def handle_resume(gm, api, cfg):
         pass
 
     vol_cfg = cfg.get("volatility", {})
+
+    # Auto-compounding multiplier
+    compounding_mult = gm._compounding_factor()
+
     calc = calculate_grid(
         equity, price, num_buy, num_sell,
         cfg["capital"]["max_exposure_multiplier"],
         cfg["capital"]["margin_reserve_pct"],
         atr_pct=atr_pct,
         vol_cfg=vol_cfg,
+        compounding_mult=compounding_mult,
     )
     if not calc["safe"]:
         msg = f"❌ Safety check failed — cannot resume: {calc['reason']}"
@@ -325,6 +331,10 @@ async def startup(cfg: dict) -> tuple[LighterAPI, GridManager, dict]:
         pass
 
     vol_cfg = cfg.get("volatility", {})
+
+    # Auto-compounding multiplier
+    compounding_mult = gm._compounding_factor()
+
     # Safety-check against the REAL level count
     calc = calculate_grid(
         equity, price, num_buy, num_sell,
@@ -332,6 +342,7 @@ async def startup(cfg: dict) -> tuple[LighterAPI, GridManager, dict]:
         cfg["capital"]["margin_reserve_pct"],
         atr_pct=atr_pct,
         vol_cfg=vol_cfg,
+        compounding_mult=compounding_mult,
     )
     if not calc["safe"]:
         msg = f"❌ Safety check failed: {calc['reason']}"
@@ -353,10 +364,26 @@ async def startup(cfg: dict) -> tuple[LighterAPI, GridManager, dict]:
 
 
 async def run_loop(api: LighterAPI, gm: GridManager, levels: dict, cfg: dict):
-    poll_interval = cfg["grid"]["poll_interval_seconds"]
     pnl_reported_today = False
 
+    config_mtime = os.path.getmtime(Path(__file__).parent / "config.yml")
+
     while True:
+        # ── Config hot-reload ────────────────────────────────────
+        config_path = Path(__file__).parent / "config.yml"
+        current_mtime = os.path.getmtime(config_path)
+        if current_mtime != config_mtime:
+            try:
+                old_poll = cfg["grid"].get("poll_interval_seconds")
+                with open(config_path) as f:
+                    cfg = yaml.safe_load(f)
+                new_poll = cfg["grid"].get("poll_interval_seconds")
+                config_mtime = current_mtime
+                log.info(f"Config reloaded · poll: {old_poll}s → {new_poll}s")
+            except Exception as e:
+                log.warning(f"Config hot-reload failed: {e} — keeping old config")
+
+        poll_interval = cfg["grid"].get("poll_interval_seconds", 30)
         await asyncio.sleep(poll_interval)
 
         # Check for telegram bot commands (pause, cancel, resume)
@@ -395,13 +422,29 @@ async def run_loop(api: LighterAPI, gm: GridManager, levels: dict, cfg: dict):
                     trades_count = len(gm.state.get("trades", []))
                     pending_buys = len(gm.state.get("pending_buys", []))
                     pnl_pct_str = f"{realized_pnl/equity_at_reset*100:.1f}%" if equity_at_reset > 0 else "0.0%"
+
+                    compounding_mult = gm._compounding_factor()
+                    trades = gm.state.get("trades", [])
+                    if trades:
+                        wins = sum(1 for t in trades if t.get("pnl", 0) >= 0)
+                        win_rate = wins / len(trades) * 100
+                        avg_pnl = sum(t.get("pnl", 0) for t in trades) / len(trades)
+                    else:
+                        win_rate = 0
+                        avg_pnl = 0
+
+                    win_emoji = "🎯" if win_rate > 0 else ""
+                    comp_emoji = "📈" if compounding_mult >= 1.0 else "📉"
                     await send_alert(
                         (
                             f"📊 Daily PnL Report · {now.strftime('%Y-%m-%d %H:%M UTC')}\n"
                             f"Starting Equity: ${equity_at_reset:.2f}\n"
                             f"Current Equity: ${equity:.2f}\n"
                             f"Realized PnL: ${realized_pnl:.2f} ({pnl_pct_str}%)\n"
-                            f"Completed trades: {trades_count} | Pending buys: {pending_buys}\n"
+                            f"Completed trades: {trades_count} | Win rate: {win_emoji} {win_rate:.0f}%\n"
+                            f"Avg PnL/trade: {avg_pnl:+.2f} USDC\n"
+                            f"{comp_emoji} Compounding: {compounding_mult:.2f}x\n"
+                            f"Pending buys: {pending_buys}\n"
                             f"Grid Range: ${gm.state['range_low']:.0f}–${gm.state['range_high']:.0f}"
                         )
                     )

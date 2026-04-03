@@ -20,7 +20,7 @@ from pathlib import Path
 
 from lighter_api import LighterAPI
 from calculator import calculate_grid
-from telegram import send_alert
+from tg_alerts import send_alert
 from indicators import calc_bollinger_bands, calc_atr, calc_trend_skew, calc_ema_single
 from analyst import fetch_candles
 
@@ -73,6 +73,77 @@ class GridManager:
         STATE_FILE.parent.mkdir(exist_ok=True)
         with open(STATE_FILE, "w") as f:
             json.dump(self.state, f, indent=2)
+
+    def _compounding_factor(self) -> float:
+        """Calculate a compounding multiplier based on PnL history.
+
+        Returns:
+          - >1.0 if grid is profitable (scale up sizing)
+          - <1.0 if grid is losing (scale down sizing)
+          - 1.0 on startup (no history)
+
+        Factors:
+          1. Win rate (weight: 40%)
+          2. Avg PnL per trade as % of equity (weight: 30%)
+          3. Recent momentum — last 5 trades vs all trades (weight: 30%)
+        """
+        trades = self.state.get("trades", [])
+        if len(trades) < 3:
+            return 1.0  # Not enough data
+
+        equity_at_reset = self.state.get("equity_at_reset", 0)
+        if equity_at_reset <= 0:
+            return 1.0
+
+        # --- Factor 1: Win rate ---
+        wins = sum(1 for t in trades if t.get("pnl", 0) >= 0)
+        win_rate = wins / len(trades)
+
+        if win_rate >= 0.70:
+            win_score = 1.0
+        elif win_rate >= 0.60:
+            win_score = 0.5
+        elif win_rate >= 0.50:
+            win_score = 0.0
+        else:
+            win_score = -0.5
+
+        # --- Factor 2: Avg PnL per trade as % of equity ---
+        total_pnl = sum(t.get("pnl", 0) for t in trades)
+        avg_pnl_pct = total_pnl / equity_at_reset / len(trades) * 100  # percent per trade
+
+        if avg_pnl_pct >= 0.5:
+            pnl_score = 1.0
+        elif avg_pnl_pct >= 0.1:
+            pnl_score = 0.5
+        elif avg_pnl_pct >= 0:
+            pnl_score = 0.0
+        else:
+            pnl_score = -1.0
+
+        # --- Factor 3: Recent momentum (last 5 vs all) ---
+        last_n = trades[-5:] if len(trades) > 5 else trades
+        recent_wr = sum(1 for t in last_n if t.get("pnl", 0) >= 0) / len(last_n)
+        all_wr = win_rate
+
+        if recent_wr > all_wr + 0.1:
+            momentum_score = 1.0  # improving
+        elif recent_wr > all_wr:
+            momentum_score = 0.5  # slightly improving
+        elif recent_wr > all_wr - 0.1:
+            momentum_score = 0.0  # flat
+        else:
+            momentum_score = -1.0  # deteriorating
+
+        # --- Combine with weights ---
+        compound_score = 0.4 * win_score + 0.3 * pnl_score + 0.3 * momentum_score
+
+        # Map score [-1, 1] to multiplier [0.7, 1.3]
+        # -1.0 → 0.7x, 0.0 → 1.0x, +1.0 → 1.3x
+        mult = 1.0 + 0.3 * compound_score
+        mult = max(0.7, min(1.3, mult))  # clamp
+
+        return round(mult, 3)
 
     # ── Order reconciliation ────────────────────────────────────
 
@@ -330,12 +401,17 @@ class GridManager:
             pass
 
         vol_cfg = cfg.get("volatility", {})
+
+        # Auto-compounding multiplier
+        compounding_mult = self._compounding_factor()
+
         calc = calculate_grid(
             equity, btc_price, num_buy, num_sell,
             cfg["capital"]["max_exposure_multiplier"],
             cfg["capital"]["margin_reserve_pct"],
             atr_pct=atr_pct,
             vol_cfg=vol_cfg if vol_cfg else None,
+            compounding_mult=compounding_mult,
         )
         if not calc["safe"]:
             logging.error(f"Capital check failed with position: {calc['reason']}")
@@ -525,6 +601,9 @@ class GridManager:
         # Load vol config from main config if present
         vol_cfg = self.cfg.get("volatility", {})
 
+        # Auto-compounding multiplier
+        compounding_mult = self._compounding_factor()
+
         # Run capital calculator
         calc = calculate_grid(
             equity, btc_price, num_buy, num_sell,
@@ -532,6 +611,7 @@ class GridManager:
             self.cfg["capital"]["margin_reserve_pct"],
             atr_pct=atr_pct,
             vol_cfg=vol_cfg,
+            compounding_mult=compounding_mult,
         )
         if not calc["safe"]:
             msg = f"🚨 Capital check FAILED: {calc['reason']}. Grid not deployed."
@@ -793,9 +873,13 @@ class GridManager:
             candles_15m = await fetch_candles("15m", limit=200)
             candles_30m = await fetch_candles("30m", limit=200)
             candles_4h = await fetch_candles("4H", limit=48)
+            try:
+                candles_1d = await fetch_candles("1D", limit=90)
+            except Exception:
+                candles_1d = []
             market_intel = await gather_all_intel(self.cfg)
 
-            indicators = gather_indicators(candles_15m, candles_30m, candles_4h, market_intel)
+            indicators = gather_indicators(candles_15m, candles_30m, candles_4h, market_intel, candles_1d)
             bands = indicators["bollinger"]
             atr = indicators["atr"]
             skew = indicators["skew"]

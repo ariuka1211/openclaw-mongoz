@@ -245,7 +245,7 @@ class TestGridStateDefaultDirection:
         os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
         STATE_PATH = tmp_path / "grid_state.json"
-        with patch("grid.STATE_FILE", STATE_PATH):
+        with patch("core.grid_manager.STATE_FILE", STATE_PATH):
             gm = GridManager.__new__(GridManager)
             gm.cfg = cfg
             gm.api = mock_api
@@ -448,9 +448,11 @@ class TestDeployShortGridIntegration:
             "note": "bearish",
         }
 
-        # Patch send_alert at the tg_alerts module level
-        with patch("tg_alerts.send_alert", new_callable=AsyncMock()):
-            await gm.deploy_short_grid(levels, equity=1000.0, btc_price=66000.0)
+        with patch("core.grid_manager.fetch_candles", new_callable=AsyncMock, return_value=[]), \
+             patch("core.grid_manager.calc_atr", return_value={"atr": 300, "atr_pct": 0.0046, "suggested_spacing": 150}) as _:  # low vol, no vol_adj
+             # Patch send_alert at the notifications module level
+             with patch("notifications.alerts.send_alert", new_callable=AsyncMock):
+                 await gm.deploy_short_grid(levels, equity=5000.0, btc_price=66000.0)
 
         # Verify sell orders were placed first
         sell_orders = [o for o in placed_orders if o["side"] == "sell"]

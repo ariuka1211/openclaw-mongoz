@@ -1,37 +1,47 @@
-# Session Handoff — 2026-04-02 (FINAL — All 7 Features)
+# Session Handoff — 2026-04-03 (AM)
 
 ## What happened
-Two sessions today. Added 7 features total via subagent swarm. All committed, pushed, bot restarted.
+Two feature batches + critical bug fixes.
 
-## All Features Shipped
-### Batch 1 (4 parallel subagents):
-1. **Volume Profile** — `calc_volume_profile()` replaces BB-based roll. HVN/LVN placement from combined 15m+30m+4H+1D candles. BB fallback if empty.
-2. **Funding Rate Awareness** — `funding_rate_adjustment()`. Extreme positive >0.1% → 0.4x sizing, negative → 1.1x. Multiplicative chain: `size = base × vol_adj × time_adj × funding_adj × compounding`
-3. **One-Sided Roll** — `roll_one_sided()`. Only replace tested side, keep other intact. Falls back to full roll if too few levels or >80% overlap.
-4. **Time-Aware Volatility** — `time_awareness_adjustment()`. Asian 0.7x, London 1.0x, NY overlap 1.2x.
+### Batch 1: Phase 2 — Short Grid Direction (commits d0251f7-384ecc2)
+- Short grids: bot can flip SHORT instead of pausing in downtrends
+- deploy_short_grid(), direction_score() (6-signal, -100/+100)
+- Safety overrides: never short during capitulation/long_squeeze
+- Min grid spacing: 1.0× ATR, min range: 5× ATRs (~$530)
+- Deployment snapshots with signal context in state/deployments/
+- 28 unit tests passing
 
-### Batch 2 (sequential):
-5. **Trailing Loss Limit** — `peak_equity` tracking via `risk.trailing_loss_pct: 0.04`. 4% trail from peak, never drops below static 8% floor.
+### Batch 2: Critical Bug Fixes (3 commits)
+- **d53d6c6**: recover_position() short fix — place BUY to cover shorts, not SELL
+- **5cb6ee0**: Dust position loop — skip recovery for < 1% equity
+- **fe359e5**: Remove premature AI pause bail, default direction = neutral_prefer_long
 
-### Batch 3 (2 parallel subagents):
-6. **OI Divergence Detection** — `get_open_interest_history()` + `oi_divergence()`. 4 states: long_squeeze (price↑ OI↓), capitulation (↓↓), new_shorts (↓↑), new_longs (↑↑). Influences roll decisions + LLM prompt.
-7. **Volume Spike Cooldown** — `detect_volume_spike()`. >2.5x avg volume → 1hr cooldown on roll + trend pause. Prevents over-reaction to panic candles.
+## The Short Disaster (root cause)
+Old recover_position() always placed SELL orders. When position was a SHORT (-0.024 BTC = $1,606, 1853% equity), it placed SELL orders that made the short bigger. Each restart grew the short: -0.0036 → -0.0071 → -0.0160 → -0.0240 BTC.
 
-## Current state
-- btc-grid-bot: ✅ running, restarted at 23:51 MDT
-- btc-grid-telegram: ✅ running
-- Equity: ~$86.72, BTC @ ~$66,571
+Fixed by detecting position sign, placing BUY to cover shorts, SELL to close longs. 3 exit BUYs filled, short closed. Net loss: ~$1.47 ($86.73 → $85.26 = -1.7%).
 
-## Commits on main
-- `ac0d6ae` feat: volume profile, funding rate awareness, one-sided roll, time-aware volatility
-- `2f891e5` feat: trailing loss limit
-- `163f8c9` feat: OI divergence detection + volume spike cooldown
+## Current State
+- btc-grid-bot: ✅ running on `fe359e5` (11:32 deploy)
+- BTC @ ~$66,842, equity ~$85.26
+- Grid: 5 BUYs ($65,700-$66,650) + 5 SELLs ($67,100-$69,200)
+- Size per level: 0.001432 BTC (~$96/level)
+- Direction: neutral_prefer_long (dust position detected but incorporated)
+- Next 06:00 UTC daily reset will use full direction scoring
 
-## Files modified
-- indicators.py (all new functions + gather_indicators integration)
-- analyst.py (new prompt sections for VP, funding, OI, volume spike)
-- grid.py (roll_one_sided, VP-based levels, OI-influenced rolls, spike cooldown)
-- calculator.py (time_adj + funding_adj params)
-- main.py (trailing loss, peak_equity, time/funding adj in startup/resume)
-- market_intel.py (OI history endpoint)
-- config.yml (trailing_loss_pct: 0.04)
+## Key Decisions
+- Long-only grid → directional grid (long/short/neutral_prefer_long) — approved
+- Position nets on Lighter, can't hold long + short simultaneously
+- Dust position threshold: < 1% equity → ignore in recover/AI pause logic
+- Dust but >= 1% and < 10% → incorporate into grid
+
+## Pending
+- 4% trailing stop check: equity is $85.26 vs high watermark?
+- Post-mortem after 5+ ATR deployment results come in
+- Volume quota concerns: used ~143 of remaining (8356 quota → 8356 remaining = barely touched)
+- Config.yml has uncommitted changes (contains secrets, .gitignored)
+
+## Git Status
+- On branch main, pushed to fe359e5
+- 6 total commits today
+- config.yml managed manually (secrets)

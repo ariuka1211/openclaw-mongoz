@@ -12,8 +12,16 @@ from pathlib import Path
 from datetime import datetime, timezone
 
 import yaml
+
+# ── Fix: prevent local telegram.py from shadowing python-telegram-bot ──
+import sys, importlib
+_sys_path = sys.path.copy()
+# Remove the script directory so 'import telegram' finds the package, not local file
+script_dir = str(Path(__file__).parent)
+sys.path = [p for p in sys.path if p != script_dir]
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
+sys.path = _sys_path
 
 logging.basicConfig(
     level=logging.INFO,

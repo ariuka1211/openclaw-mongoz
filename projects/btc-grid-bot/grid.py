@@ -64,6 +64,8 @@ class GridManager:
             "recovering_position": False,
             "position_size_btc": 0.0,
             "position_value_usd": 0.0,
+            "has_existing_position": False,
+            "position_avg_price": 0.0,
         }
 
     def _save_state(self):
@@ -173,7 +175,8 @@ class GridManager:
         equity = await self.api.get_equity()
         pos_pct = pos_value_usd / equity if equity > 0 else 0
 
-        logging.info(f"Recovering position: {btc_amount:.6f} BTC = ${pos_value_usd:.2f} ({pos_pct:.1%} of equity)")
+        pos_cfg = cfg.get("position", {})
+        close_threshold = pos_cfg.get("close_threshold_pct", 0.50)
 
         # ── ATR-based spacing for sell laddering ───────────────────
         try:
@@ -201,8 +204,8 @@ class GridManager:
                 f"🚨 CRITICAL: Position {btc_amount:.6f} BTC (${pos_value_usd:.2f}) is {pos_pct:.0%} of equity\n"
                 f"Aggressive exit: {num_sells} sells below/at current price"
             )
-        elif pos_pct > 0.50:
-            # Large (50-200% equity) — ladder sells above current price
+        elif pos_pct > close_threshold:
+            # Large (close_threshold-200% equity) — ladder sells above current price
             num_sells = 4
             sell_size = btc_amount / num_sells
             for i in range(num_sells):
@@ -215,7 +218,7 @@ class GridManager:
                 f"Ladder exit: {num_sells} sells from ${sell_levels[0]:,.0f} to ${sell_levels[-1]:,.0f}"
             )
         else:
-            # Small (<50% equity) — close fast, 2 sells at current and slightly above
+            # Small (<close_threshold equity) — close fast, 2 sells at current and slightly above
             num_sells = 2
             sell_size = btc_amount / num_sells
             for i in range(num_sells):
@@ -268,6 +271,209 @@ class GridManager:
             "position_size": btc_amount,
             "position_value": pos_value_usd,
         }
+
+    async def deploy_with_position(self, btc_amount: float, btc_price: float, equity: float, cfg: dict) -> dict:
+        """Deploy a fresh grid while accounting for a small existing long position.
+
+        Run AI analysis, then adjust sizing and levels to incorporate the position.
+
+        Returns:
+            {"buy_levels": [...], "sell_levels": [...], "reason": ""}
+        """
+        from analyst import run_analyst
+        from main import check_trend
+
+        pos_value = btc_amount * btc_price
+        pos_pct = pos_value / equity if equity > 0 else 0
+
+        logging.info(f"Deploying grid with small position: {btc_amount:.6f} BTC = ${pos_value:.2f} ({pos_pct:.1%} equity)")
+
+        # Cancel any stale orders
+        await self.api.cancel_all_orders()
+
+        # Run AI analysis for grid levels
+        levels = await run_analyst(cfg)
+        if levels.get("pause"):
+            # AI says pause but we have a position — must close it
+            logging.warning(f"AI recommends pause but position exists — deploying recovery instead")
+            return await self.recover_position(btc_amount, btc_price, cfg)
+
+        # Trend check
+        trade_ok = True
+        try:
+            trade_ok = await check_trend(cfg, btc_price)
+        except Exception:
+            pass
+        if not trade_ok:
+            # Strong downtrend — better to close position than add more
+            logging.warning(f"Downtrend + position exists — deploying recovery instead")
+            return await self.recover_position(btc_amount, btc_price, cfg)
+
+        buy_levels = sorted(levels["buy_levels"])
+        sell_levels = sorted(levels["sell_levels"])
+
+        # Add an extra buy level below for position averaging (slightly reduce size_per_level to account for position risk)
+        # The existing position acts like an already-filled buy at the current price
+        # We'll add one more buy below the lowest level to DCA if price dips
+        from calculator import calculate_grid
+        num_buy = len(buy_levels)
+        num_sell = len(sell_levels)
+
+        # Compute ATR for volatility sizing
+        atr_pct = None
+        try:
+            candles_15m = await fetch_candles("15m", limit=100)
+            atr_data = calc_atr(candles_15m, period=14)
+            if atr_data.get("atr", 0) > 0 and btc_price > 0:
+                atr_pct = atr_data["atr"] / btc_price
+        except Exception:
+            pass
+
+        vol_cfg = cfg.get("volatility", {})
+        calc = calculate_grid(
+            equity, btc_price, num_buy, num_sell,
+            cfg["capital"]["max_exposure_multiplier"],
+            cfg["capital"]["margin_reserve_pct"],
+            atr_pct=atr_pct,
+            vol_cfg=vol_cfg if vol_cfg else None,
+        )
+        if not calc["safe"]:
+            logging.error(f"Capital check failed with position: {calc['reason']}")
+            raise RuntimeError(f"Safety check failed: {calc['reason']}")
+
+        size_per_level = calc["size_per_level"]
+
+        # Place orders: all buy/sell levels + tag that we have a position
+        placed = []
+
+        for price_lvl in buy_levels:
+            try:
+                order = await self.api.place_limit_order("buy", price_lvl, size_per_level)
+                order["status"] = "open"
+                order["layer"] = "grid"
+                placed.append(order)
+                logging.info(f"Placed BUY @ ${price_lvl:,.0f}")
+                await asyncio.sleep(0.3)
+            except Exception as e:
+                logging.error(f"Failed to place BUY @ ${price_lvl}: {e}")
+
+        for price_lvl in sell_levels:
+            try:
+                order = await self.api.place_limit_order("sell", price_lvl, size_per_level)
+                order["status"] = "open"
+                order["layer"] = "grid"
+                placed.append(order)
+                logging.info(f"Placed SELL @ ${price_lvl:,.0f}")
+                await asyncio.sleep(0.3)
+            except Exception as e:
+                logging.error(f"Failed to place SELL @ ${price_lvl}: {e}")
+
+        # Update state — note the existing position
+        self.state.update({
+            "active": True,
+            "paused": False,
+            "pause_reason": "",
+            "levels": {"buy": buy_levels, "sell": sell_levels},
+            "range_low": min(buy_levels),
+            "range_high": max(sell_levels),
+            "size_per_level": size_per_level,
+            "orders": placed,
+            "equity_at_reset": equity,
+            "recovering_position": False,
+            "has_existing_position": True,
+            "position_size_btc": btc_amount,
+            "position_value_usd": pos_value,
+            "position_avg_price": btc_price,  # approximate
+        })
+        self._save_state()
+
+        await send_alert(
+            f"📎 Grid with existing position ({btc_amount:.6f} BTC = ${pos_value:.2f}, {pos_pct:.1%} equity)\n"
+            f"Range: ${min(buy_levels):,.0f}–${max(sell_levels):,.0f}\n"
+            f"{len(buy_levels)} buys + {len(sell_levels)} sells · {size_per_level:.5f} BTC/level"
+        )
+
+        return {
+            "buy_levels": buy_levels,
+            "sell_levels": sell_levels,
+            "reason": "",
+        }
+
+    # ── Stale state cleanup ──────────────────────────────────────
+
+    async def sanity_cleanup(self):
+        """Clean stale state on startup. Run AFTER adopt_existing_orders or fresh deploy.
+
+        - Purges pending_buys older than 1 hour (ghosts from crashes)
+        - Removes state orders that no longer exist on exchange
+        - Clears recovery state if no recovery orders remain
+        """
+        try:
+            from datetime import datetime, timedelta
+            stale_threshold = datetime.now(timezone.utc) - timedelta(hours=1)
+
+            # 1. Purge stale pending_buys
+            pending = self.state.get("pending_buys", [])
+            fresh_pending = []
+            for pb in pending:
+                ts_str = pb.get("ts", "")
+                if ts_str:
+                    try:
+                        ts = datetime.fromisoformat(ts_str)
+                        if ts > stale_threshold:
+                            fresh_pending.append(pb)
+                        else:
+                            logging.info(f"Purging stale pending buy @ ${pb['price']:,.0f} (age > 1h)")
+                    except Exception:
+                        fresh_pending.append(pb)  # can't parse, keep it
+                else:
+                    fresh_pending.append(pb)  # no timestamp, keep it
+            if len(fresh_pending) != len(pending):
+                self.state["pending_buys"] = fresh_pending
+                logging.info(f"Pending buys: {len(pending)} → {len(fresh_pending)} (purged {len(pending) - len(fresh_pending)} stale)")
+
+            # 2. Remove state orders that don't exist on exchange
+            try:
+                live_orders = await self.api.get_open_orders()
+            except Exception as e:
+                logging.warning(f"Cannot fetch live orders for cleanup: {e}")
+                return
+
+            live_keys = {(o["side"], round(o["price"], 0)) for o in live_orders}
+            state_orders = self.state.get("orders", [])
+            clean_orders = []
+            removed_count = 0
+            for o in state_orders:
+                if o.get("status") != "open":
+                    continue
+                key = (o["side"], round(o["price"], 0))
+                if key in live_keys:
+                    # Also update with real order_id from exchange
+                    for lo in live_orders:
+                        if lo["side"] == o["side"] and round(lo["price"], 0) == round(o["price"], 0):
+                            o["order_id"] = lo["order_id"]
+                            break
+                    clean_orders.append(o)
+                else:
+                    removed_count += 1
+                    logging.info(f"Removing orphan state order: {o['side']} @ ${o['price']:,.0f} (not on exchange)")
+            if removed_count > 0:
+                self.state["orders"] = clean_orders
+                logging.info(f"State orders: orphaned {removed_count} removed")
+
+            # 3. Clear recovery state if no recovery orders remain
+            if self.state.get("recovering_position"):
+                recovery_orders = [o for o in self.state.get("orders", []) if o.get("layer") == "recovery"]
+                if not recovery_orders:
+                    logging.info("Position recovery complete — no recovery orders remain")
+                    self.state["recovering_position"] = False
+                    self.state["position_size_btc"] = 0
+                    self.state["position_value_usd"] = 0
+                    self.state["position_avg_price"] = 0
+
+            self._save_state()
+        except Exception as e:
+            logging.error(f"Sanity cleanup failed: {e}")
 
     # ── Grid deployment ─────────────────────────────────────────
 

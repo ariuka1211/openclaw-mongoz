@@ -205,9 +205,9 @@ class LighterAPI:
                 raise RuntimeError(f"Order rejected: {result[2]}")
         
         # Wait for exchange to process and make order visible
-        # Try up to 3 times with 1 second delay between attempts
-        for attempt in range(3):
-            await asyncio.sleep(1.0)  # 1 second delay
+        # Try up to 10 times with 2 second delay between attempts
+        for attempt in range(10):
+            await asyncio.sleep(2.0)  # 2 second delay
             try:
                 orders = await self.get_open_orders()
                 # Find the order that matches side and price (it should be the one we just placed)

@@ -231,17 +231,36 @@ async def startup(cfg: dict) -> tuple[LighterAPI, GridManager, dict]:
         btc_balance = 0.0  # assume clean, proceed with caution
 
     if btc_balance > 0:
-        # Naked long position — recover
-        log.warning(f"⚠️ Found BTC position: {btc_balance:.6f} (${btc_balance * price:.2f})")
-        await send_alert(f"⚠️ Found unhedged position: {btc_balance:.6f} BTC = ${btc_balance * price:.2f}")
-        result = await gm.recover_position(btc_balance, price, cfg)
-        levels = {
-            "buy_levels": result["buy_levels"],
-            "sell_levels": result["sell_levels"],
-            "range_low": min(result["buy_levels"]) if result["buy_levels"] else price,
-            "range_high": max(result["sell_levels"]),
-        }
-        return api, gm, levels
+        pos_value = btc_balance * price
+        pos_pct = pos_value / equity if equity > 0 else 0
+
+        log.warning(f"⚠️ Found BTC position: {btc_balance:.6f} (${pos_value:.2f} = {pos_pct:.1%} equity)")
+
+        if pos_pct < 0.10:
+            # Small position — incorporate into fresh grid
+            await send_alert(
+                f"📎 Small position detected: {btc_balance:.6f} BTC (${pos_value:.2f}, {pos_pct:.1%} equity)\n"
+                f"Building grid around position..."
+            )
+            result = await gm.deploy_with_position(btc_balance, price, equity, cfg)
+            levels = {
+                "buy_levels": result["buy_levels"],
+                "sell_levels": result["sell_levels"],
+                "range_low": min(result["buy_levels"]),
+                "range_high": max(result["sell_levels"]),
+            }
+            return api, gm, levels
+        else:
+            # Medium or large position — close it
+            await send_alert(f"⚠️ Found position to close: {btc_balance:.6f} BTC = ${pos_value:.2f} ({pos_pct:.1%} equity)")
+            result = await gm.recover_position(btc_balance, price, cfg)
+            levels = {
+                "buy_levels": result["buy_levels"],
+                "sell_levels": result["sell_levels"],
+                "range_low": min(result["buy_levels"]) if result["buy_levels"] else price,
+                "range_high": max(result["sell_levels"]),
+            }
+            return api, gm, levels
 
     # ── 2. Check for existing orders ─────────────────────────────
     if await gm.adopt_existing_orders(price):
@@ -259,6 +278,9 @@ async def startup(cfg: dict) -> tuple[LighterAPI, GridManager, dict]:
             f"Equity: ${equity:.2f}"
         )
         return api, gm, levels
+
+    # ── 4. Sanity cleanup (always run) ───────────────────────────
+    await gm.sanity_cleanup()
 
     # ── 3. Fresh deploy ──────────────────────────────────────────
     await send_alert("🔍 Running market analysis...")

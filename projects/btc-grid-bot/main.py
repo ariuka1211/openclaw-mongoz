@@ -270,7 +270,7 @@ async def startup(cfg: dict) -> tuple[LighterAPI, GridManager, dict]:
         log.warning(f"⚠️ Found BTC {side}.position: {btc_balance:.6f} (${pos_value:.2f} = {pos_pct:.1%} equity)")
 
         if pos_pct < 0.10:
-            # Small position — incorporate into fresh grid
+            # Small position (<10% equity) — incorporate into fresh grid
             await send_alert(
                 f"📎 Small {side} position detected: {btc_balance:.6f} BTC (${pos_value:.2f}, {pos_pct:.1%} equity)\n"
                 f"Building grid around position..."
@@ -284,11 +284,15 @@ async def startup(cfg: dict) -> tuple[LighterAPI, GridManager, dict]:
             except Exception:
                 pass
             result = await gm.deploy_with_position(btc_balance, price, equity, cfg, funding_adj=funding_adj)
+            if not result["buy_levels"] and not result["sell_levels"]:
+                # deploy_with_position returned empty (AI pause with tiny position) — exit gracefully
+                log.warning("deploy_with_position returned no levels — exiting gracefully")
+                sys.exit(1)
             levels = {
                 "buy_levels": result["buy_levels"],
                 "sell_levels": result["sell_levels"],
-                "range_low": min(result["buy_levels"]),
-                "range_high": max(result["sell_levels"]),
+                "range_low": min(result["buy_levels"]) if result["buy_levels"] else price,
+                "range_high": max(result["sell_levels"]) if result["sell_levels"] else price,
             }
             return api, gm, levels
         else:

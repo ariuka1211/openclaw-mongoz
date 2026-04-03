@@ -525,7 +525,12 @@ class GridManager:
         # Run AI analysis for grid levels
         levels = await run_analyst(cfg)
         if levels.get("pause"):
-            # AI says pause but we have a position - must close it
+            # AI says pause
+            if abs(pos_pct) < 0.01:
+                # Dust position — just exit, no grid this cycle
+                logging.warning(f"AI says pause with dust position ({pos_pct:.1%}) — exiting. No grid deployed.")
+                sys.exit(1)
+            # Real position — must close it
             logging.warning(f"AI recommends pause but position exists - deploying recovery instead")
             return await self.recover_position(btc_amount, btc_price, cfg)
 
@@ -537,7 +542,12 @@ class GridManager:
         except Exception:
             pass
         if direction_ok == "pause":
-            # Strong bearish signals — better to close position than add more
+            # Strong bearish signals
+            if abs(pos_pct) < 0.01:
+                # Dust position — just exit, no grid this cycle
+                logging.warning(f"Direction score says pause with dust position ({pos_pct:.1%}) — exiting. No grid deployed.")
+                sys.exit(1)
+            # Real position — better to close position than add more
             logging.warning(f"Direction score says pause + position exists - deploying recovery instead")
             return await self.recover_position(btc_amount, btc_price, cfg)
 

@@ -1,3 +1,6 @@
+import logging
+
+
 def calculate_grid(
     account_equity: float,
     btc_price: float,
@@ -47,10 +50,10 @@ def calculate_grid(
 
     # Log the adjustment
     if vol_adj != 1.0 and atr_pct:
-        print(f"Volatility adj: {vol_adj:.2f}x (ATR: {atr_pct:.2%})")
+        logging.debug(f"Volatility adj: {vol_adj:.2f}x (ATR: {atr_pct:.2%})")
 
     if direction == "short":
-        print("Direction: short — margin calculation same but monitoring for short squeeze risk")
+        logging.debug("Direction: short — margin calculation same but monitoring for short squeeze risk")
 
     max_notional = account_equity * max_exposure_mult
     reserved = account_equity * margin_reserve_pct
@@ -173,31 +176,3 @@ def print_safety_table(equity, btc_price, num_buy, num_sell, result, max_exposur
     print()
     print(f"  {status}")
     print("═" * 45)
-
-
-async def main():
-    """Run standalone: python calculator.py"""
-    with open("config.yml") as f:
-        cfg = yaml.safe_load(f)
-
-    api = LighterAPI(cfg)
-    equity = await api.get_equity()
-    btc_price = await api.get_btc_price()
-
-    num_buy = cfg["grid"]["max_levels"] // 2
-    num_sell = cfg["grid"]["max_levels"] // 2
-
-    # Load volatility config section if present
-    vol_cfg = cfg.get("volatility", {})
-    result = calculate_grid(
-        equity, btc_price, num_buy, num_sell,
-        cfg["capital"]["max_exposure_multiplier"],
-        cfg["capital"]["margin_reserve_pct"],
-        atr_pct=None,  # Standalone mode: no ATR passed
-        vol_cfg=vol_cfg,
-    )
-    print_safety_table(equity, btc_price, num_buy, num_sell, result)
-
-
-if __name__ == "__main__":
-    asyncio.run(main())

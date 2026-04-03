@@ -286,13 +286,13 @@ class LighterAPI:
                 if hasattr(account, 'positions') and account.positions:
                     for pos in account.positions:
                         if pos.market_id == BTC_MARKET_ID:
-                            # Lighter stores position as signed integer
+                            # Lighter `position` is a float string (e.g. "0.00198")
                             # `sign`: 1 for long, -1 for short
-                            # `position`: integer size
-                            pos_int = int(pos.position)
-                            if pos_int != 0:
-                                # Convert from integer to float using size decimals
-                                pos_size = pos_int / (10 ** self._size_decimals)
+                            try:
+                                pos_size = float(pos.position)
+                            except (ValueError, TypeError):
+                                pos_size = 0.0
+                            if pos_size != 0:
                                 sign = int(pos.sign) if pos.sign else 1
                                 pos_size = pos_size * sign  # negative for shorts
                                 return pos_size

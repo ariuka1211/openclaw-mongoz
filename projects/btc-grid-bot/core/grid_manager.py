@@ -512,7 +512,7 @@ class GridManager:
             {"buy_levels": [...], "sell_levels": [...], "reason": ""}
         """
         from analysis.analyst import run_analyst
-        from main import check_direction
+        from analysis.direction import check_direction
 
         pos_value = btc_amount * btc_price
         pos_pct = pos_value / equity if equity > 0 else 0

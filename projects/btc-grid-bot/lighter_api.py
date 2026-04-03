@@ -286,9 +286,16 @@ class LighterAPI:
                 if hasattr(account, 'positions') and account.positions:
                     for pos in account.positions:
                         if pos.market_id == BTC_MARKET_ID:
-                            base_amount = float(pos.base_amount)
-                            if base_amount != 0:
-                                return base_amount / (10 ** self._size_decimals)
+                            # Lighter stores position as signed integer
+                            # `sign`: 1 for long, -1 for short
+                            # `position`: integer size
+                            pos_int = int(pos.position)
+                            if pos_int != 0:
+                                # Convert from integer to float using size decimals
+                                pos_size = pos_int / (10 ** self._size_decimals)
+                                sign = int(pos.sign) if pos.sign else 1
+                                pos_size = pos_size * sign  # negative for shorts
+                                return pos_size
                 return 0.0
             raise RuntimeError("No accounts found")
         except Exception as e:

@@ -493,21 +493,28 @@ async def run_loop(api: LighterAPI, gm: GridManager, levels: dict, cfg: dict):
             if now.hour == 0:
                 pnl_reported_today = False
 
-            # Check daily loss limit (8% drop from equity at reset)
+            # Trailing loss limit check (replaces static daily loss limit)
             if gm.state["active"] and not gm.state["paused"]:
                 equity = await api.get_equity()
                 equity_at_reset = gm.state.get("equity_at_reset", equity)
-                loss_pct = (equity_at_reset - equity) / equity_at_reset
-                if loss_pct > cfg["risk"]["daily_loss_limit_pct"]:
-                    loss_reason = f"Daily loss limit hit: {loss_pct:.1%} drop from reset equity"
-                    set_loss_lockout(loss_reason)
-                    await gm._pause(loss_reason)
-                    await send_alert(
-                        f"🚨 Daily loss limit reached!\n"
-                        f"Equity dropped {loss_pct:.1%} from reset.\n"
-                        f"Starting: ${equity_at_reset:.2f} → Now: ${equity:.2f}\n"
-                        f"🔒 Locked for 24h — delete state/loss_lockout.json to override"
-                    )
+                peak_equity = max(gm.state.get("peak_equity", equity_at_reset), equity)
+                gm.state["peak_equity"] = peak_equity
+
+                trailing_loss_pct = cfg["risk"].get("trailing_loss_pct", 0.04)
+                trailing_stop = peak_equity * (1 - trailing_loss_pct)
+                static_floor = equity_at_reset * (1 - cfg["risk"]["daily_loss_limit_pct"])
+                effective_stop = max(trailing_stop, static_floor)
+
+                if equity < effective_stop:
+                    # Trigger lockout
+                    if trailing_stop > static_floor:
+                        reason = f"Trailing loss hit: equity ${equity:.2f} dropped {((peak_equity - equity)/peak_equity)*100:.1f}% from peak ${peak_equity:.2f}. Stop was ${effective_stop:.2f}."
+                    else:
+                        loss_pct = (equity_at_reset - equity) / equity_at_reset
+                        reason = f"Daily loss limit hit: equity ${equity:.2f} dropped {loss_pct:.1%} from reset"
+                    set_loss_lockout(reason)
+                    await gm._pause(reason)
+                    await send_alert(f"🚨 LOSS LIMIT REACHED!\n{reason}\n🔒 Locked for 24h")
                     return
 
             # If paused (price left range), wait for manual restart

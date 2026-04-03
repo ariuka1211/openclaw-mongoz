@@ -327,6 +327,7 @@ class GridManager:
             "size_per_level": sell_sizes[0],
             "orders": placed,
             "equity_at_reset": equity,
+            "peak_equity": equity,  # starts at reset equity
             "recovering_position": True,
             "position_size_btc": btc_amount,
             "position_value_usd": pos_value_usd,
@@ -456,6 +457,7 @@ class GridManager:
             "size_per_level": size_per_level,
             "orders": placed,
             "equity_at_reset": equity,
+            "peak_equity": equity,  # starts at reset equity
             "recovering_position": False,
             "has_existing_position": True,
             "position_size_btc": btc_amount,
@@ -666,6 +668,7 @@ class GridManager:
             "orders": placed_orders,
             "last_reset": datetime.now(timezone.utc).isoformat(),
             "equity_at_reset": equity,
+            "peak_equity": equity,  # starts at reset equity, only increases
             "daily_pnl": 0.0,
             "fill_count": 0,
         })

@@ -9,6 +9,8 @@ def calculate_grid(
     atr_spacing: float = None, # NEW: ATR-based spacing in USD
     vol_cfg: dict = None,      # NEW: volatility config overrides
     compounding_mult: float = 1.0,  # Auto-compounding multiplier
+    time_adj: float = 1.0,          # Time-of-day adjustment multiplier
+    funding_adj: float = 1.0,       # Funding rate adjustment multiplier
 ) -> dict:
     """
     Returns:
@@ -56,6 +58,8 @@ def calculate_grid(
     size_per_level = (safe_available / total_levels) / btc_price
     size_per_level *= vol_adj  # Apply vol adjustment to size
     size_per_level *= compounding_mult  # Apply auto-compounding
+    size_per_level *= time_adj  # Apply time-of-day adjustment
+    size_per_level *= funding_adj  # Apply funding rate adjustment
     adjusted_num_buy = None
     adjusted_num_sell = None
     
@@ -80,12 +84,16 @@ def calculate_grid(
                     "adjusted_num_sell_levels": None,
                     "vol_adj": round(vol_adj, 2),
                     "atr_pct": round(atr_pct, 4) if atr_pct else None,
+                    "time_adj": round(time_adj, 2),
+                    "funding_adj": round(funding_adj, 2),
                 }
             adjusted_num_buy = max(1, int(num_buy_levels * (max_levels / total_levels)))
             adjusted_num_sell = max(1, int(num_sell_levels * (max_levels / total_levels)))
             total_levels = adjusted_num_buy + adjusted_num_sell
             size_per_level = (available * safety_factor) / (total_levels * btc_price)
             size_per_level *= vol_adj  # Re-apply vol adjustment after min size fix
+            size_per_level *= time_adj  # Re-apply time adj after min size fix
+            size_per_level *= funding_adj  # Re-apply funding adj after min size fix
     
     worst_case_notional = total_levels * size_per_level * btc_price
 
@@ -104,6 +112,8 @@ def calculate_grid(
         "vol_adj": round(vol_adj, 2),
         "atr_pct": round(atr_pct, 4) if atr_pct else None,
         "compounding_mult": round(compounding_mult, 3),
+        "time_adj": round(time_adj, 2),
+        "funding_adj": round(funding_adj, 2),
     }
 
 
@@ -125,8 +135,12 @@ def print_safety_table(equity, btc_price, num_buy, num_sell, result, max_exposur
     if result.get("vol_adj") is not None and result["vol_adj"] != 1.0:
         atr_str = f" (ATR: {result['atr_pct']:.2%})" if result.get("atr_pct") else ""
         print(f"  Volatility adj:    {result['vol_adj']:.2f}x{atr_str}")
+    if result.get("time_adj") is not None and result["time_adj"] != 1.0:
+        print(f"  Time adj:          {result['time_adj']:.2f}x")
     if result.get("compounding_mult") is not None and result["compounding_mult"] != 1.0:
         print(f"  Compounding adj:   {result['compounding_mult']:.3f}x")
+    if result.get("funding_adj") is not None and result["funding_adj"] != 1.0:
+        print(f"  Funding adj:       {result['funding_adj']:.2f}x")
     print(f"  Worst case (all levels fill): ${result['worst_case_notional']:,.0f}")
     print()
     if result["safe"]:

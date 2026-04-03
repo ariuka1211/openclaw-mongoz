@@ -17,7 +17,7 @@ from pathlib import Path
 import httpx
 import yaml
 from market_intel import gather_all_intel, format_market_intel
-from indicators import gather_indicators, _format_regime
+from indicators import gather_indicators, _format_regime, funding_rate_adjustment
 
 # Load .env from workspace root
 _ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
@@ -169,6 +169,8 @@ def build_prompt(
     account_context: str = "",
     spacing_guidance: str = "",
     regime_label: str = "",
+    volume_profile: str = "",
+    funding_context: str = "",
 ) -> str:
     """Build an enhanced LLM prompt with full context."""
     highs_15 = swing_15m.get("swing_highs", [])
@@ -209,6 +211,10 @@ for placing limit orders. Think about where price is LIKELY TO REVERSE, not wher
 
 ## Market Regime Classification
 {regime_label}
+
+{volume_profile}
+
+{funding_context}
 
 {market_intel}
 
@@ -451,12 +457,35 @@ async def run_analyst(cfg: dict, equity: float = 0, btc_price: float = 0, grid_m
     # Build prompt with all context
     regime = indicators_data.get("regime", "unknown")
     regime_label = _format_regime(regime)
+    volume_profile_text = indicators_data.get("volume_profile", {}).get("formatted", "")
+    
+    # Funding rate context
+    funding_data = indicators_data.get("funding_adj", {})
+    if funding_data:
+        current = market_intel_data.get("current", {})
+        funding_rate = current.get("funding_rate", 0)
+        adj_mult = funding_data.get("adj_multiplier", 1.0)
+        warning = funding_data.get("warning")
+        
+        funding_context = f"""## Funding Rate Context
+- Current funding rate: {funding_rate*100:.4f}% per 8h
+- Grid size adjustment: {adj_mult:.2f}x
+- Implication: {funding_data.get('label', 'Normal funding')}
+"""
+        if warning:
+            funding_context += f"- ⚠️ **{warning}**\n"
+        funding_context += "Extreme funding rates increase liquidation squeeze risk. The bot will auto-adjust position sizing.\n"
+    else:
+        funding_context = ""
+    
     prompt = build_prompt(
         swing_15m, swing_30m, market_intel_text, indicators_text,
         grid_history=grid_history_text,
         account_context=account_context,
         spacing_guidance=spacing_guidance,
         regime_label=regime_label,
+        volume_profile=volume_profile_text,
+        funding_context=funding_context,
     )
     result = await call_llm(prompt, cfg)
 

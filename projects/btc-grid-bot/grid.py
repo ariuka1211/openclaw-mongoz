@@ -21,7 +21,7 @@ from pathlib import Path
 from lighter_api import LighterAPI
 from calculator import calculate_grid
 from tg_alerts import send_alert
-from indicators import calc_bollinger_bands, calc_atr, calc_trend_skew, calc_ema_single
+from indicators import calc_bollinger_bands, calc_atr, calc_trend_skew, calc_ema_single, calc_volume_profile
 from analyst import fetch_candles
 
 STATE_FILE = Path("state/grid_state.json")
@@ -343,7 +343,7 @@ class GridManager:
             "position_value": pos_value_usd,
         }
 
-    async def deploy_with_position(self, btc_amount: float, btc_price: float, equity: float, cfg: dict) -> dict:
+    async def deploy_with_position(self, btc_amount: float, btc_price: float, equity: float, cfg: dict, funding_adj: float = 1.0):
         """Deploy a fresh grid while accounting for a small existing long position.
 
         Run AI analysis, then adjust sizing and levels to incorporate the position.
@@ -412,6 +412,7 @@ class GridManager:
             atr_pct=atr_pct,
             vol_cfg=vol_cfg if vol_cfg else None,
             compounding_mult=compounding_mult,
+            funding_adj=funding_adj,
         )
         if not calc["safe"]:
             logging.error(f"Capital check failed with position: {calc['reason']}")
@@ -553,7 +554,7 @@ class GridManager:
 
     # ── Grid deployment ─────────────────────────────────────────
 
-    async def deploy(self, levels: dict, equity: float, btc_price: float, roll_info: dict | None = None):
+    async def deploy(self, levels: dict, equity: float, btc_price: float, roll_info: dict | None = None, time_adj: float = 1.0, funding_adj: float = 1.0):
         """
         Deploy a new grid from AI analyst output.
 
@@ -612,6 +613,8 @@ class GridManager:
             atr_pct=atr_pct,
             vol_cfg=vol_cfg,
             compounding_mult=compounding_mult,
+            time_adj=time_adj,
+            funding_adj=funding_adj,
         )
         if not calc["safe"]:
             msg = f"🚨 Capital check FAILED: {calc['reason']}. Grid not deployed."
@@ -859,7 +862,7 @@ class GridManager:
                 self._save_state()
                 logging.info("Position recovery complete — all exit sells filled")
 
-    async def _compute_candidate_levels(self, current_price: float) -> dict | None:
+    async def _compute_candidate_levels(self, current_price: float) -> tuple[dict | None, float]:
         """Fetch candles and indicators, generate candidate grid levels.
 
         Returns None on any error (do not proceed with roll).
@@ -883,11 +886,14 @@ class GridManager:
             bands = indicators["bollinger"]
             atr = indicators["atr"]
             skew = indicators["skew"]
+            time_adj = indicators.get("time_awareness", {}).get("adj_multiplier", 1.0)
+            funding_adj = indicators.get("funding_adj", {}).get("adj_multiplier", 1.0)
 
-            return self.generate_levels_from_bands(bands, atr, skew, current_price)
+            vp = indicators.get("volume_profile", {})
+            return self.generate_levels_from_volume_profile(vp, bands, atr, skew, current_price), time_adj, funding_adj
         except Exception as e:
             logging.error(f"Failed to compute candidate levels for roll: {e}")
-            return None
+            return None, 1.0, 1.0
 
     @staticmethod
     def _levels_overlap(old_buy: list, old_sell: list, new_buy: list, new_sell: list) -> float:
@@ -1009,15 +1015,226 @@ class GridManager:
             logging.error(f"Unexpected error in _place_replacement: {e}")
             await send_alert(f"⚠️ Unexpected error in _place_replacement: {e}")
 
+    # ── One-sided rolling ────────────────────────────────────────
+
+    def _count_side_levels(self, side: str) -> int:
+        """Count active open orders on one side (buy or sell)."""
+        orders = self.state.get("orders", [])
+        return sum(1 for o in orders if o.get("status") == "open" and o.get("side") == side)
+
+    async def roll_one_sided(self, current_price: float, direction: str, new_levels: dict) -> bool:
+        """Roll only one side of the grid, keeping the other side intact.
+
+        Args:
+            current_price: Current BTC price
+            direction: "up" (price hit top — new sells needed) or "down" (price hit bottom — new buys needed)
+            new_levels: Dict with keys "buy_levels" and "sell_levels" from volume profile or BB fallback
+
+        Returns:
+            True if roll was performed, False if error
+        """
+        try:
+            logging.info(f"One-sided roll ({direction}) at ${current_price:,.0f}")
+
+            size_per_level = self.state.get("size_per_level", 0)
+            if size_per_level <= 0:
+                logging.error("size_per_level is zero or negative — cannot roll")
+                return False
+
+            if direction == "up":
+                # Price hit top — cancel SELL orders, place new SELL orders above current price
+                # Keep BUY orders intact
+                logging.info("Cancelling SELL orders, keeping BUY orders intact")
+
+                # Cancel only sell orders
+                cancelled_count = 0
+                for o in self.state.get("orders", []):
+                    if o.get("status") == "open" and o.get("side") == "sell":
+                        try:
+                            await self.api.cancel_order(o.get("order_id"))
+                            o["status"] = "cancelled"
+                            cancelled_count += 1
+                            await asyncio.sleep(0.1)
+                        except Exception as e:
+                            logging.error(f"Failed to cancel sell @ ${o['price']}: {e}")
+
+                # Place new sell orders from the relevant side of new_levels
+                new_sell_prices = new_levels.get("sell_levels", [])
+                if not new_sell_prices:
+                    logging.warning("No sell levels in new_levels — cannot complete one-sided roll")
+                    return False
+
+                placed = []
+                for price in new_sell_prices:
+                    if price <= current_price:
+                        continue  # Skip levels not above current price
+                    try:
+                        order = await self.api.place_limit_order("sell", price, size_per_level)
+                        order["status"] = "open"
+                        order["layer"] = "grid"
+                        placed.append(order)
+                        logging.info(f"Placed SELL @ ${price:,.0f}")
+                        await asyncio.sleep(0.3)
+                    except Exception as e:
+                        logging.error(f"Failed to place SELL @ ${price}: {e}")
+
+                # Update state: replace sell side, keep buy side
+                self.state["levels"]["sell"] = new_sell_prices
+                # Update range_high based on new sell levels
+                self.state["range_high"] = max(new_sell_prices) if new_sell_prices else self.state["range_high"]
+
+                # Clean up cancelled orders, append new ones
+                self.state["orders"] = [o for o in self.state["orders"] if o.get("status") != "cancelled"]
+                self.state["orders"].extend(placed)
+
+                logging.info(f"One-sided roll (up): cancelled {cancelled_count} sells, placed {len(placed)} new sells")
+
+            elif direction == "down":
+                # Price hit bottom — cancel BUY orders, place new BUY orders below current price
+                # Keep SELL orders intact
+                logging.info("Cancelling BUY orders, keeping SELL orders intact")
+
+                # Cancel only buy orders
+                cancelled_count = 0
+                for o in self.state.get("orders", []):
+                    if o.get("status") == "open" and o.get("side") == "buy":
+                        try:
+                            await self.api.cancel_order(o.get("order_id"))
+                            o["status"] = "cancelled"
+                            cancelled_count += 1
+                            await asyncio.sleep(0.1)
+                        except Exception as e:
+                            logging.error(f"Failed to cancel buy @ ${o['price']}: {e}")
+
+                # Place new buy orders from the relevant side of new_levels
+                new_buy_prices = new_levels.get("buy_levels", [])
+                if not new_buy_prices:
+                    logging.warning("No buy levels in new_levels — cannot complete one-sided roll")
+                    return False
+
+                placed = []
+                for price in new_buy_prices:
+                    if price >= current_price:
+                        continue  # Skip levels not below current price
+                    try:
+                        order = await self.api.place_limit_order("buy", price, size_per_level)
+                        order["status"] = "open"
+                        order["layer"] = "grid"
+                        placed.append(order)
+                        logging.info(f"Placed BUY @ ${price:,.0f}")
+                        await asyncio.sleep(0.3)
+                    except Exception as e:
+                        logging.error(f"Failed to place BUY @ ${price}: {e}")
+
+                # Update state: replace buy side, keep sell side
+                self.state["levels"]["buy"] = new_buy_prices
+                # Update range_low based on new buy levels
+                self.state["range_low"] = min(new_buy_prices) if new_buy_prices else self.state["range_low"]
+
+                # Clean up cancelled orders, append new ones
+                self.state["orders"] = [o for o in self.state["orders"] if o.get("status") != "cancelled"]
+                self.state["orders"].extend(placed)
+
+                logging.info(f"One-sided roll (down): cancelled {cancelled_count} buys, placed {len(placed)} new buys")
+            else:
+                logging.error(f"Invalid direction for one-sided roll: {direction}")
+                return False
+
+            # Update roll metadata
+            self.state["roll_count"] = self.state.get("roll_count", 0) + 1
+            self.state["last_roll"] = datetime.now(timezone.utc).isoformat()
+            self._save_state()
+
+            return True
+
+        except Exception as e:
+            logging.error(f"One-sided roll failed: {e}")
+            return False
+
     # ── Rolling Grid ─────────────────────────────────────────────
 
     @staticmethod
-    def generate_levels_from_bands(bands: dict, atr: dict, skew: dict, current_price: float) -> dict:
-        """Generate grid levels from Bollinger Bands + ATR + Trend Skew.
+    def generate_levels_from_volume_profile(vp: dict, bands: dict, atr: dict, skew: dict, current_price: float) -> dict:
+        """Generate grid levels from Volume Profile with Bollinger Bands fallback.
+
+        Uses volume profile nodes (HVN) to place buy levels below price
+        and sell levels above price. POC (Point of Control) influences density.
+
+        Falls back to Bollinger Bands logic if volume profile returns empty nodes.
+
+        Returns same format as analyst output:
+        {"buy_levels": [...], "sell_levels": [...], "range_low": X, "range_high": Y}
+        """
+        hvn = vp.get("hvn", [])
+        lvn = vp.get("lvn", [])
+        poc = vp.get("poc", 0)
+
+        # Fallback: if volume profile has no useful data, use BB bands
+        if not hvn or poc == 0:
+            return GridManager._generate_levels_from_bands(bands, atr, skew, current_price)
+
+        spacing = atr["suggested_spacing"]
+        if spacing <= 0:
+            spacing = current_price * 0.002
+
+        buy_pct = skew.get("buy_pct", 50) / 100.0
+        sell_pct = skew.get("sell_pct", 50) / 100.0
+
+        # Buy levels: HVNs below current price, sorted ascending
+        buy_levels_raw = sorted([p for p in hvn if p < current_price])
+        # Sell levels: HVNs above current price, sorted ascending
+        sell_levels_raw = sorted([p for p in hvn if p > current_price])
+
+        # Round to nearest $50
+        buy_levels = sorted(list(set(round(p / 50) * 50 for p in buy_levels_raw)))
+        sell_levels = sorted(list(set(round(p / 50) * 50 for p in sell_levels_raw)))
+
+        # Filter to ensure buy < current_price and sell > current_price after rounding
+        buy_levels = [p for p in buy_levels if p < current_price]
+        sell_levels = [p for p in sell_levels if p > current_price]
+
+        # Ensure minimum 2 levels on each side
+        if len(buy_levels) < 2 or len(sell_levels) < 2:
+            return GridManager._generate_levels_from_bands(bands, atr, skew, current_price)
+
+        # Clip to a reasonable number based on skew (4-8 per side)
+        max_buys = max(4, int(8 * buy_pct))
+        max_sells = max(4, int(8 * sell_pct))
+        buy_levels = buy_levels[-max_buys:]  # closest to price
+        sell_levels = sell_levels[:max_sells]  # closest to price
+
+        # If POC is close to current price, add extra levels near POC for density
+        if len(buy_levels) < max_buys and poc < current_price:
+            poc_rounded = round(poc / 50) * 50
+            if poc_rounded not in buy_levels:
+                buy_levels.append(poc_rounded)
+                buy_levels.sort()
+                buy_levels = buy_levels[-max_buys:]
+
+        if len(sell_levels) < max_sells and poc > current_price:
+            poc_rounded = round(poc / 50) * 50
+            if poc_rounded not in sell_levels:
+                sell_levels.append(poc_rounded)
+                sell_levels.sort()
+                sell_levels = sell_levels[:max_sells]
+
+        range_low = min(buy_levels) if buy_levels else current_price - spacing * 2
+        range_high = max(sell_levels) if sell_levels else current_price + spacing * 2
+
+        return {
+            "buy_levels": buy_levels,
+            "sell_levels": sell_levels,
+            "range_low": range_low,
+            "range_high": range_high,
+        }
+
+    @staticmethod
+    def _generate_levels_from_bands(bands: dict, atr: dict, skew: dict, current_price: float) -> dict:
+        """Generate grid levels from Bollinger Bands + ATR + Trend Skew (fallback).
 
         Levels are anchored to band edges (lower for buys, upper for sells),
         not current_price — ensuring deterministic output for the same bands.
-        
+
         Returns same format as analyst output:
         {"buy_levels": [...], "sell_levels": [...], "range_low": X, "range_high": Y}
         """
@@ -1060,7 +1277,7 @@ class GridManager:
             price -= spacing
         sell_levels.sort()
 
-        # Fallback: if we couldn't fit levels, place some at band edges  
+        # Fallback: if we couldn't fit levels, place some at band edges
         if len(buy_levels) < 2 and current_price > lower:
             for i in range(1, 3):
                 p = round((lower + spacing * i) / 50) * 50
@@ -1084,37 +1301,145 @@ class GridManager:
     async def roll_grid(self, current_price: float, direction: str) -> bool:
         """Roll the grid to follow price when it hits band edges.
 
+        Strategy: try one-sided roll first (keep one side's orders intact),
+        fall back to full roll if one-sided would leave too few levels.
+
         Returns True if a roll was performed, False if skipped.
         """
-        logging.info(f"Rolling grid at ${current_price:,.0f}")
-
-        # Backup current state
-        backup_state = copy.deepcopy(self.state)
+        logging.info(f"Rolling grid at ${current_price:,.0f} (direction: {direction})")
 
         # Fetch candidate levels first (before canceling anything)
-        new_levels = await self._compute_candidate_levels(current_price)
+        new_levels, time_adj, funding_adj = await self._compute_candidate_levels(current_price)
         if new_levels is None:
             logging.error("Failed to compute candidate levels for roll — skipping")
             return False
 
-        # Check if levels would meaningfully change
-        old_buy = self.state["levels"].get("buy", [])
-        old_sell = self.state["levels"].get("sell", [])
-        new_buy = new_levels["buy_levels"]
-        new_sell = new_levels["sell_levels"]
-
+        new_buy = new_levels.get("buy_levels", [])
+        new_sell = new_levels.get("sell_levels", [])
         if not new_buy or not new_sell:
             logging.warning("Roll generated empty levels — skipping")
             return False
 
+        min_levels = self.cfg["grid"].get("min_levels", 2)
+
+        # ── Try one-sided roll first ─────────────────────────────────
+        # Determine the affected side and the preserved side
+        if direction == "up":
+            # Price hit top — new sells needed
+            preserved_side_count = self._count_side_levels("buy")   # buy side stays
+            replaced_side_count = len(new_sell)                       # new sell count
+        elif direction == "down":
+            # Price hit bottom — new buys needed
+            preserved_side_count = self._count_side_levels("sell")   # sell side stays
+            replaced_side_count = len(new_buy)                        # new buy count
+        else:
+            logging.error(f"Invalid direction: {direction}")
+            return False
+
+        # Check if one-sided roll would leave enough levels on both sides
+        can_one_sided = (
+            preserved_side_count >= min_levels
+            and replaced_side_count >= min_levels
+        )
+
+        if can_one_sided:
+            # Check per-side overlap for the side being replaced
+            # If the side being replaced has >80% overlap with new levels, skip
+            old_buy = self.state["levels"].get("buy", [])
+            old_sell = self.state["levels"].get("sell", [])
+
+            if direction == "up":
+                # Replacing sell side
+                if old_sell:
+                    matched = 0
+                    for np in new_sell:
+                        if any(abs(np - op) / max(np, op) < 0.0015 for op in old_sell):
+                            matched += 1
+                    overlap_sell = matched / len(new_sell) if new_sell else 0
+                    if overlap_sell > 0.80:
+                        logging.info(f"Sell side overlap {overlap_sell:.0%} — one-sided roll would be redundant")
+                    else:
+                        # Per-side overlap is acceptable, try one-sided roll
+                        rolled = await self.roll_one_sided(current_price, direction, new_levels)
+                        if rolled:
+                            await send_alert(
+                                (
+                                    f"🔄 Grid rolled {direction} (one-sided) · BTC @ ${current_price:,.0f}\n"
+                                    f"New range: ${self.state['range_low']:,.0f} – ${self.state['range_high']:,.0f}\n"
+                                    f"Roll #{self.state['roll_count']}"
+                                )
+                            )
+                            return True
+                else:
+                    # No old sell levels, proceed with one-sided
+                    rolled = await self.roll_one_sided(current_price, direction, new_levels)
+                    if rolled:
+                        await send_alert(
+                            (
+                                f"🔄 Grid rolled {direction} (one-sided) · BTC @ ${current_price:,.0f}\n"
+                                f"New range: ${self.state['range_low']:,.0f} – ${self.state['range_high']:,.0f}\n"
+                                f"Roll #{self.state['roll_count']}"
+                            )
+                        )
+                        return True
+            elif direction == "down":
+                # Replacing buy side
+                if old_buy:
+                    matched = 0
+                    for np in new_buy:
+                        if any(abs(np - op) / max(np, op) < 0.0015 for op in old_buy):
+                            matched += 1
+                    overlap_buy = matched / len(new_buy) if new_buy else 0
+                    if overlap_buy > 0.80:
+                        logging.info(f"Buy side overlap {overlap_buy:.0%} — one-sided roll would be redundant")
+                    else:
+                        # Per-side overlap is acceptable, try one-sided roll
+                        rolled = await self.roll_one_sided(current_price, direction, new_levels)
+                        if rolled:
+                            await send_alert(
+                                (
+                                    f"🔄 Grid rolled {direction} (one-sided) · BTC @ ${current_price:,.0f}\n"
+                                    f"New range: ${self.state['range_low']:,.0f} – ${self.state['range_high']:,.0f}\n"
+                                    f"Roll #{self.state['roll_count']}"
+                                )
+                            )
+                            return True
+                else:
+                    # No old buy levels, proceed with one-sided
+                    rolled = await self.roll_one_sided(current_price, direction, new_levels)
+                    if rolled:
+                        await send_alert(
+                            (
+                                f"🔄 Grid rolled {direction} (one-sided) · BTC @ ${current_price:,.0f}\n"
+                                f"New range: ${self.state['range_low']:,.0f} – ${self.state['range_high']:,.0f}\n"
+                                f"Roll #{self.state['roll_count']}"
+                            )
+                        )
+                        return True
+
+            logging.info("One-sided roll skipped or failed — falling back to full roll")
+        else:
+            logging.info(
+                f"One-sided roll not viable (preserved={preserved_side_count}, new={replaced_side_count}, min={min_levels}) — falling back to full roll"
+            )
+
+        # ── Fallback: full roll (existing logic) ─────────────────────
+        logging.info("Attempting full grid roll (fallback)")
+
+        # Backup current state
+        backup_state = copy.deepcopy(self.state)
+
+        # Full overlap check (both sides combined)
+        old_buy = self.state["levels"].get("buy", [])
+        old_sell = self.state["levels"].get("sell", [])
         overlap = self._levels_overlap(old_buy, old_sell, new_buy, new_sell)
         if overlap > 0.80:
-            logging.info(f"New grid levels {overlap:.0%} overlap with current — skipping roll, levels too similar")
+            logging.info(f"Full grid overlap {overlap:.0%} — skipping roll, levels too similar")
             return False
 
         # Cancel existing orders
         cancelled = await self.api.cancel_all_orders()
-        logging.info(f"Cancelled {cancelled} old orders for roll")
+        logging.info(f"Cancelled {cancelled} old orders for full roll")
 
         # Get equity for sizing
         try:
@@ -1131,7 +1456,7 @@ class GridManager:
             "last_roll": datetime.now(timezone.utc).isoformat(),
         }
         try:
-            await self.deploy(new_levels, equity, current_price, roll_info=roll_info)
+            await self.deploy(new_levels, equity, current_price, roll_info=roll_info, time_adj=time_adj, funding_adj=funding_adj)
         except Exception as e:
             logging.error(f"Failed to deploy new grid: {e}")
             await send_alert(f"⚠️ Grid roll failed to deploy: {e}. Reverting to previous grid.")
@@ -1140,7 +1465,7 @@ class GridManager:
 
         await send_alert(
             (
-                f"🔄 Grid rolled {direction} · BTC @ ${current_price:,.0f}\n"
+                f"🔄 Grid rolled {direction} (full)· BTC @ ${current_price:,.0f}\n"
                 f"New range: ${min(new_buy):,.0f} – ${max(new_sell):,.0f}\n"
                 f"Overlap was {overlap:.0%} — levels changed meaningfully\n"
                 f"Roll #{self.state['roll_count']}"

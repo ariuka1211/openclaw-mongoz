@@ -7,9 +7,172 @@ to enhance AI analyst grid level decisions.
 
 import math
 import logging
+from datetime import datetime, timezone
 from typing import Dict, List
 
 logger = logging.getLogger(__name__)
+
+
+def funding_rate_adjustment(funding_data: dict, price: float) -> dict:
+    """Calculate grid size adjustment based on funding rate.
+
+    Args:
+        funding_data: dict with 'current' key containing funding info from market_intel.
+        price: current BTC price (used for context in warning messages).
+
+    Returns:
+        {"adj_multiplier": float, "label": str, "warning": str | None}
+    """
+    current = funding_data.get("current", {})
+    funding_rate = current.get("funding_rate", 0)
+
+    if funding_rate < 0:
+        # Negative funding: shorts paying longs — bullish squeeze potential
+        if funding_rate < -0.0003:
+            adj_multiplier = 1.15
+            label = "Very negative funding — strong squeeze potential (1.15x)"
+            warning = None
+        elif funding_rate < -0.0001:
+            adj_multiplier = 1.1
+            label = "Negative funding — moderate squeeze potential (1.1x)"
+            warning = None
+        else:  # -0.0001 to 0
+            adj_multiplier = 1.05
+            label = "Slightly negative funding — mild squeeze potential (1.05x)"
+            warning = None
+    elif funding_rate > 0.001:
+        # > 0.1% — extreme positive funding
+        adj_multiplier = 0.4
+        label = "Extreme positive funding — reduce 60%"
+        warning = "⚠️ EXTREME FUNDING: Size reduced 60% to avoid liquidation squeeze"
+    elif funding_rate > 0.0004:
+        # 0.04% to 0.1%
+        adj_multiplier = 0.6
+        label = "High positive funding — reduce 40%"
+        warning = None
+    elif funding_rate > 0.0001:
+        # 0.01% to 0.04%
+        adj_multiplier = 0.8
+        label = "Elevated positive funding — reduce 20%"
+        warning = None
+    else:
+        # 0 to 0.01%
+        adj_multiplier = 1.0
+        label = "Normal funding — no adjustment"
+        warning = None
+
+    formatted = (
+        f"Funding Rate: {funding_rate*100:.4f}% per 8h"
+        f" | Adjustment: {adj_multiplier:.2f}x ({label})"
+    )
+    if warning:
+        formatted += f" | {warning}"
+
+    return {
+        "adj_multiplier": adj_multiplier,
+        "label": label,
+        "warning": warning,
+        "formatted": formatted,
+    }
+
+
+def calc_volume_profile(all_candles: List[Dict], current_price: float, bin_size: float = 50.0) -> Dict:
+    """Build a Volume-at-Price histogram from combined candle data.
+
+    Buckets prices into $bin_size bins and sums volume per bin.
+
+    Returns:
+        {
+            "hist": dict[int, float]   # rounded price -> total volume
+            "nodes": list[dict]        # top volume nodes, sorted by volume desc
+            "poc": float               # Point of Control (highest volume price)
+            "hvn": list[float]         # High Volume Nodes (top 3 by volume)
+            "lvn": list[float]         # Low Volume Nodes (gaps between HVNs, max 3)
+            "formatted": str           # text representation for LLM prompt
+        }
+    """
+    if not all_candles:
+        return {
+            "hist": {},
+            "nodes": [],
+            "poc": 0.0,
+            "hvn": [],
+            "lvn": [],
+            "formatted": "No volume profile data available.",
+        }
+
+    # Build histogram: bucket each candle by rounded high+low midpoint volume
+    hist: Dict[int, float] = {}
+    for c in all_candles:
+        # Use average of high and low as the "representative price" for this candle
+        mid = (c["h"] + c["l"]) / 2.0
+        bucket = int(mid // bin_size) * int(bin_size)
+        vol = c.get("v", 0)
+        hist[bucket] = hist.get(bucket, 0.0) + vol
+
+    if not hist:
+        return {
+            "hist": {},
+            "nodes": [],
+            "poc": 0.0,
+            "hvn": [],
+            "lvn": [],
+            "formatted": "No volume profile data available.",
+        }
+
+    # Find Point of Control (highest volume bucket)
+    poc_price = max(hist, key=hist.get)
+    poc_vol = hist[poc_price]
+
+    # Build sorted nodes list
+    nodes = sorted(
+        [{"price": float(price), "volume": float(vol)} for price, vol in hist.items()],
+        key=lambda x: x["volume"],
+        reverse=True,
+    )
+
+    # HVN: top 3 volume nodes
+    hvn = [n["price"] for n in nodes[:3]]
+
+    # LVN: low-volume gaps between HVNs (up to 3)
+    if len(hvn) >= 2:
+        hvn_sorted = sorted(hvn)
+        lvn = []
+        for i in range(len(hvn_sorted) - 1):
+            gap_mid = (hvn_sorted[i] + hvn_sorted[i + 1]) / 2.0
+            gap_bucket = int(gap_mid // bin_size) * int(bin_size)
+            # Only include if volume in this gap is significantly lower than neighbors
+            gap_vol = hist.get(gap_bucket, 0)
+            neighbor_vols = [hist.get(b, 0) for b in hist if abs(b - gap_bucket) < 3 * bin_size and b != gap_bucket]
+            if neighbor_vols and gap_vol < sum(neighbor_vols) / len(neighbor_vols) * 0.3:
+                lvn.append(float(gap_bucket))
+        lvn = lvn[:3]
+    else:
+        lvn = []
+
+    # Format for LLM prompt
+    lines = []
+    lines.append("=== VOLUME PROFILE ===")
+    lines.append(f"Point of Control: ${poc_price:,.0f} (vol: {poc_vol:.2f})")
+    lines.append(f"High Volume Nodes: {', '.join(f'${p:,.0f}' for p in hvn)}")
+    if lvn:
+        lines.append(f"Low Volume Nodes (gaps): {', '.join(f'${p:,.0f}' for p in lvn)}")
+    lines.append("Top 10 volume bins:")
+    for n in nodes[:10]:
+        marker = " <-- POC" if n["price"] == poc_price else ""
+        marker += " <-- HVN" if n["price"] in hvn else ""
+        lines.append(f"  ${int(n['price']):,}: {n['volume']:.2f}{marker}")
+    lines.append("=== END VOLUME PROFILE ===")
+    formatted = "\n".join(lines)
+
+    return {
+        "hist": hist,
+        "nodes": nodes,
+        "poc": float(poc_price),
+        "hvn": hvn,
+        "lvn": lvn,
+        "formatted": formatted,
+    }
 
 
 def calc_sma(candles: List[Dict], period: int) -> List[float]:
@@ -482,6 +645,47 @@ def format_indicators(bands: Dict, atr: Dict, skew: Dict) -> str:
     )
 
 
+# Session schedule for time-of-day awareness
+_TIME_SESSIONS = [
+    (0, 5, 0.7, "Late Asian (quiet hours, reduce size 30%)"),
+    (6, 7, 0.85, "Asian/London transition"),
+    (8, 11, 1.0, "London session (normal sizing)"),
+    (12, 15, 1.15, "London afternoon (increased activity)"),
+    (16, 19, 1.2, "NY/London overlap (high volume, widen grid)"),
+    (20, 23, 1.0, "NY close (normal sizing)"),
+]
+
+
+def time_awareness_adjustment(current_time_utc: datetime | None = None) -> dict:
+    """Return time-of-day volatility multiplier based on trading session.
+
+    Returns:
+        {"adj_multiplier": float, "session_label": str, "description": str}
+    """
+    from datetime import datetime, timezone
+
+    if current_time_utc is None:
+        current_time_utc = datetime.now(timezone.utc)
+
+    hour = current_time_utc.hour
+
+    # Find matching session
+    for start, end, mult, desc in _TIME_SESSIONS:
+        if start <= hour <= end:
+            return {
+                "adj_multiplier": mult,
+                "session_label": desc,
+                "description": desc,
+            }
+
+    # Fallback (shouldn't happen with proper session coverage)
+    return {
+        "adj_multiplier": 1.0,
+        "session_label": "Unknown session",
+        "description": "Unknown trading session (default sizing)",
+    }
+
+
 def gather_indicators(candles_15m: List[Dict], candles_30m: List[Dict],
                        candles_4h: List[Dict], market_intel: Dict, candles_1d: List[Dict] = None) -> Dict:
     """Calculate all indicators and return combined result."""
@@ -525,6 +729,15 @@ def gather_indicators(candles_15m: List[Dict], candles_30m: List[Dict],
     regime_line = f"\n🔍 Market Regime: {regime} — {regime_labels.get(regime, regime)}"
     formatted = formatted + regime_line
 
+    # Volume Profile (combine all timeframes for broader coverage)
+    combined_candles = list(candles_15m) + list(candles_30m) + list(candles_4h)
+    if candles_1d:
+        combined_candles += list(candles_1d)
+    current_price = candles_15m[-1]["c"]
+    vp = calc_volume_profile(combined_candles, current_price, bin_size=50.0)
+    vp_formatted = vp["formatted"]
+    formatted = formatted + f"\n\n{vp_formatted}"
+
     # --- 1D indicators ---
     if candles_1d and len(candles_1d) >= 50:
         ema_50_1d = calc_ema_single(candles_1d, 50)
@@ -553,6 +766,16 @@ def gather_indicators(candles_15m: List[Dict], candles_30m: List[Dict],
         daily_line = "\n📊 Daily: no data"
     formatted = formatted + daily_line
 
+    # Time-of-day awareness
+    time_adj = time_awareness_adjustment()
+    time_line = f"\n⏰ Time awareness: {time_adj['adj_multiplier']}x — {time_adj['session_label']}"
+    formatted = formatted + time_line
+
+    # Funding rate context
+    funding_adj = funding_rate_adjustment(market_intel, candles_15m[-1]["c"] if candles_15m else 0)
+    funding_line = f"\n💰 {funding_adj['formatted']}"
+    formatted = formatted + funding_line
+
     return {
         "bollinger": bands,
         "atr": atr,
@@ -564,6 +787,9 @@ def gather_indicators(candles_15m: List[Dict], candles_30m: List[Dict],
         "daily_trend": daily_trend,
         "trend": trend,
         "regime": regime,
+        "volume_profile": vp,
+        "time_awareness": time_adj,
+        "funding_adj": funding_adj,
         "formatted": formatted,
     }
 

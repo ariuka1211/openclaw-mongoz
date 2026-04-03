@@ -27,7 +27,8 @@ from grid import GridManager
 from lighter_api import LighterAPI
 from tg_alerts import send_alert
 from analyst import run_analyst, fetch_candles
-from indicators import calc_ema_single
+from indicators import calc_ema_single, time_awareness_adjustment, funding_rate_adjustment
+from market_intel import gather_all_intel
 
 load_dotenv()
 
@@ -148,6 +149,18 @@ async def handle_resume(gm, api, cfg):
     # Auto-compounding multiplier
     compounding_mult = gm._compounding_factor()
 
+    # Time-of-day adjustment
+    time_adj = time_awareness_adjustment()["adj_multiplier"]
+
+    # Funding rate adjustment
+    funding_adj = 1.0
+    try:
+        market_intel = await gather_all_intel(cfg)
+        funding_info = funding_rate_adjustment(market_intel, price)
+        funding_adj = funding_info["adj_multiplier"]
+    except Exception:
+        pass  # Default to 1.0 if funding fetch fails
+
     calc = calculate_grid(
         equity, price, num_buy, num_sell,
         cfg["capital"]["max_exposure_multiplier"],
@@ -155,6 +168,8 @@ async def handle_resume(gm, api, cfg):
         atr_pct=atr_pct,
         vol_cfg=vol_cfg,
         compounding_mult=compounding_mult,
+        time_adj=time_adj,
+        funding_adj=funding_adj,
     )
     if not calc["safe"]:
         msg = f"❌ Safety check failed — cannot resume: {calc['reason']}"
@@ -165,7 +180,7 @@ async def handle_resume(gm, api, cfg):
     await gm.cancel_all()
     gm.state["paused"] = False
     gm.state["pause_reason"] = ""
-    await gm.deploy(levels, equity, price)
+    await gm.deploy(levels, equity, price, time_adj=time_adj, funding_adj=funding_adj)
     await send_alert(f"🟢 Grid resumed (same levels) · BTC @ ${price:,.0f}")
 
 
@@ -248,7 +263,15 @@ async def startup(cfg: dict) -> tuple[LighterAPI, GridManager, dict]:
                 f"📎 Small position detected: {btc_balance:.6f} BTC (${pos_value:.2f}, {pos_pct:.1%} equity)\n"
                 f"Building grid around position..."
             )
-            result = await gm.deploy_with_position(btc_balance, price, equity, cfg)
+            # Compute funding adjustment
+            funding_adj = 1.0
+            try:
+                market_intel = await gather_all_intel(cfg)
+                funding_info = funding_rate_adjustment(market_intel, price)
+                funding_adj = funding_info["adj_multiplier"]
+            except Exception:
+                pass
+            result = await gm.deploy_with_position(btc_balance, price, equity, cfg, funding_adj=funding_adj)
             levels = {
                 "buy_levels": result["buy_levels"],
                 "sell_levels": result["sell_levels"],
@@ -335,6 +358,18 @@ async def startup(cfg: dict) -> tuple[LighterAPI, GridManager, dict]:
     # Auto-compounding multiplier
     compounding_mult = gm._compounding_factor()
 
+    # Time-of-day adjustment
+    time_adj = time_awareness_adjustment()["adj_multiplier"]
+
+    # Funding rate adjustment
+    funding_adj = 1.0
+    try:
+        market_intel = await gather_all_intel(cfg)
+        funding_info = funding_rate_adjustment(market_intel, price)
+        funding_adj = funding_info["adj_multiplier"]
+    except Exception:
+        pass  # Default to 1.0 if fetch fails
+
     # Safety-check against the REAL level count
     calc = calculate_grid(
         equity, price, num_buy, num_sell,
@@ -343,6 +378,8 @@ async def startup(cfg: dict) -> tuple[LighterAPI, GridManager, dict]:
         atr_pct=atr_pct,
         vol_cfg=vol_cfg,
         compounding_mult=compounding_mult,
+        time_adj=time_adj,
+        funding_adj=funding_adj,
     )
     if not calc["safe"]:
         msg = f"❌ Safety check failed: {calc['reason']}"
@@ -351,7 +388,7 @@ async def startup(cfg: dict) -> tuple[LighterAPI, GridManager, dict]:
         sys.exit(1)
 
     # Deploy
-    await gm.deploy(levels, equity, price)
+    await gm.deploy(levels, equity, price, time_adj=time_adj, funding_adj=funding_adj)
 
     open_count = sum(1 for o in gm.state["orders"] if o.get("status") == "open")
     await send_alert(

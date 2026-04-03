@@ -61,6 +61,9 @@ class GridManager:
             "trades": [],
             "pending_buys": [],
             "equity_pnl": 0.0,
+            "recovering_position": False,
+            "position_size_btc": 0.0,
+            "position_value_usd": 0.0,
         }
 
     def _save_state(self):
@@ -147,6 +150,117 @@ class GridManager:
         num_adopted = len(orders)
         logging.info(f"Adopted {num_adopted} existing orders ({len(buy_orders)} buy + {len(sell_orders)} sell)")
         return True
+
+    async def recover_position(self, btc_amount: float, btc_price: float, cfg: dict) -> dict:
+        """Recover from a naked BTC long position.
+
+        Places sell orders above current price to exit the position,
+        and buy orders below for standard grid recovery.
+
+        Returns:
+            {"safe": bool, "sell_levels": [...], "buy_levels": [...], "reason": ""}
+        """
+        # First, cancel any existing stale orders
+        await self.api.cancel_all_orders()
+
+        pos_value_usd = btc_amount * btc_price
+        equity = await self.api.get_equity()
+        pos_pct = pos_value_usd / equity if equity > 0 else 0
+
+        logging.info(f"Recovering position: {btc_amount:.6f} BTC = ${pos_value_usd:.2f} ({pos_pct:.1%} of equity)")
+
+        risk_cfg = cfg.get("risk", {})
+        # Safety: if position is >50% of equity, flag it
+        if pos_pct > 0.50:
+            msg = f"⚠️ Large position: {btc_amount:.6f} BTC (${pos_value_usd:.2f}) is {pos_pct:.1%} of equity. Recovery is risky."
+            logging.warning(msg)
+            # Still proceed - but warn
+
+        # Design recovery grid
+        # Use ATR-based spacing if available
+        try:
+            candles_15m = await fetch_candles("15m", limit=100)
+            atr_data = calc_atr(candles_15m, period=14)
+            atr = atr_data.get("atr", 0)
+        except Exception:
+            atr = btc_price * 0.005  # fallback: 0.5% of price
+
+        # Split position into 3 sell levels
+        # First sell at current price (market-close soonest)
+        # Other sells at ATR intervals above to catch price dips
+        spacing = max(atr * 0.5, btc_price * 0.002)  # half ATR or 0.2%, whichever is larger
+        sell_size = btc_amount / 3
+
+        sell_levels = []
+        for i in range(3):
+            sell_price = btc_price + (spacing * i)  # current, +spacing, +2*spacing
+            sell_levels.append(round(sell_price))
+
+        # Place sell orders for the position
+        orders_to_place = []
+        for i, price in enumerate(sell_levels):
+            size = sell_size
+            if i == 2:
+                size = btc_amount - 2 * sell_size  # avoid rounding issues
+            orders_to_place.append(("sell", price, size))
+
+        # Place buy orders below for grid recovery
+        buy_levels = []
+        for i in range(3):
+            buy_price = btc_price - (spacing * (i + 1))
+            buy_level = round(buy_price)
+            buy_levels.append(buy_level)
+
+        buy_size = (equity * cfg["capital"]["max_exposure_multiplier"] * 0.1) / btc_price  # 10% of available
+
+        for price in buy_levels:
+            orders_to_place.append(("buy", price, buy_size))
+
+        # Place all orders
+        placed = []
+        for side, price, size in orders_to_place:
+            try:
+                order = await self.api.place_limit_order(side, price, size)
+                order["status"] = "open"
+                order["layer"] = "recovery"  # tag as recovery orders
+                placed.append(order)
+                logging.info(f"Placed {side.upper()} @ ${price:,.0f} (recovery)")
+                await asyncio.sleep(0.3)
+            except Exception as e:
+                logging.error(f"Failed to place {side} @ ${price}: {e}")
+
+        # Update state
+        self.state.update({
+            "active": True,
+            "paused": False,
+            "pause_reason": "",
+            "levels": {"buy": buy_levels, "sell": sell_levels},
+            "range_low": min(buy_levels),
+            "range_high": max(sell_levels),
+            "size_per_level": sell_size,
+            "orders": placed,
+            "equity_at_reset": equity,
+            "recovering_position": True,
+            "position_size_btc": btc_amount,
+            "position_value_usd": pos_value_usd,
+        })
+        self._save_state()
+
+        await send_alert(
+            f"♻️ Position recovery deployed\n"
+            f"Position: {btc_amount:.6f} BTC (${pos_value_usd:.2f})\n"
+            f"Sell levels: {sell_levels}\n"
+            f"Buy levels: {buy_levels}\n"
+            f"Equity: ${equity:.2f}"
+        )
+
+        return {
+            "safe": True,
+            "sell_levels": sell_levels,
+            "buy_levels": buy_levels,
+            "position_size": btc_amount,
+            "position_value": pos_value_usd,
+        }
 
     # ── Grid deployment ─────────────────────────────────────────
 

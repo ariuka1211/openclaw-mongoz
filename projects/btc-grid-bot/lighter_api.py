@@ -269,6 +269,32 @@ class LighterAPI:
 
         return cancelled
 
+    async def get_btc_balance(self) -> float:
+        """Return account BTC balance/position size in BTC units.
+
+        Returns positive value for long position, 0 for no position.
+        """
+        await self._ensure_signer()
+        auth = self._get_auth_token()
+
+        try:
+            result = await self._account_api.account(
+                by="index",
+                value=str(ACCOUNT_INDEX),
+            )
+            for account in result.accounts:
+                if hasattr(account, 'positions') and account.positions:
+                    for pos in account.positions:
+                        if pos.market_id == BTC_MARKET_ID:
+                            base_amount = float(pos.base_amount)
+                            if base_amount != 0:
+                                return base_amount / (10 ** self._size_decimals)
+                return 0.0
+            raise RuntimeError("No accounts found")
+        except Exception as e:
+            logging.error(f"Failed to fetch BTC balance: {e}")
+            return 0.0
+
     async def close(self):
         """Close all aiohttp sessions."""
         errors = []

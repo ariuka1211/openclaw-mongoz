@@ -221,8 +221,29 @@ async def startup(cfg: dict) -> tuple[LighterAPI, GridManager, dict]:
         await send_alert(msg)
         sys.exit(1)
 
-    # ── Order reconciliation: check for existing grid orders ───────
     gm = GridManager(cfg, api)
+
+    # ── 1. Check for actual BTC position ─────────────────────────
+    try:
+        btc_balance = await api.get_btc_balance()
+    except Exception as e:
+        log.error(f"Failed to check BTC balance: {e}")
+        btc_balance = 0.0  # assume clean, proceed with caution
+
+    if btc_balance > 0:
+        # Naked long position — recover
+        log.warning(f"⚠️ Found BTC position: {btc_balance:.6f} (${btc_balance * price:.2f})")
+        await send_alert(f"⚠️ Found unhedged position: {btc_balance:.6f} BTC = ${btc_balance * price:.2f}")
+        result = await gm.recover_position(btc_balance, price, cfg)
+        levels = {
+            "buy_levels": result["buy_levels"],
+            "sell_levels": result["sell_levels"],
+            "range_low": min(result["buy_levels"]),
+            "range_high": max(result["sell_levels"]),
+        }
+        return api, gm, levels
+
+    # ── 2. Check for existing orders ─────────────────────────────
     if await gm.adopt_existing_orders(price):
         levels = {
             "buy_levels": gm.state["levels"]["buy"],
@@ -239,7 +260,7 @@ async def startup(cfg: dict) -> tuple[LighterAPI, GridManager, dict]:
         )
         return api, gm, levels
 
-    # ── No existing orders — fresh deploy ──────────────────────────
+    # ── 3. Fresh deploy ──────────────────────────────────────────
     await send_alert("🔍 Running market analysis...")
     levels = await run_analyst(cfg)
 
@@ -297,7 +318,6 @@ async def startup(cfg: dict) -> tuple[LighterAPI, GridManager, dict]:
         sys.exit(1)
 
     # Deploy
-    gm = GridManager(cfg, api)
     await gm.deploy(levels, equity, price)
 
     open_count = sum(1 for o in gm.state["orders"] if o.get("status") == "open")

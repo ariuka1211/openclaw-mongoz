@@ -82,7 +82,7 @@ class GridManager(CapitalMixin, OrderMixin):
         with open(STATE_FILE, "w") as f:
             json.dump(self.state, f, indent=2)
 
-    def _update_previous_deployment_results(self):
+    async def _update_previous_deployment_results(self):
         """Fill in results for the previous deployment log."""
         try:
             prev_log_path = self.state.get("deployment_log_path")
@@ -103,7 +103,8 @@ class GridManager(CapitalMixin, OrderMixin):
                 wins = sum(1 for t in trades if t.get("pnl", 0) >= 0)
                 win_rate = round(wins / len(trades) * 100, 1)
 
-            current_equity = self.state.get("equity_at_reset", 0)
+            # Fetch live equity from API instead of stale state file
+            current_equity = await self.api.get_equity()
 
             # Price change during deployment
             deploy_start_price = self.state.get("deploy_start_price")
@@ -336,7 +337,7 @@ class GridManager(CapitalMixin, OrderMixin):
 
         # Log deployment snapshot
         try:
-            self._update_previous_deployment_results()
+            await self._update_previous_deployment_results()
             self._save_deployment_log(btc_price, equity, direction, signal_data, levels, size)
         except Exception as e:
             logging.error(f"Deployment logging failed (non-fatal): {e}")
@@ -477,7 +478,7 @@ class GridManager(CapitalMixin, OrderMixin):
 
         # Log deployment snapshot
         try:
-            self._update_previous_deployment_results()
+            await self._update_previous_deployment_results()
             self._save_deployment_log(btc_price, equity, "short", signal_data, levels, size)
         except Exception as e:
             logging.error(f"Deployment logging failed (non-fatal): {e}")

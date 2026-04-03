@@ -69,35 +69,52 @@ def calculate_grid(
     
     min_size = 0.001
     if size_per_level < min_size:
-        size_per_level = min_size
+        # — Min-size branch: reduce levels until min_size fits —
+        # 1. Compute product of all multiplicative adjustments
+        adj_product = vol_adj * time_adj * funding_adj
         total_levels = num_buy_levels + num_sell_levels
-        max_notional_for_min = size_per_level * btc_price * total_levels
-        if max_notional_for_min > available:
-            max_levels = int(available / (size_per_level * btc_price))
-            if max_levels < 2:
-                return {
-                    "safe": False,
-                    "size_per_level": 0,
-                    "size_per_level_usd": 0,
-                    "max_notional": 0,
-                    "available_notional": 0,
-                    "worst_case_notional": 0,
-                    "buffer": 0,
-                    "reason": "Equity too low to place even minimum size orders",
-                    "adjusted_num_buy_levels": None,
-                    "adjusted_num_sell_levels": None,
-                    "vol_adj": round(vol_adj, 2),
-                    "atr_pct": round(atr_pct, 4) if atr_pct else None,
-                    "time_adj": round(time_adj, 2),
-                    "funding_adj": round(funding_adj, 2),
-                }
+
+        # 2. Max levels we can afford at min_size with adjustments applied
+        max_levels = int(available / (min_size * btc_price * adj_product))
+
+        # 3. Need at least 2 levels (1 buy + 1 sell)
+        if max_levels < 2:
+            return {
+                "safe": False,
+                "size_per_level": 0,
+                "size_per_level_usd": 0,
+                "max_notional": 0,
+                "available_notional": 0,
+                "worst_case_notional": 0,
+                "buffer": 0,
+                "reason": "Equity too low to place even minimum size orders",
+                "adjusted_num_buy_levels": None,
+                "adjusted_num_sell_levels": None,
+                "vol_adj": round(vol_adj, 2),
+                "atr_pct": round(atr_pct, 4) if atr_pct else None,
+                "time_adj": round(time_adj, 2),
+                "funding_adj": round(funding_adj, 2),
+            }
+
+        # 4. If max_levels is below the requested total, scale levels down proportionally
+        if max_levels < total_levels:
             adjusted_num_buy = max(1, int(num_buy_levels * (max_levels / total_levels)))
             adjusted_num_sell = max(1, int(num_sell_levels * (max_levels / total_levels)))
             total_levels = adjusted_num_buy + adjusted_num_sell
-            size_per_level = (available * safety_factor) / (total_levels * btc_price)
-            size_per_level *= vol_adj  # Re-apply vol adjustment after min size fix
-            size_per_level *= time_adj  # Re-apply time adj after min size fix
-            size_per_level *= funding_adj  # Re-apply funding adj after min size fix
+        else:
+            adjusted_num_buy = num_buy_levels
+            adjusted_num_sell = num_sell_levels
+
+        # 5. Compute base size factoring adjustments into the denominator
+        size_per_level = (available * safety_factor) / (total_levels * btc_price * adj_product)
+
+        # 6. Clamp to min_size (should already be >= min_size after level reduction)
+        size_per_level = max(size_per_level, min_size)
+
+        # 7. Multiply by adjustments — worst_case will be <= available * safety_factor
+        size_per_level *= vol_adj
+        size_per_level *= time_adj
+        size_per_level *= funding_adj
     
     worst_case_notional = total_levels * size_per_level * btc_price
 

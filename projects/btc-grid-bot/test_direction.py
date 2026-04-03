@@ -448,10 +448,13 @@ class TestDeployShortGridIntegration:
             "note": "bearish",
         }
 
+        from pathlib import Path
         with patch("core.grid_manager.fetch_candles", new_callable=AsyncMock, return_value=[]), \
              patch("core.grid_manager.calc_atr", return_value={"atr": 300, "atr_pct": 0.0046, "suggested_spacing": 150}) as _:  # low vol, no vol_adj
              # Patch send_alert at the notifications module level
-             with patch("notifications.alerts.send_alert", new_callable=AsyncMock):
+             # Also patch STATE_FILE so tests don't write to real state file
+             with patch("core.grid_manager.STATE_FILE", Path("/tmp/test_grid_state.json")), \
+                  patch("notifications.alerts.send_alert", new_callable=AsyncMock):
                  await gm.deploy_short_grid(levels, equity=5000.0, btc_price=66000.0)
 
         # Verify sell orders were placed first

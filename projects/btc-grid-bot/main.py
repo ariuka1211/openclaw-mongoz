@@ -349,8 +349,8 @@ async def startup(cfg: dict) -> tuple[LighterAPI, GridManager, dict]:
         elif num_buy + num_sell > max_levels:
             logging.warning(f"Grid levels exceed max ({num_buy + num_sell} > {max_levels}) — deploying anyway")
 
-    if levels["pause"]:
-        msg = f"⏸ Analyst paused: {levels['pause_reason']}"
+    if levels.get("pause", False):
+        msg = f"⏸ Analyst paused: {levels.get('pause_reason', 'unknown')}"
         log.warning(msg)
         await send_alert(msg)
         sys.exit(1)

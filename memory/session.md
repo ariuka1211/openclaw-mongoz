@@ -1,56 +1,33 @@
-# Session Handoff — 2026-04-02
+# Session Handoff — 2026-04-02 (v2 — Grid Bot Overhaul Day 2)
 
 ## What happened
-Massive grid bot improvement session. Went from basic working state → production-hardened bot with position-aware startup, realized PnL, interactive Telegram control, and enhanced AI prompt with feedback loop.
+Session: added 5 new features to grid bot. All committed & pushed. Bot restarted.
 
-## Changes made (all pushed to main)
-1. **Roll grid fixes (batch 1):**
-   - Fill detection no longer skipped after roll (check_fills continues after roll_grid)
-   - Roll skips if new levels >80% overlap with current (no pointless redeploy)
-   - Atomic roll state save via deploy(roll_info=) param (no double _save_state race)
+## Features added
+1. **Volume Profile** — `calc_volume_profile()` in indicators.py, replaces BB-based roll generation. HVN/LVN placement, BB fallback.
+2. **Funding Rate Awareness** — `funding_rate_adjustment()` in indicators.py. Tiered sizing: extreme positive funding → 0.4x, negative → 1.1x. In calculator, deploy, main, analyst prompt.
+3. **One-Sided Roll** — `roll_one_sided()` in grid.py. Only replaces tested side, keeps other intact. Falls back to full roll if too few levels.
+4. **Time-Aware Volatility** — `time_awareness_adjustment()` in indicators.py. Asian 0.7x, London 1.0x, NY overlap 1.2x. Multiplies with vol_adj and compounding.
+5. **Trailing Loss Limit** — peak_equity tracking in main.py + grid.py. 4% trail from peak, never drops below static 8% floor. Configurable via `risk.trailing_loss_pct`.
 
-2. **Roll grid fixes (batch 2):**
-   - generate_levels_from_bands() anchors from Bollinger bands, not current_price (deterministic)
-   - Buffer tightened 10% → 3%
-   - Cooldown logging improved
-
-3. **Position-aware startup reconciliation:**
-   - get_btc_balance() added to lighter_api.py (position field = float string)
-   - recover_position() ONLY places sells — NO buys while exiting position
-   - 3-tier sizing: <10% keep+grid, 10-50% ladder close, >50% aggressive close
-   - deploy_with_position() for small positions (<10% equity)
-   - sanity_cleanup() on every startup: purges stale pending_buys, removes orphan orders, clears done recovery state
-
-4. **Realized PnL tracking:**
-   - pending_buys stack tracks buy fills
-   - Sell fills match to pending buys (FIFO) for realized PnL
-   - trades[] stores completed trade history
-   - /pnl shows individual trade breakdown
-
-5. **Telegram interactive bot:**
-   - Systemd service btc-grid-telegram running @techno4k_bot
-   - Commands: /start, /status, /pnl, /pause, /resume, /cancel
-   - Writes to state/bot_command.json → main.py reads every 30s
-   - Fixed /resume to use bot_command.json (was writing to nonexistent resume_signal.json)
-   - Fixed telegram.py → tg_alerts.py rename (shadowed python-telegram-bot package)
-
-6. **Enhanced LLM prompt:**
-   - Account context (equity, max exposure, margin reserve)
-   - ATR-based spacing guidance
-   - Swing strength (★) in swing points
-   - Previous grid session results (PnL, fills, recent trades)
+## All multiplier chain
+`size = base × vol_adj × time_adj × funding_adj × compounding`
 
 ## Current state
-- btc-grid-bot: ✅ running, fresh grid deployed (3 buy + 9 sell), position recovering via sells
-- btc-grid-telegram: ✅ running, polling @techno4k_bot
-- Bot token in config.yml (gitignored)
-- Config removed from git
+- btc-grid-bot: ✅ running, restarted with new code
+- btc-grid-telegram: ✅ running
+- Equity: ~$86.72, BTC @ ~$66,499
+- Grid adopted: 3 buy + 7 sell orders
+- Config: `trailing_loss_pct: 0.04` added to config.yml
 
-## Files in /root/.openclaw/workspace/projects/btc-grid-bot/
-- main.py, grid.py, tg_alerts.py, analyst.py, calculator.py, lighter_api.py, indicators.py, market_intel.py
-- telegram_bot.py + run_telegram_bot.sh
-- Systemd: btc-grid-bot.service, btc-grid-telegram.service
+## Commits pushed to main
+- `ac0d6ae` feat: volume profile, funding rate awareness, one-sided roll, time-aware volatility
+- `2f891e5` feat: trailing loss limit - 4% trail from peak equity with absolute 8% floor
 
-## Memory
-- Session state in memory/session.md (this file)
-- Daily log should go to memory/2026-04-02.md
+## Rejected
+- CoinGlass liquidation heatmap: too much work, user said skip.
+
+## Next potential ideas (not implemented)
+- Downtrend auto-reduce (shrink buys 50% when EMA filter warns)
+- Multi-asset expansion (same engine, ETH next)
+- Configurable time session multipliers in config.yml

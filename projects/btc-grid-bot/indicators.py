@@ -628,6 +628,112 @@ def detect_regime(candles_15m: List[Dict], candles_4h: List[Dict], adx_data: Dic
     return f"{trend}_{vol_label}"
 
 
+def detect_volume_spike(candles: List[Dict], period: int = 20, threshold_mult: float = 2.5) -> dict:
+    """Detect volume spike in the latest candle.
+
+    A volume spike is when the latest candle's volume exceeds
+    threshold_mult * rolling average volume over the previous `period` candles.
+
+    Args:
+        candles: list of OHLCV dicts with keys "ts", "o", "h", "l", "c", "v" (last ~100 candles)
+        period: number of candles to use for the rolling average (default: 20)
+        threshold_mult: multiplier for spike detection (default: 2.5)
+
+    Returns:
+        {
+            "is_spike": bool,
+            "volume_ratio": float,  # current_vol / avg_vol
+            "avg_volume": float,
+            "current_volume": float,
+            "direction": str,       # "bullish" | "bearish" | "neutral"
+            "candle_body_pct": float,  # (close - open) / open * 100
+            "label": str,           # human-readable description
+            "formatted": str,       # text for LLM prompt
+            "mean_reversion_likely": bool  # True if spike and volume_ratio > threshold
+        }
+    """
+    if len(candles) < period + 1:
+        return {
+            "is_spike": False,
+            "volume_ratio": 0.0,
+            "avg_volume": 0.0,
+            "current_volume": 0.0,
+            "direction": "neutral",
+            "candle_body_pct": 0.0,
+            "label": "Insufficient candle data for volume spike detection",
+            "formatted": "Volume Spike: insufficient data",
+            "mean_reversion_likely": False,
+        }
+
+    # Latest candle
+    latest = candles[-1]
+    current_vol = latest.get("v", 0)
+    current_open = latest.get("o", 0)
+    current_close = latest.get("c", 0)
+
+    # Rolling average volume from the previous `period` candles (exclude latest)
+    prev_candles = candles[-(period + 1):-1]  # candles before the latest, up to `period` back
+    avg_volume = sum(c.get("v", 0) for c in prev_candles) / len(prev_candles) if prev_candles else 0
+
+    if avg_volume == 0:
+        return {
+            "is_spike": False,
+            "volume_ratio": 0.0,
+            "avg_volume": 0.0,
+            "current_volume": current_vol,
+            "direction": "neutral",
+            "candle_body_pct": 0.0,
+            "label": "Average volume is zero — cannot detect spike",
+            "formatted": "Volume Spike: avg volume zero",
+            "mean_reversion_likely": False,
+        }
+
+    volume_ratio = current_vol / avg_volume
+    is_spike = volume_ratio > threshold_mult
+
+    # Determine direction
+    if current_close > current_open:
+        direction = "bullish"
+    elif current_close < current_open:
+        direction = "bearish"
+    else:
+        direction = "neutral"
+
+    # Candle body percentage
+    candle_body_pct = ((current_close - current_open) / current_open * 100) if current_open != 0 else 0.0
+
+    # Human-readable label
+    if is_spike:
+        label = f"Volume spike detected ({volume_ratio:.2f}x average) — {direction}"
+    else:
+        label = f"Normal volume ({volume_ratio:.2f}x average)"
+
+    # Formatted text for LLM prompt
+    if is_spike:
+        mean_rev_text = "MEAN REVERSION LIKELY — consider counter-spike grid placement" if volume_ratio > threshold_mult else ""
+        formatted = (
+            f"⚡ VOLUME SPIKE: {current_vol:.2f} ({volume_ratio:.2f}x avg {avg_volume:.2f})"
+            f" | Direction: {direction} (body {candle_body_pct:.2f}%)"
+            f" | Mean reversion likely: {is_spike and volume_ratio > threshold_mult}"
+        )
+        if mean_rev_text:
+            formatted += f" | {mean_rev_text}"
+    else:
+        formatted = f"Volume: normal ({current_vol:.2f}, {volume_ratio:.2f}x avg {avg_volume:.2f})"
+
+    return {
+        "is_spike": is_spike,
+        "volume_ratio": round(volume_ratio, 3),
+        "avg_volume": round(avg_volume, 2),
+        "current_volume": round(current_vol, 2),
+        "direction": direction,
+        "candle_body_pct": round(candle_body_pct, 3),
+        "label": label,
+        "formatted": formatted,
+        "mean_reversion_likely": is_spike and volume_ratio > threshold_mult,
+    }
+
+
 def format_indicators(bands: Dict, atr: Dict, skew: Dict) -> str:
     """Format all indicators into text block for LLM prompt."""
     position_pct = round(bands["position"] * 100)
@@ -683,6 +789,115 @@ def time_awareness_adjustment(current_time_utc: datetime | None = None) -> dict:
         "adj_multiplier": 1.0,
         "session_label": "Unknown session",
         "description": "Unknown trading session (default sizing)",
+    }
+
+
+def oi_divergence(price_history: list, oi_history: list) -> dict:
+    """Detect OI/Price divergence to identify forced liquidation regimes.
+
+    Compares last 12 readings (3 hours) vs the 12 before that (3-6 hours ago).
+
+    Args:
+        price_history: last ~50 candles with keys {"ts": int, "c": float}
+        oi_history: last ~50 OI readings with keys {"t": int, "oi": float}
+
+    Returns:
+        {
+            "state": str,  # "long_squeeze" | "capitulation" | "new_shorts" | "new_longs" | "neutral"
+            "price_direction": str,  # "up", "down", "flat"
+            "oi_direction": str,     # "up", "down", "flat"
+            "price_change_pct": float,
+            "oi_change_pct": float,
+            "label": str,
+            "formatted": str,
+            "grid_implication": str
+        }
+    """
+    if not price_history or not oi_history or len(price_history) < 24 or len(oi_history) < 24:
+        return {
+            "state": "neutral",
+            "price_direction": "flat",
+            "oi_direction": "flat",
+            "price_change_pct": 0.0,
+            "oi_change_pct": 0.0,
+            "label": "Insufficient data for OI divergence analysis",
+            "formatted": "OI Divergence: neutral (insufficient data)",
+            "grid_implication": "none"
+        }
+
+    # Take last 24 readings for both price and OI
+    recent_prices = price_history[-12:]
+    old_prices = price_history[-24:-12]
+    recent_oi = oi_history[-12:]
+    old_oi = oi_history[-24:-12]
+
+    # Compute averages
+    recent_price_avg = sum(c["c"] for c in recent_prices) / len(recent_prices)
+    old_price_avg = sum(c["c"] for c in old_prices) / len(old_prices)
+    recent_oi_avg = sum(o["oi"] for o in recent_oi) / len(recent_oi)
+    old_oi_avg = sum(o["oi"] for o in old_oi) / len(old_oi)
+
+    # Compute direction (% change)
+    if old_price_avg > 0:
+        price_change_pct = (recent_price_avg - old_price_avg) / old_price_avg
+    else:
+        price_change_pct = 0.0
+
+    if old_oi_avg > 0:
+        oi_change_pct = (recent_oi_avg - old_oi_avg) / old_oi_avg
+    else:
+        oi_change_pct = 0.0
+
+    # Classify directions (threshold: 0.1% for flat detection)
+    def direction(pct):
+        if pct > 0.001:
+            return "up"
+        elif pct < -0.001:
+            return "down"
+        else:
+            return "flat"
+
+    price_dir = direction(price_change_pct)
+    oi_dir = direction(oi_change_pct)
+
+    # Classify the 4 divergence states
+    if price_dir == "up" and oi_dir == "down":
+        state = "long_squeeze"
+        label = f"Price up {price_change_pct*100:.2f}% + OI down {abs(oi_change_pct)*100:.2f}% → Shorts getting squeezed (bullish continuation)"
+        grid_implication = "widen sells"
+    elif price_dir == "down" and oi_dir == "down":
+        state = "capitulation"
+        label = f"Price down {abs(price_change_pct)*100:.2f}% + OI down {abs(oi_change_pct)*100:.2f}% → Longs getting liquidated (capitulation)"
+        grid_implication = "prepare buys"
+    elif price_dir == "down" and oi_dir == "up":
+        state = "new_shorts"
+        label = f"Price down {abs(price_change_pct)*100:.2f}% + OI up {oi_change_pct*100:.2f}% → New shorts entering (bearish trend)"
+        grid_implication = "reduce size"
+    elif price_dir == "up" and oi_dir == "up":
+        state = "new_longs"
+        label = f"Price up {price_change_pct*100:.2f}% + OI up {oi_change_pct*100:.2f}% → New longs entering (bullish trend)"
+        grid_implication = "normal grid"
+    else:
+        state = "neutral"
+        label = "Price and OI both flat — no clear divergence signal"
+        grid_implication = "none"
+
+    formatted = (
+        f"OI Divergence: {state} | Price: {price_dir} ({price_change_pct*100:+.2f}%) | "
+        f"OI: {oi_dir} ({oi_change_pct*100:+.2f}%)\n"
+        f"  {label}\n"
+        f"  Grid hint: {grid_implication}"
+    )
+
+    return {
+        "state": state,
+        "price_direction": price_dir,
+        "oi_direction": oi_dir,
+        "price_change_pct": round(price_change_pct, 6),
+        "oi_change_pct": round(oi_change_pct, 6),
+        "label": label,
+        "formatted": formatted,
+        "grid_implication": grid_implication
     }
 
 
@@ -776,6 +991,18 @@ def gather_indicators(candles_15m: List[Dict], candles_30m: List[Dict],
     funding_line = f"\n💰 {funding_adj['formatted']}"
     formatted = formatted + funding_line
 
+    # Volume spike detection (15m candles)
+    volume_spike = detect_volume_spike(candles_15m)
+    spike_line = f"\n{volume_spike['formatted']}"
+    formatted = formatted + spike_line
+
+    # OI divergence analysis
+    oi_history = market_intel.get("oi_history_15min", [])
+    price_history = [{"ts": c["ts"], "c": c["c"]} for c in candles_15m[-50:]]
+    oi_div = oi_divergence(price_history, oi_history)
+    oi_div_line = f"\n\n📊 {oi_div['formatted']}"
+    formatted = formatted + oi_div_line
+
     return {
         "bollinger": bands,
         "atr": atr,
@@ -790,6 +1017,8 @@ def gather_indicators(candles_15m: List[Dict], candles_30m: List[Dict],
         "volume_profile": vp,
         "time_awareness": time_adj,
         "funding_adj": funding_adj,
+        "volume_spike": volume_spike,
+        "oi_divergence": oi_div,
         "formatted": formatted,
     }
 

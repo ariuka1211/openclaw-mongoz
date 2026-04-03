@@ -171,6 +171,8 @@ def build_prompt(
     regime_label: str = "",
     volume_profile: str = "",
     funding_context: str = "",
+    oi_divergence: str = "",
+    volume_spike: str = "",
 ) -> str:
     """Build an enhanced LLM prompt with full context."""
     highs_15 = swing_15m.get("swing_highs", [])
@@ -215,6 +217,12 @@ for placing limit orders. Think about where price is LIKELY TO REVERSE, not wher
 {volume_profile}
 
 {funding_context}
+
+## Open Interest Divergence
+{oi_divergence}
+
+## Volume Spike Alert
+{volume_spike}
 
 {market_intel}
 
@@ -454,11 +462,19 @@ async def run_analyst(cfg: dict, equity: float = 0, btc_price: float = 0, grid_m
                 emoji = "✅" if t.get("pnl", 0) >= 0 else "❌"
                 grid_history_text += f"  {emoji} Buy ${t['buy_price']:,.0f} → Sell ${t['sell_price']:,.0f} | PnL ${t['pnl']:.2f}\n"
 
-    # Build prompt with all context
+    # Volume Profile text
     regime = indicators_data.get("regime", "unknown")
     regime_label = _format_regime(regime)
     volume_profile_text = indicators_data.get("volume_profile", {}).get("formatted", "")
-    
+
+    # OI Divergence text
+    oi_div_data = indicators_data.get("oi_divergence", {})
+    oi_div_text = oi_div_data.get("formatted", "OI Divergence: neutral (no data)")
+
+    # Volume spike text
+    volume_spike_data = indicators_data.get("volume_spike", {})
+    volume_spike_text = volume_spike_data.get("formatted", "Volume Spike: no data")
+
     # Funding rate context
     funding_data = indicators_data.get("funding_adj", {})
     if funding_data:
@@ -486,6 +502,8 @@ async def run_analyst(cfg: dict, equity: float = 0, btc_price: float = 0, grid_m
         regime_label=regime_label,
         volume_profile=volume_profile_text,
         funding_context=funding_context,
+        oi_divergence=oi_div_text,
+        volume_spike=volume_spike_text,
     )
     result = await call_llm(prompt, cfg)
 

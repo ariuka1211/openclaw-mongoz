@@ -1,5 +1,5 @@
 """
-BTC Smart Grid — Grid Manager
+BTC Smart Grid - Grid Manager
 
 Responsibilities:
 - Place buy/sell limit orders at AI-provided levels
@@ -85,7 +85,7 @@ class GridManager:
         Factors:
           1. Win rate (weight: 40%)
           2. Avg PnL per trade as % of equity (weight: 30%)
-          3. Recent momentum — last 5 trades vs all trades (weight: 30%)
+          3. Recent momentum - last 5 trades vs all trades (weight: 30%)
         """
         trades = self.state.get("trades", [])
         if len(trades) < 3:
@@ -167,7 +167,7 @@ class GridManager:
 
         # Need at least 2 buy + 2 sell orders to consider it a valid grid
         if len(buy_orders) < 2 or len(sell_orders) < 2:
-            logging.info(f"Existing orders don't look like a grid ({len(buy_orders)} buy, {len(sell_orders)} sell) — will deploy new")
+            logging.info(f"Existing orders don't look like a grid ({len(buy_orders)} buy, {len(sell_orders)} sell) - will deploy new")
             return False
 
         # Reconstruct levels and order state
@@ -216,7 +216,7 @@ class GridManager:
             "trend_warning_count": 0,
             "roll_count": self.state.get("roll_count", 0),
         })
-        # Don't overwrite last_reset — it's still the original deployment time
+        # Don't overwrite last_reset - it's still the original deployment time
 
         self._save_state()
 
@@ -234,7 +234,7 @@ class GridManager:
         Position sizing tiers:
         - <50% of equity: close fast, sells at/near current price
         - 50-200% of equity: ladder sells above current price
-        - >200% of equity: aggressive exit — all sells at current price or below
+        - >200% of equity: aggressive exit - all sells at current price or below
 
         Returns:
             {"safe": bool, "sell_levels": [...], "buy_levels": [], "reason": ""}
@@ -263,7 +263,7 @@ class GridManager:
         sell_sizes = []
 
         if pos_pct > 2.0:
-            # Very large (>200% equity) — exit ASAP, sells at/below current price
+            # Very large (>200% equity) - exit ASAP, sells at/below current price
             num_sells = 3
             sell_size = btc_amount / num_sells
             for i in range(num_sells):
@@ -276,7 +276,7 @@ class GridManager:
                 f"Aggressive exit: {num_sells} sells below/at current price"
             )
         elif pos_pct > close_threshold:
-            # Large (close_threshold-200% equity) — ladder sells above current price
+            # Large (close_threshold-200% equity) - ladder sells above current price
             num_sells = 4
             sell_size = btc_amount / num_sells
             for i in range(num_sells):
@@ -289,7 +289,7 @@ class GridManager:
                 f"Ladder exit: {num_sells} sells from ${sell_levels[0]:,.0f} to ${sell_levels[-1]:,.0f}"
             )
         else:
-            # Small (<close_threshold equity) — close fast, 2 sells at current and slightly above
+            # Small (<close_threshold equity) - close fast, 2 sells at current and slightly above
             num_sells = 2
             sell_size = btc_amount / num_sells
             for i in range(num_sells):
@@ -366,8 +366,8 @@ class GridManager:
         # Run AI analysis for grid levels
         levels = await run_analyst(cfg)
         if levels.get("pause"):
-            # AI says pause but we have a position — must close it
-            logging.warning(f"AI recommends pause but position exists — deploying recovery instead")
+            # AI says pause but we have a position - must close it
+            logging.warning(f"AI recommends pause but position exists - deploying recovery instead")
             return await self.recover_position(btc_amount, btc_price, cfg)
 
         # Trend check
@@ -377,8 +377,8 @@ class GridManager:
         except Exception:
             pass
         if not trade_ok:
-            # Strong downtrend — better to close position than add more
-            logging.warning(f"Downtrend + position exists — deploying recovery instead")
+            # Strong downtrend - better to close position than add more
+            logging.warning(f"Downtrend + position exists - deploying recovery instead")
             return await self.recover_position(btc_amount, btc_price, cfg)
 
         buy_levels = sorted(levels["buy_levels"])
@@ -446,7 +446,7 @@ class GridManager:
             except Exception as e:
                 logging.error(f"Failed to place SELL @ ${price_lvl}: {e}")
 
-        # Update state — note the existing position
+        # Update state - note the existing position
         self.state.update({
             "active": True,
             "paused": False,
@@ -468,7 +468,7 @@ class GridManager:
 
         await send_alert(
             f"📎 Grid with existing position ({btc_amount:.6f} BTC = ${pos_value:.2f}, {pos_pct:.1%} equity)\n"
-            f"Range: ${min(buy_levels):,.0f}–${max(sell_levels):,.0f}\n"
+            f"Range: ${min(buy_levels):,.0f}-${max(sell_levels):,.0f}\n"
             f"{len(buy_levels)} buys + {len(sell_levels)} sells · {size_per_level:.5f} BTC/level"
         )
 
@@ -544,7 +544,7 @@ class GridManager:
             if self.state.get("recovering_position"):
                 recovery_orders = [o for o in self.state.get("orders", []) if o.get("layer") == "recovery"]
                 if not recovery_orders:
-                    logging.info("Position recovery complete — no recovery orders remain")
+                    logging.info("Position recovery complete - no recovery orders remain")
                     self.state["recovering_position"] = False
                     self.state["position_size_btc"] = 0
                     self.state["position_value_usd"] = 0
@@ -589,7 +589,7 @@ class GridManager:
             await send_alert(msg)
             return
         if total > max_levels:
-            logging.warning(f"Grid levels exceed max ({total} > {max_levels}) — deploying anyway")
+            logging.warning(f"Grid levels exceed max ({total} > {max_levels}) - deploying anyway")
 
         # Compute ATR for volatility-adaptive sizing
         atr_pct = None
@@ -683,7 +683,7 @@ class GridManager:
 
         alert = (
             f"📊 Grid deployed · BTC @ ${btc_price:,.0f}\n"
-            f"Range: ${min(buy_levels):,.0f} – ${max(sell_levels):,.0f}\n"
+            f"Range: ${min(buy_levels):,.0f} - ${max(sell_levels):,.0f}\n"
             f"{num_buy} buys + {num_sell} sells · {size:.5f} BTC/level{vol_info}"
         )
         await send_alert(alert)
@@ -695,20 +695,56 @@ class GridManager:
         Compare current open orders against state.
         If an order is no longer on the exchange → it filled.
         Place replacement order.
-        
+
         Matching is by (side, price) since the exchange assigns order_ids server-side
         and our place_limit_order doesn't get the real order_id back.
         """
         if not self.state["active"] or self.state["paused"]:
             return
 
+        # ── Volume spike cooldown check ─────────────────────────────
+        # If volume spike was detected in the last hour, skip trend-based
+        # pause check and roll trigger - give the market time to settle.
+        from datetime import datetime
+        now = datetime.now(timezone.utc)
+        cooldown_until = self.state.get("volume_spike_cooldown_until")
+        in_spike_cooldown = False
+        if cooldown_until:
+            try:
+                cooldown_dt = datetime.fromisoformat(cooldown_until)
+                if now < cooldown_dt:
+                    in_spike_cooldown = True
+                    logging.info(f"Volume spike cooldown active until {cooldown_dt} - skipping trend checks")
+                else:
+                    # Cooldown expired, clear it
+                    self.state["volume_spike_cooldown_until"] = None
+                    self._save_state()
+            except Exception:
+                pass  # If parsing fails, proceed normally
+
+        # Detect volume spike on 15m candles
+        try:
+            candles_15m = await fetch_candles("15m", limit=100)
+            from indicators import detect_volume_spike
+            spike_info = detect_volume_spike(candles_15m)
+            if spike_info["is_spike"] and spike_info["mean_reversion_likely"]:
+                # Set cooldown to 1 hour from now
+                self.state["volume_spike_cooldown_until"] = (now + timedelta(hours=1)).isoformat()
+                self._save_state()
+                logging.info(
+                    f"Volume spike detected: {spike_info['volume_ratio']:.2f}x avg, "
+                    f"direction={spike_info['direction']}, cooldown set for 1h"
+                )
+        except Exception as e:
+            logging.warning(f"Volume spike detection failed: {e}")
+
         # Check if price is near band edge → trigger roll instead of pause
         range_low = self.state["range_low"]
         range_high = self.state["range_high"]
-        
-        # Use 3% buffer inside the range — roll before price fully exits
-        buffer = (range_high - range_low) * 0.03  # 3% of range — only roll when price is truly at the edge
-        
+
+        # Use 3% buffer inside the range - roll before price fully exits
+        buffer = (range_high - range_low) * 0.03  # 3% of range - only roll when price is truly at the edge
+
         # Enforce minimum 5-minute cooldown between rolls
         last_roll = self.state.get("last_roll")
         if last_roll:
@@ -716,20 +752,25 @@ class GridManager:
                 from datetime import datetime
                 last_roll_time = datetime.fromisoformat(last_roll)
                 if datetime.now(timezone.utc) - last_roll_time < timedelta(minutes=5):
-                    logging.info("Roll cooldown active — skipping roll check (less than 5 min since last roll)")
+                    logging.info("Roll cooldown active - skipping roll check (less than 5 min since last roll)")
                     return  # Don't roll yet
             except Exception:
                 pass  # If parsing fails, allow roll
-        
+
         near_top = btc_price >= range_high - buffer
         near_bottom = btc_price <= range_low + buffer
-        
-        if near_top or near_bottom:
+
+        if not in_spike_cooldown and (near_top or near_bottom):
             direction = "up" if near_top else "down"
             logging.info(f"Price ${btc_price:,.0f} near {direction} band edge — triggering grid roll")
             rolled = await self.roll_grid(btc_price, direction)
             # After roll, check_fills below will work with the new order state
             # Update local state refs in case roll changed the state
+            buy_levels = self.state["levels"].get("buy", [])
+            sell_levels = self.state["levels"].get("sell", [])
+            size = self.state["size_per_level"]
+        elif in_spike_cooldown and (near_top or near_bottom):
+            logging.info(f"Price ${btc_price:,.0f} near band edge but volume spike cooldown active — skipping roll")
             buy_levels = self.state["levels"].get("buy", [])
             sell_levels = self.state["levels"].get("sell", [])
             size = self.state["size_per_level"]
@@ -739,26 +780,30 @@ class GridManager:
             size = self.state["size_per_level"]
 
         # ── Trend-based pause check (sustained downtrend) ────────────
-        try:
-            candles_4h = await fetch_candles("4H", limit=100)
-            ema_50 = calc_ema_single(candles_4h, 50)
-            trend_cfg = self.cfg.get("trend", {})
-            if ema_50 is not None:
-                pct_below = (ema_50 - btc_price) / ema_50
-                pause_threshold = trend_cfg.get("pause_threshold_pct", 0.03)
-                if pct_below > pause_threshold:
-                    count = self.state.get("trend_warning_count", 0) + 1
-                    self.state["trend_warning_count"] = count
-                    self._save_state()
-                    if count >= 4:  # 4 cycles = 2 minutes sustained
-                        await self._pause(f"Strong downtrend: price {pct_below:.1%} below 4h EMA(50)")
-                        await send_alert("📉 Strong Downtrend. Grid paused.")
-                        return
-                else:
-                    self.state["trend_warning_count"] = 0
-                    self._save_state()
-        except Exception:
-            pass  # Don't break the loop if trend check fails
+        # Skip during volume spike cooldown
+        if not in_spike_cooldown:
+            try:
+                candles_4h = await fetch_candles("4H", limit=100)
+                ema_50 = calc_ema_single(candles_4h, 50)
+                trend_cfg = self.cfg.get("trend", {})
+                if ema_50 is not None:
+                    pct_below = (ema_50 - btc_price) / ema_50
+                    pause_threshold = trend_cfg.get("pause_threshold_pct", 0.03)
+                    if pct_below > pause_threshold:
+                        count = self.state.get("trend_warning_count", 0) + 1
+                        self.state["trend_warning_count"] = count
+                        self._save_state()
+                        if count >= 4:  # 4 cycles = 2 minutes sustained
+                            await self._pause(f"Strong downtrend: price {pct_below:.1%} below 4h EMA(50)")
+                            await send_alert("📉 Strong Downtrend. Grid paused.")
+                            return
+                    else:
+                        self.state["trend_warning_count"] = 0
+                        self._save_state()
+            except Exception:
+                pass  # Don't break the loop if trend check fails
+        else:
+            logging.info("Volume spike cooldown active — skipping trend-based pause check")
 
         # Get current open orders from exchange
         live_orders = await self.api.get_open_orders()
@@ -831,7 +876,7 @@ class GridManager:
         for order in fills_processed:
             # Skip replacement for recovery exit orders
             if order.get("exit_order"):
-                logging.info(f"Exit order filled — no replacement (position being closed)")
+                logging.info(f"Exit order filled - no replacement (position being closed)")
                 continue
             await self._place_replacement(order, buy_levels, sell_levels, size, open_prices)
 
@@ -858,14 +903,14 @@ class GridManager:
                 if o.get("layer") == "recovery" and o.get("status") == "open"
             ]
             if not open_recovery_orders:
-                # All exit sells filled — position is closed
+                # All exit sells filled - position is closed
                 self.state["recovering_position"] = False
                 self.state["position_size_btc"] = 0
                 self.state["position_value_usd"] = 0
                 self._save_state()
-                logging.info("Position recovery complete — all exit sells filled")
+                logging.info("Position recovery complete - all exit sells filled")
 
-    async def _compute_candidate_levels(self, current_price: float) -> tuple[dict | None, float]:
+    async def _compute_candidate_levels(self, current_price: float) -> tuple[dict | None, float, float, dict]:
         """Fetch candles and indicators, generate candidate grid levels.
 
         Returns None on any error (do not proceed with roll).
@@ -891,12 +936,13 @@ class GridManager:
             skew = indicators["skew"]
             time_adj = indicators.get("time_awareness", {}).get("adj_multiplier", 1.0)
             funding_adj = indicators.get("funding_adj", {}).get("adj_multiplier", 1.0)
+            oi_div = indicators.get("oi_divergence", {"state": "neutral", "grid_implication": "none"})
 
             vp = indicators.get("volume_profile", {})
-            return self.generate_levels_from_volume_profile(vp, bands, atr, skew, current_price), time_adj, funding_adj
+            return self.generate_levels_from_volume_profile(vp, bands, atr, skew, current_price), time_adj, funding_adj, oi_div
         except Exception as e:
             logging.error(f"Failed to compute candidate levels for roll: {e}")
-            return None, 1.0, 1.0
+            return None, 1.0, 1.0, {"state": "neutral", "grid_implication": "none"}
 
     @staticmethod
     def _levels_overlap(old_buy: list, old_sell: list, new_buy: list, new_sell: list) -> float:
@@ -934,7 +980,7 @@ class GridManager:
         filled_side = filled_order["side"]
         filled_order_id = filled_order.get("order_id")
 
-        # If we don't have the filled order ID, we can't cancel it later — abort
+        # If we don't have the filled order ID, we can't cancel it later - abort
         if not filled_order_id:
             logging.error("Cannot cancel filled order: missing order_id")
             return
@@ -968,13 +1014,13 @@ class GridManager:
                     except Exception as e:
                         logging.error(f"Attempt {attempt + 1} failed: {e}")
                         if attempt == max_retries:
-                            # All retries failed — bot now holds an unhedged long position.
+                            # All retries failed - bot now holds an unhedged long position.
                             # The buy already filled (removed from the book), cancel can't close it.
                             logging.error(f"All {max_retries} retries failed for sell replacement after BUY fill @ ${filled_price:,.0f}. Position is now UNHEDGED.")
                             await send_alert(
                                 f"🚨 UNHEDGED POSITION · BUY filled @ ${filled_price:,.0f}\n"
                                 f"SELL replacement failed after {max_retries} retries.\n"
-                                f"Position is open — manual intervention required."
+                                f"Position is open - manual intervention required."
                             )
                         # Continue to next retry attempt
                 else:
@@ -1008,7 +1054,7 @@ class GridManager:
                     except Exception as e:
                         logging.error(f"Attempt {attempt + 1} failed: {e}")
                         if attempt == max_retries:
-                            # All retries failed — log error but do NOT cancel the filled sell order
+                            # All retries failed - log error but do NOT cancel the filled sell order
                             # (since a filled sell closes a position, not opens one)
                             logging.error(f"All {max_retries} retries failed for buy replacement after SELL fill")
                             await send_alert(
@@ -1030,7 +1076,7 @@ class GridManager:
 
         Args:
             current_price: Current BTC price
-            direction: "up" (price hit top — new sells needed) or "down" (price hit bottom — new buys needed)
+            direction: "up" (price hit top - new sells needed) or "down" (price hit bottom - new buys needed)
             new_levels: Dict with keys "buy_levels" and "sell_levels" from volume profile or BB fallback
 
         Returns:
@@ -1041,11 +1087,11 @@ class GridManager:
 
             size_per_level = self.state.get("size_per_level", 0)
             if size_per_level <= 0:
-                logging.error("size_per_level is zero or negative — cannot roll")
+                logging.error("size_per_level is zero or negative - cannot roll")
                 return False
 
             if direction == "up":
-                # Price hit top — cancel SELL orders, place new SELL orders above current price
+                # Price hit top - cancel SELL orders, place new SELL orders above current price
                 # Keep BUY orders intact
                 logging.info("Cancelling SELL orders, keeping BUY orders intact")
 
@@ -1064,7 +1110,7 @@ class GridManager:
                 # Place new sell orders from the relevant side of new_levels
                 new_sell_prices = new_levels.get("sell_levels", [])
                 if not new_sell_prices:
-                    logging.warning("No sell levels in new_levels — cannot complete one-sided roll")
+                    logging.warning("No sell levels in new_levels - cannot complete one-sided roll")
                     return False
 
                 placed = []
@@ -1093,7 +1139,7 @@ class GridManager:
                 logging.info(f"One-sided roll (up): cancelled {cancelled_count} sells, placed {len(placed)} new sells")
 
             elif direction == "down":
-                # Price hit bottom — cancel BUY orders, place new BUY orders below current price
+                # Price hit bottom - cancel BUY orders, place new BUY orders below current price
                 # Keep SELL orders intact
                 logging.info("Cancelling BUY orders, keeping SELL orders intact")
 
@@ -1112,7 +1158,7 @@ class GridManager:
                 # Place new buy orders from the relevant side of new_levels
                 new_buy_prices = new_levels.get("buy_levels", [])
                 if not new_buy_prices:
-                    logging.warning("No buy levels in new_levels — cannot complete one-sided roll")
+                    logging.warning("No buy levels in new_levels - cannot complete one-sided roll")
                     return False
 
                 placed = []
@@ -1236,7 +1282,7 @@ class GridManager:
         """Generate grid levels from Bollinger Bands + ATR + Trend Skew (fallback).
 
         Levels are anchored to band edges (lower for buys, upper for sells),
-        not current_price — ensuring deterministic output for the same bands.
+        not current_price - ensuring deterministic output for the same bands.
 
         Returns same format as analyst output:
         {"buy_levels": [...], "sell_levels": [...], "range_low": X, "range_high": Y}
@@ -1312,29 +1358,54 @@ class GridManager:
         logging.info(f"Rolling grid at ${current_price:,.0f} (direction: {direction})")
 
         # Fetch candidate levels first (before canceling anything)
-        new_levels, time_adj, funding_adj = await self._compute_candidate_levels(current_price)
+        new_levels, time_adj, funding_adj, oi_div = await self._compute_candidate_levels(current_price)
         if new_levels is None:
-            logging.error("Failed to compute candidate levels for roll — skipping")
+            logging.error("Failed to compute candidate levels for roll - skipping")
             return False
 
         new_buy = new_levels.get("buy_levels", [])
         new_sell = new_levels.get("sell_levels", [])
         if not new_buy or not new_sell:
-            logging.warning("Roll generated empty levels — skipping")
+            logging.warning("Roll generated empty levels - skipping")
             return False
 
+        # Apply OI divergence hints to adjust grid sizing
+        oi_state = oi_div.get("state", "neutral")
+        oi_implication = oi_div.get("grid_implication", "none")
+
         min_levels = self.cfg["grid"].get("min_levels", 2)
+        max_levels = self.cfg["grid"].get("max_levels", 8)
 
         # ── Try one-sided roll first ─────────────────────────────────
         # Determine the affected side and the preserved side
         if direction == "up":
-            # Price hit top — new sells needed
+            # Price hit top - new sells needed
             preserved_side_count = self._count_side_levels("buy")   # buy side stays
             replaced_side_count = len(new_sell)                       # new sell count
+            if oi_state == "new_shorts":
+                # Bearish trend - reduce sell count
+                new_sell = new_sell[:max(max_levels - 1, min_levels)]
+                replaced_side_count = len(new_sell)
+                logging.info(f"OI divergence: new_shorts - reduced sell count to {replaced_side_count}")
+            elif oi_state == "long_squeeze":
+                # Bullish continuation - widen sell spacing
+                new_sell = new_sell[::2] if len(new_sell) > 4 else new_sell
+                replaced_side_count = len(new_sell)
+                logging.info(f"OI divergence: long_squeeze - widened sell levels to {replaced_side_count}")
         elif direction == "down":
-            # Price hit bottom — new buys needed
+            # Price hit bottom - new buys needed
             preserved_side_count = self._count_side_levels("sell")   # sell side stays
             replaced_side_count = len(new_buy)                        # new buy count
+            if oi_state == "capitulation":
+                # Longs liquidating - be more aggressive with buy levels
+                new_buy = new_buy[-min(max_levels, len(new_buy) + 1):]
+                replaced_side_count = len(new_buy)
+                logging.info(f"OI divergence: capitulation - aggressive buy count {replaced_side_count}")
+            elif oi_state == "new_shorts":
+                # Bearish trend - reduce buy count by 1
+                new_buy = new_buy[-max(min_levels, max_levels - 1):]
+                replaced_side_count = len(new_buy)
+                logging.info(f"OI divergence: new_shorts - reduced buy count to {replaced_side_count}")
         else:
             logging.error(f"Invalid direction: {direction}")
             return False
@@ -1360,7 +1431,7 @@ class GridManager:
                             matched += 1
                     overlap_sell = matched / len(new_sell) if new_sell else 0
                     if overlap_sell > 0.80:
-                        logging.info(f"Sell side overlap {overlap_sell:.0%} — one-sided roll would be redundant")
+                        logging.info(f"Sell side overlap {overlap_sell:.0%} - one-sided roll would be redundant")
                     else:
                         # Per-side overlap is acceptable, try one-sided roll
                         rolled = await self.roll_one_sided(current_price, direction, new_levels)
@@ -1368,7 +1439,7 @@ class GridManager:
                             await send_alert(
                                 (
                                     f"🔄 Grid rolled {direction} (one-sided) · BTC @ ${current_price:,.0f}\n"
-                                    f"New range: ${self.state['range_low']:,.0f} – ${self.state['range_high']:,.0f}\n"
+                                    f"New range: ${self.state['range_low']:,.0f} - ${self.state['range_high']:,.0f}\n"
                                     f"Roll #{self.state['roll_count']}"
                                 )
                             )
@@ -1380,7 +1451,7 @@ class GridManager:
                         await send_alert(
                             (
                                 f"🔄 Grid rolled {direction} (one-sided) · BTC @ ${current_price:,.0f}\n"
-                                f"New range: ${self.state['range_low']:,.0f} – ${self.state['range_high']:,.0f}\n"
+                                f"New range: ${self.state['range_low']:,.0f} - ${self.state['range_high']:,.0f}\n"
                                 f"Roll #{self.state['roll_count']}"
                             )
                         )
@@ -1394,7 +1465,7 @@ class GridManager:
                             matched += 1
                     overlap_buy = matched / len(new_buy) if new_buy else 0
                     if overlap_buy > 0.80:
-                        logging.info(f"Buy side overlap {overlap_buy:.0%} — one-sided roll would be redundant")
+                        logging.info(f"Buy side overlap {overlap_buy:.0%} - one-sided roll would be redundant")
                     else:
                         # Per-side overlap is acceptable, try one-sided roll
                         rolled = await self.roll_one_sided(current_price, direction, new_levels)
@@ -1402,7 +1473,7 @@ class GridManager:
                             await send_alert(
                                 (
                                     f"🔄 Grid rolled {direction} (one-sided) · BTC @ ${current_price:,.0f}\n"
-                                    f"New range: ${self.state['range_low']:,.0f} – ${self.state['range_high']:,.0f}\n"
+                                    f"New range: ${self.state['range_low']:,.0f} - ${self.state['range_high']:,.0f}\n"
                                     f"Roll #{self.state['roll_count']}"
                                 )
                             )
@@ -1414,16 +1485,16 @@ class GridManager:
                         await send_alert(
                             (
                                 f"🔄 Grid rolled {direction} (one-sided) · BTC @ ${current_price:,.0f}\n"
-                                f"New range: ${self.state['range_low']:,.0f} – ${self.state['range_high']:,.0f}\n"
+                                f"New range: ${self.state['range_low']:,.0f} - ${self.state['range_high']:,.0f}\n"
                                 f"Roll #{self.state['roll_count']}"
                             )
                         )
                         return True
 
-            logging.info("One-sided roll skipped or failed — falling back to full roll")
+            logging.info("One-sided roll skipped or failed - falling back to full roll")
         else:
             logging.info(
-                f"One-sided roll not viable (preserved={preserved_side_count}, new={replaced_side_count}, min={min_levels}) — falling back to full roll"
+                f"One-sided roll not viable (preserved={preserved_side_count}, new={replaced_side_count}, min={min_levels}) - falling back to full roll"
             )
 
         # ── Fallback: full roll (existing logic) ─────────────────────
@@ -1437,7 +1508,7 @@ class GridManager:
         old_sell = self.state["levels"].get("sell", [])
         overlap = self._levels_overlap(old_buy, old_sell, new_buy, new_sell)
         if overlap > 0.80:
-            logging.info(f"Full grid overlap {overlap:.0%} — skipping roll, levels too similar")
+            logging.info(f"Full grid overlap {overlap:.0%} - skipping roll, levels too similar")
             return False
 
         # Cancel existing orders
@@ -1469,8 +1540,8 @@ class GridManager:
         await send_alert(
             (
                 f"🔄 Grid rolled {direction} (full)· BTC @ ${current_price:,.0f}\n"
-                f"New range: ${min(new_buy):,.0f} – ${max(new_sell):,.0f}\n"
-                f"Overlap was {overlap:.0%} — levels changed meaningfully\n"
+                f"New range: ${min(new_buy):,.0f} - ${max(new_sell):,.0f}\n"
+                f"Overlap was {overlap:.0%} - levels changed meaningfully\n"
                 f"Roll #{self.state['roll_count']}"
             )
         )
@@ -1482,17 +1553,17 @@ class GridManager:
     async def _redeploy_backup(self, backup_state: dict):
         """Redeploy the grid from a backup state (used when roll fails)."""
         logging.info("Reverting to backup grid state")
-        
+
         # Cancel any current orders (if any)
         try:
             await self.api.cancel_all_orders()
         except Exception as e:
             logging.error(f"Failed to cancel orders during revert: {e}")
             # Continue anyway - we'll try to redeploy on top of possibly existing orders
-        
+
         # Restore state from backup
         self.state = backup_state.copy()
-        
+
         # Redeploy using the backup levels and size
         try:
             await self.deploy(
@@ -1538,7 +1609,7 @@ class GridManager:
         trades = len(s.get("trades", []))
         return (
             f"Grid: {status}\n"
-            f"Range: ${s['range_low']:,.0f}–${s['range_high']:,.0f}\n"
+            f"Range: ${s['range_low']:,.0f}-${s['range_high']:,.0f}\n"
             f"Open orders: {len(open_orders)}\n"
             f"Fills today: {s.get('fill_count', 0)}\n"
             f"Realized PnL: ${realized_pnl:.2f}\n"

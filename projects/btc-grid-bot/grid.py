@@ -524,29 +524,20 @@ class GridManager:
 
         # Run AI analysis for grid levels
         levels = await run_analyst(cfg)
-        if levels.get("pause"):
-            # AI says pause
-            if abs(pos_pct) < 0.01:
-                # Dust position — just exit, no grid this cycle
-                logging.warning(f"AI says pause with dust position ({pos_pct:.1%}) — exiting. No grid deployed.")
-                sys.exit(1)
-            # Real position — must close it
-            logging.warning(f"AI recommends pause but position exists - deploying recovery instead")
-            return await self.recover_position(btc_amount, btc_price, cfg)
 
         # Multi-signal direction check
-        direction_ok = "pause"
+        direction_ok = "neutral_prefer_long"
         try:
             dir_result = await check_direction(cfg, btc_price)
             direction_ok = dir_result.get("recommendation", "neutral_prefer_long")
         except Exception:
-            pass
+            logging.warning("Direction check failed, defaulting to neutral_prefer_long")
         if direction_ok == "pause":
             # Strong bearish signals
             if abs(pos_pct) < 0.01:
-                # Dust position — just exit, no grid this cycle
-                logging.warning(f"Direction score says pause with dust position ({pos_pct:.1%}) — exiting. No grid deployed.")
-                sys.exit(1)
+                # Dust position — return empty, no grid this cycle
+                logging.warning(f"Direction score says pause with dust position ({pos_pct:.1%}) — no grid deployed. Returning empty levels.")
+                return {"buy_levels": [], "sell_levels": [], "reason": "Direction pause with dust position"}
             # Real position — better to close position than add more
             logging.warning(f"Direction score says pause + position exists - deploying recovery instead")
             return await self.recover_position(btc_amount, btc_price, cfg)

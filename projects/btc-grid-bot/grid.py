@@ -356,31 +356,35 @@ class GridManager:
         return True
 
     async def recover_position(self, btc_amount: float, btc_price: float, cfg: dict) -> dict:
-        """Recover from a naked BTC long position.
+        """Recover from a naked BTC position (long or short).
 
-        ONLY places sell orders to exit the position. NO buy orders.
-        Once position is closed (all sells filled), the bot deploys a fresh grid
-        normally on the next cycle.
+        Long position  → place SELL orders to close.
+        Short position → place BUY orders (cover). Both use absolute sizes.
 
-        Position sizing tiers:
-        - <50% of equity: close fast, sells at/near current price
-        - 50-200% of equity: ladder sells above current price
-        - >200% of equity: aggressive exit - all sells at current price or below
+        Position sizing tiers (based on absolute position value):
+        - <50% of equity: close fast, at/near current price
+        - 50-200% of equity: ladder away from current price
+        - >200% of equity: aggressive exit - all at/below current price
 
         Returns:
-            {"safe": bool, "sell_levels": [...], "buy_levels": [], "reason": ""}
+            {"safe": bool, "sell_levels": [...], "buy_levels": [...], "reason": ""}
         """
         # First, cancel any existing stale orders
         await self.api.cancel_all_orders()
 
-        pos_value_usd = btc_amount * btc_price
+        pos_value_usd = abs(btc_amount) * btc_price
         equity = await self.api.get_equity()
         pos_pct = pos_value_usd / equity if equity > 0 else 0
 
         pos_cfg = cfg.get("position", {})
         close_threshold = pos_cfg.get("close_threshold_pct", 0.50)
 
-        # ── ATR-based spacing for sell laddering ───────────────────
+        # Detect long vs short
+        is_short = btc_amount < 0
+        exit_side = "buy" if is_short else "sell"
+        exit_action = "cover" if is_short else "close"
+
+        # ── ATR-based spacing for exit laddering ───────────────────
         try:
             candles_15m = await fetch_candles("15m", limit=100)
             atr_data = calc_atr(candles_15m, period=14)
@@ -390,72 +394,96 @@ class GridManager:
 
         # ── Tier-based exit strategy ───────────────────────────────
         spacing = max(atr * 0.5, btc_price * 0.002)  # half ATR or 0.2%
-        sell_levels = []
-        sell_sizes = []
+        exit_levels = []
+        exit_sizes = []
+        abs_btc = abs(btc_amount)
 
         if pos_pct > 2.0:
-            # Very large (>200% equity) - exit ASAP, sells at/below current price
-            num_sells = 3
-            sell_size = btc_amount / num_sells
-            for i in range(num_sells):
-                price = btc_price - (spacing * (num_sells - 1 - i))  # below, at, slightly above
-                sell_levels.append(round(price, 0))
-                sell_sizes.append(sell_size)
-            sell_sizes[-1] = btc_amount - sum(sell_sizes[:-1])  # fix rounding
+            # Very large (>200% equity) - exit ASAP
+            num_exits = 3
+            exit_size = abs_btc / num_exits
+            for i in range(num_exits):
+                if is_short:
+                    # Short: BUY at/above current to cover
+                    price = btc_price + (spacing * i * 0.5)
+                else:
+                    # Long: SELL at/below current to close
+                    price = btc_price - (spacing * (num_exits - 1 - i))
+                exit_levels.append(round(price, 0))
+                exit_sizes.append(exit_size)
+            exit_sizes[-1] = abs_btc - sum(exit_sizes[:-1])  # fix rounding
             msg = (
-                f"🚨 CRITICAL: Position {btc_amount:.6f} BTC (${pos_value_usd:.2f}) is {pos_pct:.0%} of equity\n"
-                f"Aggressive exit: {num_sells} sells below/at current price"
+                f"🚨 CRITICAL: {'Short' if is_short else 'Long'} position {abs_btc:.6f} BTC "
+                f"(${pos_value_usd:.2f}) is {pos_pct:.0%} of equity\n"
+                f"Aggressive exit: {num_exits} {exit_side}s to {exit_action}"
             )
         elif pos_pct > close_threshold:
-            # Large (close_threshold-200% equity) - ladder sells above current price
-            num_sells = 4
-            sell_size = btc_amount / num_sells
-            for i in range(num_sells):
-                price = btc_price + (spacing * i * 0.7)  # tighter ladder
-                sell_levels.append(round(price, 0))
-                sell_sizes.append(sell_size)
-            sell_sizes[-1] = btc_amount - sum(sell_sizes[:-1])
+            # Large (close_threshold-200% equity) - ladder exits
+            num_exits = 4
+            exit_size = abs_btc / num_exits
+            for i in range(num_exits):
+                if is_short:
+                    # Short: BUY ladder above current
+                    price = btc_price + (spacing * i * 0.7)
+                else:
+                    # Long: SELL ladder above current
+                    price = btc_price + (spacing * i * 0.7)
+                exit_levels.append(round(price, 0))
+                exit_sizes.append(exit_size)
+            exit_sizes[-1] = abs_btc - sum(exit_sizes[:-1])
             msg = (
-                f"⚠️ Large position: {btc_amount:.6f} BTC (${pos_value_usd:.2f}) is {pos_pct:.0%} of equity\n"
-                f"Ladder exit: {num_sells} sells from ${sell_levels[0]:,.0f} to ${sell_levels[-1]:,.0f}"
+                f"⚠️ Large {'short' if is_short else 'long'} position: {abs_btc:.6f} BTC "
+                f"(${pos_value_usd:.2f}) is {pos_pct:.0%} of equity\n"
+                f"Ladder exit: {num_exits} {exit_side}s from ${exit_levels[0]:,.0f} to ${exit_levels[-1]:,.0f}"
             )
         else:
-            # Small (<close_threshold equity) - close fast, 2 sells at current and slightly above
-            num_sells = 2
-            sell_size = btc_amount / num_sells
-            for i in range(num_sells):
-                price = btc_price + (spacing * 0.5 * i)
-                sell_levels.append(round(price, 0))
-                sell_sizes.append(sell_size)
-            sell_sizes[-1] = btc_amount - sum(sell_sizes[:-1])
+            # Small (<close_threshold equity) - close fast
+            num_exits = 2
+            exit_size = abs_btc / num_exits
+            for i in range(num_exits):
+                if is_short:
+                    # Short: BUY at current and slightly above
+                    price = btc_price + (spacing * 0.5 * i)
+                else:
+                    # Long: SELL at current and slightly above
+                    price = btc_price + (spacing * 0.5 * i)
+                exit_levels.append(round(price, 0))
+                exit_sizes.append(exit_size)
+            exit_sizes[-1] = abs_btc - sum(exit_sizes[:-1])
             msg = (
-                f"📉 Position: {btc_amount:.6f} BTC (${pos_value_usd:.2f}) is {pos_pct:.0%} of equity\n"
-                f"Quick exit: {num_sells} sells at ${sell_levels[0]:,.0f} / ${sell_levels[-1]:,.0f}"
+                f"{'Short' if is_short else 'Long'} position: {abs_btc:.6f} BTC "
+                f"(${pos_value_usd:.2f}) is {pos_pct:.0%} of equity\n"
+                f"Quick exit: {num_exits} {exit_side}s at ${exit_levels[0]:,.0f} / ${exit_levels[-1]:,.0f}"
             )
 
-        # ── Place ONLY sell orders (NO buys) ───────────────────────
+        # ── Place exit orders (buys for shorts, sells for longs) ──
         placed = []
-        for i, (price, size) in enumerate(zip(sell_levels, sell_sizes)):
+        for i, (price, size) in enumerate(zip(exit_levels, exit_sizes)):
             try:
-                order = await self.api.place_limit_order("sell", price, size)
+                order = await self.api.place_limit_order(exit_side, price, size)
                 order["status"] = "open"
                 order["layer"] = "recovery"
                 order["exit_order"] = True  # mark as position exit, not grid
                 placed.append(order)
-                logging.info(f"Placed EXIT SELL @ ${price:,.0f} · {size:.6f} BTC")
+                logging.info(f"Placed EXIT {exit_side.upper()} @ ${price:,.0f} · {size:.6f} BTC")
                 await asyncio.sleep(0.3)
             except Exception as e:
-                logging.error(f"Failed to place exit sell @ ${price}: {e}")
+                logging.error(f"Failed to place exit {exit_side.upper()} @ ${price}: {e}")
 
-        # ── State update: NO buy levels during recovery ────────────
+        # ── State update ───────────────────────────────────────────
+        if is_short:
+            level_state = {"buy": exit_levels, "sell": []}
+        else:
+            level_state = {"buy": [], "sell": exit_levels}
+
         self.state.update({
             "active": True,
             "paused": False,
             "pause_reason": "",
-            "levels": {"buy": [], "sell": sell_levels},  # EMPTY buy list
-            "range_low": btc_price - spacing,  # approximate
-            "range_high": max(sell_levels),
-            "size_per_level": sell_sizes[0],
+            "levels": level_state,
+            "range_low": min(exit_levels),
+            "range_high": max(exit_levels),
+            "size_per_level": exit_sizes[0],
             "orders": placed,
             "equity_at_reset": equity,
             "peak_equity": equity,  # starts at reset equity
@@ -469,8 +497,8 @@ class GridManager:
 
         return {
             "safe": True,
-            "sell_levels": sell_levels,
-            "buy_levels": [],  # NO buys during recovery
+            "sell_levels": [] if is_short else exit_levels,
+            "buy_levels": exit_levels if is_short else [],
             "position_size": btc_amount,
             "position_value": pos_value_usd,
         }

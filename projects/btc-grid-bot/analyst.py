@@ -114,13 +114,29 @@ def find_swing_points(candles: list[dict], order: int = 3) -> dict:
         is_high = all(candles[i + j]["h"] <= price for j in range(-order, 0)) and \
                   all(candles[i + j]["h"] <= price for j in range(1, order + 1))
         if is_high:
-            swing_highs.append({"index": i, "price": round(price, 2), "ts": candles[i]["ts"]})
+            # Strength: how many surrounding candles confirm the swing
+            strength = 0
+            for j in range(-order, 0):
+                if candles[i + j]["h"] <= price * 0.999:
+                    strength += 1
+            for j in range(1, order + 1):
+                if candles[i + j]["h"] <= price * 0.999:
+                    strength += 1
+            swing_highs.append({"index": i, "price": round(price, 2), "ts": candles[i]["ts"], "strength": strength})
 
         price = candles[i]["l"]  # use low for swing lows
         is_low = all(candles[i + j]["l"] >= price for j in range(-order, 0)) and \
                  all(candles[i + j]["l"] >= price for j in range(1, order + 1))
         if is_low:
-            swing_lows.append({"index": i, "price": round(price, 2), "ts": candles[i]["ts"]})
+            # Strength: how many surrounding candles confirm the swing
+            strength = 0
+            for j in range(-order, 0):
+                if candles[i + j]["l"] >= price * 1.001:
+                    strength += 1
+            for j in range(1, order + 1):
+                if candles[i + j]["l"] >= price * 1.001:
+                    strength += 1
+            swing_lows.append({"index": i, "price": round(price, 2), "ts": candles[i]["ts"], "strength": strength})
 
     # Stats
     highs = [c["h"] for c in candles]
@@ -144,13 +160,16 @@ def find_swing_points(candles: list[dict], order: int = 3) -> dict:
     }
 
 
-def build_prompt(swing_15m: dict, swing_30m: dict, market_intel: str = "", indicators: str = "") -> str:
-    """Build the LLM prompt for swing-level analysis using pre-computed swing points.
-
-    Replaces raw CSV candle data with condensed swing point summaries
-    to reduce token usage by 70-80%.
-    """
-    # Format swing points compactly
+def build_prompt(
+    swing_15m: dict,
+    swing_30m: dict,
+    market_intel: str = "",
+    indicators: str = "",
+    grid_history: str = "",
+    account_context: str = "",
+    spacing_guidance: str = "",
+) -> str:
+    """Build an enhanced LLM prompt with full context."""
     highs_15 = swing_15m.get("swing_highs", [])
     lows_15 = swing_15m.get("swing_lows", [])
     highs_30 = swing_30m.get("swing_highs", [])
@@ -158,68 +177,82 @@ def build_prompt(swing_15m: dict, swing_30m: dict, market_intel: str = "", indic
     stats_15 = swing_15m.get("stats", {})
     stats_30 = swing_30m.get("stats", {})
 
-    # Format: time, price pairs for swing points
-    def format_swings(swings: list[dict]) -> str:
+    price = stats_15.get("current", 0)
+
+    # Format swing points with strength (confluence count)
+    def format_swings(swings: list[dict], label: str) -> str:
         if not swings:
             return "  (no clear swings detected)"
         lines = []
-        for s in swings[-15:]:  # cap at 15 most recent
+        for s in swings:
             from datetime import datetime, timezone
             t = datetime.fromtimestamp(s["ts"] / 1000, timezone.utc).strftime("%H:%M")
-            lines.append(f"  {t}: ${s['price']:,.0f}")
-        return "\n".join(lines[-8:])  # show last 8 max
+            strength = "★" * min(s.get("strength", 1), 3)
+            lines.append(f"  {t}: ${s['price']:,.0f} {strength}")
+        # Show up to 15, most recent
+        return "\n".join(lines[-15:])
 
-    price = stats_15.get("current", 0)
+    # Build the enhanced prompt
+    prompt = f"""You are a BTC market structure analyst for a GRID TRADING bot.
 
-    prompt = f"""You are a BTC market structure analyst for a grid trading bot.
+IMPORTANT: This is a GRID bot, not a directional trader. It places RESTING limit orders 
+above and below current price to profit from sideways volatility. The bot buys at support 
+levels and sells at resistance levels, repeatedly.
 
-Below are pre-computed swing points from BTC 15-minute and 30-minute candles.
+Your job: identify the best swing highs (sell levels) and swing lows (buy levels) 
+for placing limit orders. Think about where price is LIKELY TO REVERSE, not where it's going.
+
+{account_context}
 
 {indicators}
 
 {market_intel}
+
+{spacing_guidance}
 
 ## Market Summary
 - Current price: ${price:,.0f}
 - 15m range: ${stats_15.get('lowest', 0):,.0f} – ${stats_15.get('highest', 0):,.0f} ({stats_15.get('candle_count', 0)} candles)
 - 30m range: ${stats_30.get('lowest', 0):,.0f} – ${stats_30.get('highest', 0):,.0f} ({stats_30.get('candle_count', 0)} candles)
 
-## Swing Highs (resistance candidates)
+## Swing Highs (resistance candidates) — price reversed DOWN from these
 15m:
-{format_swings(highs_15)}
+{format_swings(highs_15, "15m")}
 30m:
-{format_swings(highs_30)}
+{format_swings(highs_30, "30m")}
 
-## Swing Lows (support candidates)
+## Swing Lows (support candidates) — price reversed UP from these
 15m:
-{format_swings(lows_15)}
+{format_swings(lows_15, "15m")}
 30m:
-{format_swings(lows_30)}
+{format_swings(lows_30, "30m")}
 
-Your job: identify the key swing highs and swing lows that price has clearly reversed from. These will be used as grid order levels.
+{grid_history}
 
-Rules:
-- 4 to 8 buy levels (support / swing lows) — below current price
-- 4 to 8 sell levels (resistance / swing highs) — above current price
-- Only include levels where price visibly reversed or consolidated
-- Round levels to nearest $50 for BTC
-- Do not invent levels — only use what the data shows
-- Consider market intel: high funding + crowded positions = potential liquidation cascades
+## Rules for level selection:
+1. 4-8 buy levels BELOW current price (support zones)
+2. 4-8 sell levels ABOVE current price (resistance zones)
+3. Place levels at actual swing reversals — NOT evenly spaced
+4. Round to nearest $50
+5. Min spacing between levels: see guidance above
+6. Do NOT invent levels — only use what the data shows
+7. High funding rates / crowded longs = risk of liquidation cascades (avoid placing sells too close)
+8. If price is strongly trending (not ranging), set "pause": true
 
-Return ONLY valid JSON, no commentary:
+Return ONLY valid JSON, no markdown, no commentary:
 {{
   "buy_levels": [82400, 81900, 81200],
   "sell_levels": [83500, 84100, 84800],
   "range_low": 82400,
   "range_high": 84800,
   "confidence": "high",
-  "note": "brief explanation",
+  "note": "brief explanation of structure",
   "pause": false,
   "pause_reason": null
 }}
 
-If you cannot identify clear structure (e.g. strongly trending, not enough data):
-set "pause": true and explain in "pause_reason".
+If you cannot identify clear structure (strongly trending, no reversals):
+set "pause": true and explain why in "pause_reason".
 """
     return prompt
 
@@ -324,7 +357,7 @@ async def call_llm(prompt: str, cfg: dict) -> dict:
         }
 
 
-async def run_analyst(cfg: dict) -> dict:
+async def run_analyst(cfg: dict, equity: float = 0, btc_price: float = 0, grid_manager=None) -> dict:
     """Main analyst pipeline: fetch candles → build prompt → call LLM → validate.
 
     Returns:
@@ -359,7 +392,61 @@ async def run_analyst(cfg: dict) -> dict:
     swing_15m = find_swing_points(candles_15m, order=3)
     swing_30m = find_swing_points(candles_30m, order=2)
 
-    prompt = build_prompt(swing_15m, swing_30m, market_intel_text, indicators_text)
+    # Compute ATR for spacing guidance
+    atr_value = 0
+    atr_pct = 0
+    try:
+        atr_data = gather_indicators(candles_15m, candles_30m, candles_4h, market_intel_data)
+        atr_value = atr_data.get("atr", {}).get("atr", 0)
+        if btc_price > 0:
+            atr_pct = atr_value / btc_price
+    except Exception:
+        pass
+
+    min_spacing = max(atr_value * 0.5, btc_price * 0.002) if btc_price > 0 else 0
+    spacing_guidance = f"""## Spacing Guidance
+- Current 15m ATR(14): ${atr_value:,.0f} ({atr_pct:.2%} of price)
+- Minimum level spacing: ${min_spacing:,.0f} (50% ATR)
+- Ideal buy/sell spacing: ${atr_value:,.0f}–${atr_value*2:,.0f}
+- Place levels at least ${min_spacing:,.0f} apart to avoid constant fills
+"""
+
+    # Prepare account context
+    if equity > 0 and btc_price > 0:
+        account_context = f"""## Account Context
+- Account equity: ${equity:,.2f} USDC
+- Max exposure: {cfg['capital'].get('max_exposure_multiplier', 3.0)}x equity = ${equity * cfg['capital'].get('max_exposure_multiplier', 3.0):,.0f}
+- Margin reserve: {cfg['capital'].get('margin_reserve_pct', 0.20):.0%} ({equity * cfg['capital'].get('margin_reserve_pct', 0.20):,.0f} USDC always reserved)
+- Realized PnL so far: ${0:,.2f}
+"""
+    else:
+        account_context = ""
+
+    # Prepare grid history
+    grid_history_text = ""
+    if grid_manager:
+        state = grid_manager.state
+        if state.get("trades"):
+            trades = state["trades"][-5:]
+            pnl = state.get("realized_pnl", 0)
+            fills = state.get("fill_count", 0)
+            grid_history_text = f"""## Previous Grid Session Results
+- Realized PnL: ${pnl:,.2f}
+- Total fills: {fills}
+- Completed trades: {len(state.get('trades', []))}
+- Recent trades:
+"""
+            for t in trades:
+                emoji = "✅" if t.get("pnl", 0) >= 0 else "❌"
+                grid_history_text += f"  {emoji} Buy ${t['buy_price']:,.0f} → Sell ${t['sell_price']:,.0f} | PnL ${t['pnl']:.2f}\n"
+
+    # Build prompt with all context
+    prompt = build_prompt(
+        swing_15m, swing_30m, market_intel_text, indicators_text,
+        grid_history=grid_history_text,
+        account_context=account_context,
+        spacing_guidance=spacing_guidance,
+    )
     result = await call_llm(prompt, cfg)
 
     # Validate output

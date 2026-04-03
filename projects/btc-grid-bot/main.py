@@ -284,7 +284,7 @@ async def startup(cfg: dict) -> tuple[LighterAPI, GridManager, dict]:
 
     # ── 3. Fresh deploy ──────────────────────────────────────────
     await send_alert("🔍 Running market analysis...")
-    levels = await run_analyst(cfg)
+    levels = await run_analyst(cfg, equity=equity, btc_price=price, grid_manager=gm)
 
     # Trend filter check — after analyst, before capital check
     if not levels.get("pause"):

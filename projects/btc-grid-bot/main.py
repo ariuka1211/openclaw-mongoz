@@ -22,13 +22,13 @@ from datetime import datetime, timezone, timedelta
 import yaml
 from dotenv import load_dotenv
 
-from calculator import calculate_grid
-from grid import GridManager
-from lighter_api import LighterAPI
-from tg_alerts import send_alert
-from analyst import run_analyst, fetch_candles
+from core.calculator import calculate_grid
+from core.grid_manager import GridManager
+from api.lighter import LighterAPI
+from notifications.alerts import send_alert
+from analysis.analyst import run_analyst, fetch_candles
 from indicators import calc_ema_single, time_awareness_adjustment, funding_rate_adjustment, direction_score
-from market_intel import gather_all_intel
+from market.intel import gather_all_intel
 
 load_dotenv()
 
@@ -209,7 +209,7 @@ async def check_direction(cfg: dict, price: float) -> dict:
         candles_1d = []
     
     # Get market intel (funding, OI)
-    from market_intel import gather_all_intel
+    from market.intel import gather_all_intel
     from indicators import gather_indicators
     
     market_intel = await gather_all_intel(cfg)

@@ -263,7 +263,7 @@ async def startup(cfg: dict) -> tuple[LighterAPI, GridManager, dict]:
                 "buy_levels": result["buy_levels"],
                 "sell_levels": result["sell_levels"],
                 "range_low": min(result["buy_levels"]) if result["buy_levels"] else price,
-                "range_high": max(result["sell_levels"]),
+                "range_high": max(result["sell_levels"]) if result["sell_levels"] else price,
             }
             return api, gm, levels
 

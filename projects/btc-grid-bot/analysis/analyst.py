@@ -597,6 +597,45 @@ async def run_analyst(cfg: dict, equity: float = 0, btc_price: float = 0, grid_m
         result["range_high"] = 0
         return result
 
+    # Store AI decision in memory for pattern analysis
+    try:
+        from core.memory_layer import get_memory  # Lazy import to avoid circular deps
+        current_price = btc_price if btc_price > 0 else (swing_15m.get("current_price", 0) if swing_15m else 0)
+        mem = get_memory()
+        mem.store_analysis(
+            result,
+            market_context={
+                "current_price": current_price,
+                "equity": equity,
+                "regime": indicators_data.get("regime", "unknown"),
+                "atr": indicators_data.get("atr", {}).get("atr", 0),
+                "funding_rate": market_intel_data.get("current", {}).get("funding_rate", 0),
+                "oi_divergence": indicators_data.get("oi_divergence", {}).get("label", "neutral"),
+                "volume_regime": indicators_data.get("volume_spike", {}).get("regime", "normal")
+            },
+            indicators={
+                "swing_highs_15m": len(swing_15m.get("swing_highs", [])),
+                "swing_lows_15m": len(swing_15m.get("swing_lows", [])),
+                "swing_highs_30m": len(swing_30m.get("swing_highs", [])),
+                "swing_lows_30m": len(swing_30m.get("swing_lows", [])),
+                "candle_range_15m": swing_15m.get("stats", {}).get("highest", 0) - swing_15m.get("stats", {}).get("lowest", 0)
+            },
+            tags=["live", direction, indicators_data.get("regime", "unknown")]
+        )
+        
+        # Apply intelligence feedback to adjust confidence
+        try:
+            from core.intelligence import get_intelligence_report
+            intel_report = get_intelligence_report(days=7)
+            if intel_report.get("status") == "success":
+                result = _apply_intelligence_feedback(result, intel_report, indicators_data.get("regime", "unknown"))
+        except Exception as e:
+            logging.debug(f"Intelligence feedback failed (non-critical): {e}")
+        
+    except Exception as e:
+        # Don't fail the analysis if memory storage fails
+        print(f"⚠️ Failed to store analysis in memory: {e}")
+
     # Set pause true for backward compat if direction is pause
     if direction == "pause":
         result["pause"] = True
@@ -731,6 +770,74 @@ async def run_analyst(cfg: dict, equity: float = 0, btc_price: float = 0, grid_m
                 return result
 
     return result
+
+
+def _apply_intelligence_feedback(result: dict, intel_report: dict, current_regime: str) -> dict:
+    """
+    Apply intelligence feedback to adjust AI analysis results.
+    Uses patterns to modify confidence, suggest direction bias, or recommend pausing.
+    """
+    try:
+        recommendations = intel_report.get("recommendations", [])
+        modified_result = result.copy()
+        feedback_applied = []
+        
+        # Apply direction bias feedback
+        direction_rec = next((r for r in recommendations if r.get("type") == "direction_bias"), None)
+        if direction_rec and direction_rec.get("priority") == "high":
+            preferred_dir = "short" if "short" in direction_rec.get("title", "") else "long"
+            current_dir = result.get("direction")
+            
+            if current_dir == preferred_dir:
+                # Boost confidence for preferred direction
+                if result.get("confidence") == "medium":
+                    modified_result["confidence"] = "high"
+                    feedback_applied.append("boosted_confidence_preferred_direction")
+                elif result.get("confidence") == "low":
+                    modified_result["confidence"] = "medium"
+                    feedback_applied.append("boosted_confidence_preferred_direction")
+            else:
+                # Reduce confidence for non-preferred direction
+                if result.get("confidence") == "high":
+                    modified_result["confidence"] = "medium"
+                    feedback_applied.append("reduced_confidence_non_preferred")
+        
+        # Apply market regime feedback
+        regime_rec = next((r for r in recommendations if r.get("type") == "market_regime"), None)
+        if regime_rec and current_regime in regime_rec.get("finding", ""):
+            if "avoid" in regime_rec.get("recommendation", ""):
+                # Current regime is historically bad - consider pausing
+                if result.get("confidence") in ["low", "medium"]:
+                    modified_result["direction"] = "pause"
+                    modified_result["pause_reason"] = f"Historical underperformance in {current_regime} markets"
+                    feedback_applied.append("paused_due_to_regime")
+                else:
+                    # Just reduce confidence
+                    modified_result["confidence"] = "low"
+                    feedback_applied.append("reduced_confidence_bad_regime")
+        
+        # Apply risk management feedback
+        risk_rec = next((r for r in recommendations if r.get("type") == "risk_management"), None)
+        if risk_rec and risk_rec.get("priority") == "high":
+            # During losing streaks, be more conservative
+            if result.get("confidence") == "high":
+                modified_result["confidence"] = "medium"
+                feedback_applied.append("reduced_confidence_risk_management")
+            elif result.get("confidence") == "medium":
+                modified_result["confidence"] = "low"
+                feedback_applied.append("reduced_confidence_risk_management")
+        
+        # Log feedback if any was applied
+        if feedback_applied:
+            original_note = result.get("note", "")
+            feedback_note = f" [AI learned: {', '.join(feedback_applied)}]"
+            modified_result["note"] = (original_note + feedback_note)[:200]  # Truncate to keep reasonable
+        
+        return modified_result
+        
+    except Exception as e:
+        logging.debug(f"Intelligence feedback application failed: {e}")
+        return result
 
 
 async def main():

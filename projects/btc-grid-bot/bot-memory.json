@@ -1,0 +1,88 @@
+[
+  {
+    "_timestamp": "2026-04-05T19:18:09.862512+00:00",
+    "_type": "analysis",
+    "_tags": [
+      "live",
+      "long",
+      "bullish_low"
+    ],
+    "_version": 1,
+    "analysis_result": {
+      "direction": "long",
+      "buy_levels": [
+        66450,
+        66700,
+        66950,
+        67200
+      ],
+      "sell_levels": [
+        67650,
+        67900,
+        68150,
+        68400
+      ],
+      "range_low": 66450,
+      "range_high": 68400,
+      "confidence": "medium",
+      "note": "Symmetric ranging structure with price in upper BB half. Buys anchored at clustered 15m/30m swing lows and volume support. Sells placed at recent swing highs and HVN resistance. Extreme positive funding and contracting bands warrant wider spacing and reduced size to mitigate long squeeze risk.",
+      "pause_reason": null
+    },
+    "market_context": {
+      "current_price": 67387.1,
+      "equity": 85.189126,
+      "regime": "bullish_low",
+      "atr": 122.48,
+      "funding_rate": 0.001889,
+      "oi_divergence": "Price and OI both flat \u2014 no clear divergence signal",
+      "volume_regime": "normal"
+    },
+    "indicators": {
+      "swing_highs_15m": 23,
+      "swing_lows_15m": 23,
+      "swing_highs_30m": 27,
+      "swing_lows_30m": 31,
+      "candle_range_15m": 1259.9000000000087
+    },
+    "direction": "long",
+    "confidence": "medium",
+    "note": "Symmetric ranging structure with price in upper BB half. Buys anchored at clustered 15m/30m swing lows and volume support. Sells placed at recent swing highs and HVN resistance. Extreme positive funding and contracting bands warrant wider spacing and reduced size to mitigate long squeeze risk.",
+    "buy_levels": [
+      66450,
+      66700,
+      66950,
+      67200
+    ],
+    "sell_levels": [
+      67650,
+      67900,
+      68150,
+      68400
+    ],
+    "paused": null,
+    "pause_reason": null
+  },
+  {
+    "_timestamp": "2026-04-05T19:18:25.301663+00:00",
+    "_type": "session_end",
+    "_tags": [
+      "session_summary"
+    ],
+    "_version": 1,
+    "session_duration_hours": 11.9,
+    "grid_direction": "long",
+    "realized_pnl": -0.81,
+    "equity_change": -0.09,
+    "trades": 11,
+    "fill_count": 13,
+    "win_rate": 0.273,
+    "roll_count": 5,
+    "range_width": 67.0,
+    "issues": [
+      "excessive_rolls",
+      "low_win_rate"
+    ],
+    "peak_equity": 85.279449,
+    "max_drawdown_pct": 0.0095
+  }
+]

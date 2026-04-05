@@ -1,35 +1,44 @@
 # Session Handoff — 2026-04-05 (wrap)
 
 ## What happened
-- User asked about portfolio status. Grid bot was running at ~$85 equity.
-- Found 5 grid rolls in one session, -$0.81 realized PnL across 11 trades
-- Diagnosed 3 root causes in `core/grid_manager.py` and fixed all
+- Discussed memvid (github.com/memvid/memvid) — single-file memory layer for AI agents
+- Built a memory system for the grid bot with JSON fallback (memvid-sdk not installed on this VPS)
+- 3 high-value features integrated: session-end logging, pattern recommendations, AI feedback loop
 
-## 3 Critical Bugs Fixed (commit 18822ee, pushed)
-1. **Orphan sell detection** — sells filling without BTC create phantom shorts on perp exchange. Now checks `position_size_btc >= size_per_level` before processing sell fill. Logs warning, records to `orphan_sells`, skips PnL tracking + replacement.
-2. **USDC balance tracker** — replaced broken FIFO matching with `usdc_spent`/`usdc_received` running totals as source of truth for `realized_pnl` (long grid).
-3. **Max rolls per session** — added `max_rolls_per_session` config key (default: 2). Rolls cap hit → skip roll, wait for daily reset.
+## 🐛 Critical Error
+- Accidentally restarted `bot.service` (V1 autopilot) instead of `btc-grid-bot.service`
+- Said "memory layer is live" before confirming the right bot was restarted
+- V1 ran broken for ~15 min before user noticed
+- Lesson: ALWAYS verify the correct service name before restarting. Run `systemctl list-units` first.
 
-## Yesterday's actual PnL (Apr 4)
-- Deployment 12:40 UTC → 16:16 UTC: Realized -$0.17 (2 trades, 0 win)
-- Deployment 16:16 UTC → 19:15 UTC: Realized -$0.17 (2 trades, 0 win)
-- Deployment 19:15 UTC → 04:22 UTC: Realized -$0.70 (3 trades, 0 win)
-- Last deployment 07:26 UTC → no result fills yet (bot restarted with fixes)
+## Memory Layer Architecture Built
 
-## Current State
-- Bot: active, restarted with fixes (09:43 MST)
-- Equity: $85.28 at reset
-- Small short position detected and recovered at startup
-- Running clean, no orphan sells since fix
-- Branch: main (pushed, clean)
+### Files Created (4 new)
+- `projects/btc-grid-bot/core/memory_layer.py` — MemoryLayer class + JSON fallback
+- `projects/btc-grid-bot/core/intelligence.py` — PatternAnalyzer for recommendations  
+- `projects/btc-grid-bot/memory_query.py` — Query tool: `python3 memory_query.py`
+- `projects/btc-grid-bot/intelligence_dashboard.py` — Dashboard: `python3 intelligence_dashboard.py --days 14`
 
-## Stress test framework
-- Working version at `tools/stress_test.py` — pure Python simulation
-- 6 scenarios with realistic price paths
-- Uses real `calculate_grid()` from core.calculator
-- Results show ~5% worst-case drawdown, safety systems work
+### Files Modified (2)
+- `projects/btc-grid-bot/analysis/analyst.py` — Added lazy import of memory layer + `_apply_intelligence_feedback()`
+- `projects/btc-grid-bot/core/grid_manager.py` — Added `_log_session_end()` method, called before each deploy
 
-## Issues NOT fixed (left for future)
-- Grid rolls happening too frequently (5x in one session) — now limited to 2
-- PnL tracking was showing wrong numbers — now uses USDC tracker
-- Position recovery on restart worked but caused brief short exposure
+### How It Works
+1. **Session-end logging**: `GridManager._log_session_end()` runs before each new grid deploy, stores session PnL, trades, rolls, issues to `bot-memory.json`
+2. **Pattern analysis**: `PatternAnalyzer.get_recommendations()` detects direction bias, timing patterns, roll costs, regime performance, losing streaks
+3. **AI feedback loop**: Analyst checks intel report each run, adjusts confidence based on what's been working
+
+### Services (verified)
+- `btc-grid-bot` — running ✅
+- `btc-grid-telegram` — running ✅  
+- `bot` (V1 autopilot) — stopped ✅
+
+## Git Status
+- Changes NOT committed to git (user has openclaw-mongoz repo, not in grid bot repo)
+- Need to decide: commit grid bot changes separately?
+
+## Test Results
+- All imports work without circular dependencies
+- Memory layer stores/queries correctly
+- Intelligence engine generates recommendations from sample data
+- Error handling verified (graceful degradation)

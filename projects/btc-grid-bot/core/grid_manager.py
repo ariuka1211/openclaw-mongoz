@@ -292,6 +292,9 @@ class GridManager(CapitalMixin, OrderMixin):
         cancelled = await self.api.cancel_all_orders()
         if cancelled > 0:
             logging.info(f"Cancelled {cancelled} existing orders")
+        
+        # Log the ending session to memory before reset
+        await self._log_session_end()
 
         # Place all orders
         placed_orders = []
@@ -432,6 +435,9 @@ class GridManager(CapitalMixin, OrderMixin):
         cancelled = await self.api.cancel_all_orders()
         if cancelled > 0:
             logging.info(f"Cancelled {cancelled} existing orders")
+        
+        # Log the ending session to memory before reset
+        await self._log_session_end()
 
         # Place SELL orders first (opening shorts)
         placed_orders = []
@@ -659,6 +665,36 @@ class GridManager(CapitalMixin, OrderMixin):
                 await send_alert(
                     f"✅ {order['side'].upper()} filled @ ${order['price']:,.0f} · {size:.5f} BTC"
                 )
+                
+                # Store fill in memory for pattern analysis
+                try:
+                    from core.memory_layer import get_memory
+                    mem = get_memory()
+                    deploy_time = self.state.get("last_reset", datetime.now(timezone.utc).isoformat())
+                    deploy_dt = datetime.fromisoformat(deploy_time.replace('Z', '+00:00'))
+                    time_since_deploy = (datetime.now(timezone.utc) - deploy_dt).total_seconds() // 60  # minutes
+                    
+                    mem.store_trade_fill(
+                        {
+                            "side": order["side"],
+                            "price": order["price"],
+                            "size": size,
+                            "level": order.get("level", 0),
+                            "grid_direction": self.state.get("grid_direction", "long"),
+                            "time_since_deploy_min": time_since_deploy
+                        },
+                        session_context={
+                            "roll_count": self.state.get("roll_count", 0),
+                            "fill_count": self.state.get("fill_count", 0),
+                            "current_equity": await self.api.get_equity() if hasattr(self.api, 'get_equity') else 0,
+                            "current_price": btc_price,
+                            "range_low": self.state.get("range_low", 0),
+                            "range_high": self.state.get("range_high", 0)
+                        },
+                        tags=["live_fill", order["side"], self.state.get("grid_direction", "long")]
+                    )
+                except Exception as e:
+                    logging.warning(f"Failed to store fill in memory: {e}")
 
         # BUG 1 FIX: Orphan sell detection (long grid only)
         grid_direction = self.state.get("grid_direction", "long")
@@ -743,6 +779,36 @@ class GridManager(CapitalMixin, OrderMixin):
                         # BUG 2: Update realized_pnl from USDC tracker (source of truth)
                         self.state["realized_pnl"] = round(usdc_received - usdc_spent, 2)
                         self._save_state()
+                        
+                        # Store completed trade in memory
+                        try:
+                            from core.memory_layer import get_memory
+                            mem = get_memory()
+                            deploy_time = self.state.get("last_reset", datetime.now(timezone.utc).isoformat())
+                            deploy_dt = datetime.fromisoformat(deploy_time.replace('Z', '+00:00'))
+                            trade_duration_min = (datetime.now(timezone.utc) - deploy_dt).total_seconds() // 60
+                            
+                            mem.store_trade_fill(
+                                {
+                                    "type": "completed_trade",
+                                    "buy_price": buy["price"],
+                                    "sell_price": order["price"],
+                                    "size": buy_size,
+                                    "pnl": round(pnl, 2),
+                                    "trade_duration_min": trade_duration_min,
+                                    "grid_direction": "long",
+                                    "is_winner": pnl >= 0
+                                },
+                                session_context={
+                                    "roll_count": self.state.get("roll_count", 0),
+                                    "completed_trades": len(self.state.get("trades", [])),
+                                    "session_pnl": round(usdc_received - usdc_spent, 2),
+                                    "current_price": btc_price
+                                },
+                                tags=["completed_trade", "long", "win" if pnl >= 0 else "loss"]
+                            )
+                        except Exception as e:
+                            logging.warning(f"Failed to store completed trade in memory: {e}")
             else:  # short grid
                 if order["side"] == "buy":
                     pending = self.state.get("pending_sells", [])
@@ -762,6 +828,36 @@ class GridManager(CapitalMixin, OrderMixin):
                         # Short grid: realized_pnl stays from individual matching
                         self.state["realized_pnl"] = round(self.state.get("realized_pnl", 0) + pnl, 2)
                         self._save_state()
+                        
+                        # Store completed short trade in memory
+                        try:
+                            from core.memory_layer import get_memory
+                            mem = get_memory()
+                            deploy_time = self.state.get("last_reset", datetime.now(timezone.utc).isoformat())
+                            deploy_dt = datetime.fromisoformat(deploy_time.replace('Z', '+00:00'))
+                            trade_duration_min = (datetime.now(timezone.utc) - deploy_dt).total_seconds() // 60
+                            
+                            mem.store_trade_fill(
+                                {
+                                    "type": "completed_trade",
+                                    "sell_price": sell["price"],  # entry
+                                    "buy_price": order["price"],  # exit
+                                    "size": sell_size,
+                                    "pnl": round(pnl, 2),
+                                    "trade_duration_min": trade_duration_min,
+                                    "grid_direction": "short",
+                                    "is_winner": pnl >= 0
+                                },
+                                session_context={
+                                    "roll_count": self.state.get("roll_count", 0),
+                                    "completed_trades": len(self.state.get("trades", [])),
+                                    "session_pnl": self.state.get("realized_pnl", 0),
+                                    "current_price": btc_price
+                                },
+                                tags=["completed_trade", "short", "win" if pnl >= 0 else "loss"]
+                            )
+                        except Exception as e:
+                            logging.warning(f"Failed to store completed short trade in memory: {e}")
 
         # Place replacements for each fill
         for order in fills_processed:
@@ -1391,6 +1487,85 @@ class GridManager(CapitalMixin, OrderMixin):
         self.state["active"] = False
         self._save_state()
         await send_alert(f"⚠️ Grid paused: {reason}\nCancelled {cancelled} orders.")
+
+    async def _log_session_end(self):
+        """Log the ending session to memory before reset."""
+        try:
+            # Only log if we have an active session
+            if not self.state.get("last_reset"):
+                return
+            
+            from core.memory_layer import get_memory
+            
+            # Calculate session duration
+            from datetime import datetime, timezone
+            reset_time = self.state.get("last_reset")
+            reset_dt = datetime.fromisoformat(reset_time.replace('Z', '+00:00'))
+            session_duration_hours = (datetime.now(timezone.utc) - reset_dt).total_seconds() / 3600
+            
+            # Gather session stats
+            trades = self.state.get("trades", [])
+            realized_pnl = self.state.get("realized_pnl", 0.0)
+            fill_count = self.state.get("fill_count", 0)
+            roll_count = self.state.get("roll_count", 0)
+            grid_direction = self.state.get("grid_direction", "long")
+            
+            # Calculate win rate
+            winning_trades = sum(1 for t in trades if t.get("pnl", 0) >= 0)
+            win_rate = winning_trades / len(trades) if trades else 0
+            
+            # Get current equity
+            try:
+                current_equity = await self.api.get_equity()
+                equity_at_reset = self.state.get("equity_at_reset", current_equity)
+                equity_change = current_equity - equity_at_reset
+            except:
+                current_equity = 0
+                equity_change = 0
+            
+            # Identify issues
+            issues = []
+            if self.state.get("orphan_sells"):
+                issues.append(f"orphan_sells({len(self.state['orphan_sells'])})")
+            if roll_count >= 2:
+                issues.append("excessive_rolls")
+            if win_rate < 0.5 and len(trades) >= 3:
+                issues.append("low_win_rate")
+            if realized_pnl < -1.0:
+                issues.append("significant_loss")
+            
+            # Store session summary in memory
+            mem = get_memory()
+            mem.store_session_end({
+                "session_duration_hours": round(session_duration_hours, 1),
+                "grid_direction": grid_direction,
+                "realized_pnl": realized_pnl,
+                "equity_change": round(equity_change, 2),
+                "trades": len(trades),
+                "fill_count": fill_count,
+                "win_rate": round(win_rate, 3),
+                "roll_count": roll_count,
+                "range_width": self.state.get("range_high", 0) - self.state.get("range_low", 0),
+                "issues": issues,
+                "peak_equity": self.state.get("peak_equity", current_equity),
+                "max_drawdown_pct": self._calculate_max_drawdown()
+            })
+            
+            logging.info(f"Session logged: {realized_pnl:.2f} PnL, {len(trades)} trades, {win_rate:.1%} win rate")
+            
+        except Exception as e:
+            logging.warning(f"Failed to log session end: {e}")
+    
+    def _calculate_max_drawdown(self) -> float:
+        """Calculate max drawdown from peak during this session."""
+        try:
+            peak = self.state.get("peak_equity", 0)
+            current = self.state.get("equity_at_reset", 0) + self.state.get("realized_pnl", 0)
+            if peak > 0:
+                return round((peak - current) / peak, 4)
+        except:
+            pass
+        return 0.0
 
     # ── Status ───────────────────────────────────────────────────
 

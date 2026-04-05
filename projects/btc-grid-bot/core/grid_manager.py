@@ -68,6 +68,9 @@ class GridManager(CapitalMixin, OrderMixin):
             "equity_pnl": 0.0,
             "recovering_position": False,
             "position_size_btc": 0.0,
+            "orphan_sells": [],
+            "usdc_spent": 0.0,
+            "usdc_received": 0.0,
             "position_value_usd": 0.0,
             "has_existing_position": False,
             "position_avg_price": 0.0,
@@ -567,15 +570,24 @@ class GridManager(CapitalMixin, OrderMixin):
         near_top = btc_price >= range_high - buffer
         near_bottom = btc_price <= range_low + buffer
 
+        # ── Roll cap: max rolls per session ───────────────────────────
+        roll_count = self.state.get("roll_count", 0)
+        max_rolls = self.cfg.get("grid", {}).get("max_rolls_per_session", 2)
+        roll_capped = roll_count >= max_rolls
+
         if not in_spike_cooldown and (near_top or near_bottom):
             direction = "up" if near_top else "down"
-            logging.info(f"Price ${btc_price:,.0f} near {direction} band edge — triggering grid roll")
-            rolled = await self.roll_grid(btc_price, direction)
-            # After roll, check_fills below will work with the new order state
-            # Update local state refs in case roll changed the state
-            buy_levels = self.state["levels"].get("buy", [])
-            sell_levels = self.state["levels"].get("sell", [])
-            size = self.state["size_per_level"]
+            if roll_capped:
+                logging.info(f"Max rolls ({max_rolls}) reached this session — skipping roll, will wait for daily reset")
+                buy_levels = self.state["levels"].get("buy", [])
+                sell_levels = self.state["levels"].get("sell", [])
+                size = self.state["size_per_level"]
+            else:
+                logging.info(f"Price ${btc_price:,.0f} near {direction} band edge — triggering grid roll")
+                rolled = await self.roll_grid(btc_price, direction)
+                buy_levels = self.state["levels"].get("buy", [])
+                sell_levels = self.state["levels"].get("sell", [])
+                size = self.state["size_per_level"]
         elif in_spike_cooldown and (near_top or near_bottom):
             logging.info(f"Price ${btc_price:,.0f} near band edge but volume spike cooldown active — skipping roll")
             buy_levels = self.state["levels"].get("buy", [])
@@ -648,40 +660,77 @@ class GridManager(CapitalMixin, OrderMixin):
                     f"✅ {order['side'].upper()} filled @ ${order['price']:,.0f} · {size:.5f} BTC"
                 )
 
-        # Track buy fills for PnL matching (direction-dependent)
+        # BUG 1 FIX: Orphan sell detection (long grid only)
         grid_direction = self.state.get("grid_direction", "long")
-        
+        position_size_btc = self.state.get("position_size_btc", 0.0)
+        size_per_level = self.state.get("size_per_level", 0)
+
+        # BUG 2 FIX: USDC balance tracker for accurate PnL
+        usdc_spent = self.state.get("usdc_spent", 0.0)
+        usdc_received = self.state.get("usdc_received", 0.0)
+
+        # Track buy fills and detect orphan sells for long grid
         for order in fills_processed:
             if grid_direction == "long":
                 if order["side"] == "buy":
                     self.state.setdefault("pending_buys", [])
                     self.state["pending_buys"].append({
                         "price": order["price"],
-                        "size": self.state.get("size_per_level", 0),
+                        "size": size_per_level,
                         "ts": datetime.now(timezone.utc).isoformat(),
                     })
+                    # BUG 2: Track USDC spent on buys
+                    usdc_spent += order["price"] * size_per_level
+                    self.state["usdc_spent"] = round(usdc_spent, 2)
                     self._save_state()
+                elif order["side"] == "sell":
+                    # BUG 1: Check if we actually have BTC to sell
+                    if position_size_btc >= size_per_level:
+                        self.state.setdefault("pending_sells", [])
+                        self.state["pending_sells"].append({
+                            "price": order["price"],
+                            "size": size_per_level,
+                            "ts": datetime.now(timezone.utc).isoformat(),
+                        })
+                        # BUG 2: Track USDC received on sells
+                        usdc_received += order["price"] * size_per_level
+                        self.state["usdc_received"] = round(usdc_received, 2)
+                        self._save_state()
+                    else:
+                        logging.warning(
+                            f"Sell filled without BTC — orphan fill at ${order['price']:,.0f} · size {size_per_level}"
+                        )
+                        await send_alert(
+                            f"⚠️ Orphan sell fill at ${order['price']:,.0f} — no BTC to sell"
+                        )
+                        # Record orphan but do NOT track for PnL or replacement
+                        self.state.setdefault("orphan_sells", []).append({
+                            "price": order["price"],
+                            "size": size_per_level,
+                            "ts": datetime.now(timezone.utc).isoformat(),
+                        })
+                        self._save_state()
             else:  # short grid
                 if order["side"] == "sell":
                     self.state.setdefault("pending_sells", [])
                     self.state["pending_sells"].append({
                         "price": order["price"],
-                        "size": self.state.get("size_per_level", 0),
-
+                        "size": size_per_level,
                         "ts": datetime.now(timezone.utc).isoformat(),
                     })
                     self._save_state()
 
-        # Match fills for realized PnL (direction-dependent)
+        # Match fills for realized PnL (direction-dependent) - for trade display only
+        # BUG 2: real PnL is now usdc_received - usdc_spent (USDC tracker)
         for order in fills_processed:
             if grid_direction == "long":
                 if order["side"] == "sell":
+                    # Only match if this was a real sell (not orphan)
                     pending = self.state.get("pending_buys", [])
                     if pending:
                         buy = pending.pop(0)
                         buy_size = buy.get("size", self.state.get("size_per_level", 0))
                         pnl = (order["price"] - buy["price"]) * buy_size
-                        self.state["realized_pnl"] = round(self.state.get("realized_pnl", 0) + pnl, 2)
                         trade = {
                             "buy_price": buy["price"],
                             "sell_price": order["price"],
@@ -691,6 +740,8 @@ class GridManager(CapitalMixin, OrderMixin):
                         }
                         self.state.setdefault("trades", []).append(trade)
                         self.state["pending_buys"] = pending
+                        # BUG 2: Update realized_pnl from USDC tracker (source of truth)
+                        self.state["realized_pnl"] = round(usdc_received - usdc_spent, 2)
                         self._save_state()
             else:  # short grid
                 if order["side"] == "buy":
@@ -699,7 +750,6 @@ class GridManager(CapitalMixin, OrderMixin):
                         sell = pending.pop(0)
                         sell_size = sell.get("size", self.state.get("size_per_level", 0))
                         pnl = (sell["price"] - order["price"]) * sell_size  # PnL = (sell_entry - buy_exit) * size
-                        self.state["realized_pnl"] = round(self.state.get("realized_pnl", 0) + pnl, 2)
                         trade = {
                             "sell_price": sell["price"],  # short entry
                             "buy_price": order["price"],   # short exit
@@ -709,6 +759,8 @@ class GridManager(CapitalMixin, OrderMixin):
                         }
                         self.state.setdefault("trades", []).append(trade)
                         self.state["pending_sells"] = pending
+                        # Short grid: realized_pnl stays from individual matching
+                        self.state["realized_pnl"] = round(self.state.get("realized_pnl", 0) + pnl, 2)
                         self._save_state()
 
         # Place replacements for each fill
@@ -717,6 +769,11 @@ class GridManager(CapitalMixin, OrderMixin):
             if order.get("exit_order"):
                 logging.info(f"Exit order filled - no replacement (position being closed)")
                 continue
+            # BUG 1 FIX: Skip replacement for orphan sells (no matching pending_buys)
+            if grid_direction == "long" and order["side"] == "sell":
+                if position_size_btc < size_per_level:
+                    logging.info(f"Skipping replacement for orphan sell @ ${order['price']:,.0f}")
+                    continue
             await self._place_replacement(order, buy_levels, sell_levels, size, open_prices)
 
         # Update PnL metrics

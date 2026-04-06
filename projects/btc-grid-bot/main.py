@@ -432,22 +432,9 @@ async def startup(cfg: dict, monitor: MarketMonitor = None, trigger_engine: Trig
         # Safety overrides from flags
         pause_flags = [f for f in flags if "no_" in f or "pa" in f.lower()]
         
-        if ai_direction == "pause" or recommendation == "pause":
-            direction = "pause"
-        elif ai_direction == "short" and "no_shorts_during_capitulation" not in flags and "no_shorts_during_squeeze" not in flags:
-            # AI wants short + no flag preventing it
-            direction = "short"
-        elif ai_direction == "long":
-            # AI wants long, but direction score might suggest otherwise
-            direction = "long"
-        else:
-            # AI says nothing strong — defer to direction score
-            if recommendation == "deploy_short":
-                direction = "short"
-            elif recommendation == "deploy_long":
-                direction = "long"
-            else:
-                direction = "long"  # default
+        # FORCE LONG ONLY - NO SHORTS ALLOWED
+        # John: Bot keeps creating orphan shorts that lose money
+        direction = "long"  # HARDCODED - NEVER GO SHORT
         
         # Log decision for transparency
         log.info(f"Direction resolution: AI={ai_direction}, Score={score}, Result={direction}")

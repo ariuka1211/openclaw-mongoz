@@ -1843,5 +1843,95 @@
     "sell_levels": [],
     "paused": true,
     "pause_reason": "LLM HTTP error: Client error '429 Too Many Requests' for url 'https://openrouter.ai/api/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429"
+  },
+  {
+    "_timestamp": "2026-04-06T15:59:00.418956+00:00",
+    "_type": "trade_fill",
+    "_tags": [
+      "live_fill",
+      "buy",
+      "long"
+    ],
+    "_version": 1,
+    "trade_data": {
+      "side": "buy",
+      "price": 69904.0,
+      "size": 0.0009666666666666666,
+      "level": 0,
+      "grid_direction": "long",
+      "time_since_deploy_min": 85.0
+    },
+    "session_context": {
+      "roll_count": 5,
+      "fill_count": 1,
+      "current_equity": 79.289873,
+      "current_price": 69887.9,
+      "range_low": 69904.0,
+      "range_high": 70044.0
+    },
+    "side": "buy",
+    "price": 69904.0,
+    "size": 0.0009666666666666666,
+    "pnl": null
+  },
+  {
+    "_timestamp": "2026-04-06T15:59:01.437004+00:00",
+    "_type": "trade_fill",
+    "_tags": [
+      "live_fill",
+      "buy",
+      "long"
+    ],
+    "_version": 1,
+    "trade_data": {
+      "side": "buy",
+      "price": 69974.0,
+      "size": 0.0009666666666666666,
+      "level": 0,
+      "grid_direction": "long",
+      "time_since_deploy_min": 85.0
+    },
+    "session_context": {
+      "roll_count": 5,
+      "fill_count": 1,
+      "current_equity": 79.289873,
+      "current_price": 69887.9,
+      "range_low": 69904.0,
+      "range_high": 70044.0
+    },
+    "side": "buy",
+    "price": 69974.0,
+    "size": 0.0009666666666666666,
+    "pnl": null
+  },
+  {
+    "_timestamp": "2026-04-06T15:59:02.665239+00:00",
+    "_type": "trade_fill",
+    "_tags": [
+      "live_fill",
+      "buy",
+      "long"
+    ],
+    "_version": 1,
+    "trade_data": {
+      "side": "buy",
+      "price": 70044.0,
+      "size": 0.0009666666666666666,
+      "level": 0,
+      "grid_direction": "long",
+      "time_since_deploy_min": 85.0
+    },
+    "session_context": {
+      "roll_count": 5,
+      "fill_count": 1,
+      "current_equity": 79.289873,
+      "current_price": 69887.9,
+      "range_low": 69904.0,
+      "range_high": 70044.0
+    },
+    "side": "buy",
+    "price": 70044.0,
+    "size": 0.0009666666666666666,
+    "pnl": null
   }
 ]

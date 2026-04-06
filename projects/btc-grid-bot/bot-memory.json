@@ -824,5 +824,1024 @@
     ],
     "peak_equity": 78.859049,
     "max_drawdown_pct": 0.0103
+  },
+  {
+    "_timestamp": "2026-04-06T05:37:13.966790+00:00",
+    "_type": "analysis",
+    "_tags": [
+      "live",
+      "long",
+      "bullish_low"
+    ],
+    "_version": 1,
+    "analysis_result": {
+      "direction": "long",
+      "buy_levels": [
+        66600,
+        66950,
+        67200,
+        67450,
+        68750,
+        69000
+      ],
+      "sell_levels": [
+        69400,
+        69650,
+        69950,
+        70450
+      ],
+      "range_low": 66600,
+      "range_high": 70450,
+      "confidence": "medium",
+      "note": "Mild uptrend with extreme positive funding. Buys skewed deeper at swing lows to catch pullbacks. Sells placed at recent highs and HVN/LVN zones. Spacing widened >$208 to avoid chop and funding drag.",
+      "pause_reason": null
+    },
+    "market_context": {
+      "current_price": 69181.1,
+      "equity": 78.859048,
+      "regime": "bullish_low",
+      "atr": 176.43,
+      "funding_rate": 0.007073,
+      "oi_divergence": "Price and OI both flat \u2014 no clear divergence signal",
+      "volume_regime": "normal"
+    },
+    "indicators": {
+      "swing_highs_15m": 20,
+      "swing_lows_15m": 22,
+      "swing_highs_30m": 28,
+      "swing_lows_30m": 31,
+      "candle_range_15m": 2993.300000000003
+    },
+    "direction": "long",
+    "confidence": "medium",
+    "note": "Mild uptrend with extreme positive funding. Buys skewed deeper at swing lows to catch pullbacks. Sells placed at recent highs and HVN/LVN zones. Spacing widened >$208 to avoid chop and funding drag.",
+    "buy_levels": [
+      66600,
+      66950,
+      67200,
+      67450,
+      68750,
+      69000
+    ],
+    "sell_levels": [
+      69400,
+      69650,
+      69950,
+      70450
+    ],
+    "paused": null,
+    "pause_reason": null
+  },
+  {
+    "_timestamp": "2026-04-06T05:37:35.825954+00:00",
+    "_type": "session_end",
+    "_tags": [
+      "session_summary"
+    ],
+    "_version": 1,
+    "session_duration_hours": 1.1,
+    "grid_direction": "long",
+    "realized_pnl": -0.81,
+    "equity_change": -0.0,
+    "trades": 11,
+    "fill_count": 0,
+    "win_rate": 0.273,
+    "roll_count": 5,
+    "range_width": 4500.0,
+    "issues": [
+      "orphan_sells(4)",
+      "excessive_rolls",
+      "low_win_rate"
+    ],
+    "peak_equity": 78.859049,
+    "max_drawdown_pct": 0.0103
+  },
+  {
+    "_timestamp": "2026-04-06T06:22:51.245326+00:00",
+    "_type": "trade_fill",
+    "_tags": [
+      "live_fill",
+      "buy",
+      "long"
+    ],
+    "_version": 1,
+    "trade_data": {
+      "side": "buy",
+      "price": 69000,
+      "size": 0.001436,
+      "level": 0,
+      "grid_direction": "long",
+      "time_since_deploy_min": 44.0
+    },
+    "session_context": {
+      "roll_count": 5,
+      "fill_count": 0,
+      "current_equity": 78.85507,
+      "current_price": 68984.1,
+      "range_low": 66600,
+      "range_high": 70450
+    },
+    "side": "buy",
+    "price": 69000,
+    "size": 0.001436,
+    "pnl": null
+  },
+  {
+    "_timestamp": "2026-04-06T06:40:03.212462+00:00",
+    "_type": "analysis",
+    "_tags": [
+      "live",
+      "pause",
+      "bullish_low"
+    ],
+    "_version": 1,
+    "analysis_result": {
+      "pause": true,
+      "pause_reason": "LLM returned invalid JSON: 'choices' | raw: \n         \n\n         \n{\"error\":{\"message\":\"Upstream error from Alibaba: Request rate increased too quickly. To ensure system stability, please adjust your client logic to scale requests more smoothly over time.\",\"code\":502}}",
+      "buy_levels": [],
+      "sell_levels": [],
+      "range_low": 0,
+      "range_high": 0,
+      "confidence": "none",
+      "note": "",
+      "direction": "pause"
+    },
+    "market_context": {
+      "current_price": 68866.2,
+      "equity": 78.85507,
+      "regime": "bullish_low",
+      "atr": 189.9,
+      "funding_rate": 0.007073,
+      "oi_divergence": "Price and OI both flat \u2014 no clear divergence signal",
+      "volume_regime": "normal"
+    },
+    "indicators": {
+      "swing_highs_15m": 20,
+      "swing_lows_15m": 21,
+      "swing_highs_30m": 28,
+      "swing_lows_30m": 31,
+      "candle_range_15m": 2993.300000000003
+    },
+    "direction": "pause",
+    "confidence": "none",
+    "note": "",
+    "buy_levels": [],
+    "sell_levels": [],
+    "paused": true,
+    "pause_reason": "LLM returned invalid JSON: 'choices' | raw: \n         \n\n         \n{\"error\":{\"message\":\"Upstream error from Alibaba: Request rate increased too quickly. To ensure system stability, please adjust your client logic to scale requests more smoothly over time.\",\"code\":502}}"
+  },
+  {
+    "_timestamp": "2026-04-06T07:43:27.393036+00:00",
+    "_type": "analysis",
+    "_tags": [
+      "live",
+      "long",
+      "bullish_low"
+    ],
+    "_version": 1,
+    "analysis_result": {
+      "direction": "long",
+      "buy_levels": [
+        66600,
+        66950,
+        67200,
+        67550,
+        67850,
+        68800
+      ],
+      "sell_levels": [
+        71050,
+        70450,
+        69600,
+        69350
+      ],
+      "range_low": 66600,
+      "range_high": 71050,
+      "confidence": "medium",
+      "note": "Ranging structure with high probability of mean reversion following bearish volume spike. Extreme positive funding warrants caution, but symmetric grid fits current 50/50 skew. Levels anchored to confirmed swing reversals and HVNs with >$200 spacing to avoid over-trading.",
+      "pause_reason": null
+    },
+    "market_context": {
+      "current_price": 68974.9,
+      "equity": 78.85437,
+      "regime": "bullish_low",
+      "atr": 190.94,
+      "funding_rate": 0.007073,
+      "oi_divergence": "Price and OI both flat \u2014 no clear divergence signal",
+      "volume_regime": "normal"
+    },
+    "indicators": {
+      "swing_highs_15m": 21,
+      "swing_lows_15m": 22,
+      "swing_highs_30m": 29,
+      "swing_lows_30m": 31,
+      "candle_range_15m": 2993.300000000003
+    },
+    "direction": "long",
+    "confidence": "medium",
+    "note": "Ranging structure with high probability of mean reversion following bearish volume spike. Extreme positive funding warrants caution, but symmetric grid fits current 50/50 skew. Levels anchored to confirmed swing reversals and HVNs with >$200 spacing to avoid over-trading.",
+    "buy_levels": [
+      66600,
+      66950,
+      67200,
+      67550,
+      67850,
+      68800
+    ],
+    "sell_levels": [
+      71050,
+      70450,
+      69600,
+      69350
+    ],
+    "paused": null,
+    "pause_reason": null
+  },
+  {
+    "_timestamp": "2026-04-06T07:43:50.056375+00:00",
+    "_type": "session_end",
+    "_tags": [
+      "session_summary"
+    ],
+    "_version": 1,
+    "session_duration_hours": 2.1,
+    "grid_direction": "long",
+    "realized_pnl": -0.81,
+    "equity_change": -0.0,
+    "trades": 11,
+    "fill_count": 1,
+    "win_rate": 0.273,
+    "roll_count": 5,
+    "range_width": 3850,
+    "issues": [
+      "orphan_sells(4)",
+      "excessive_rolls",
+      "low_win_rate"
+    ],
+    "peak_equity": 78.859048,
+    "max_drawdown_pct": 0.0103
+  },
+  {
+    "_timestamp": "2026-04-06T08:48:25.903407+00:00",
+    "_type": "analysis",
+    "_tags": [
+      "live",
+      "long",
+      "bullish_low"
+    ],
+    "_version": 1,
+    "analysis_result": {
+      "direction": "long",
+      "buy_levels": [
+        68950,
+        67400,
+        67150,
+        66900,
+        66600
+      ],
+      "sell_levels": [
+        69500,
+        69950,
+        70450
+      ],
+      "range_low": 66600,
+      "range_high": 70450,
+      "confidence": "medium",
+      "note": "Mild uptrend with extreme positive funding indicates crowded longs. Grid skewed deeper on buys to catch pullbacks to $66.6k-$68.9k support. Sells placed at HVN/LVN resistance above $69.5k. Spacing respects 1.5x ATR minimum.",
+      "pause_reason": null
+    },
+    "market_context": {
+      "current_price": 69250.3,
+      "equity": 78.853268,
+      "regime": "bullish_low",
+      "atr": 172.18,
+      "funding_rate": 0.005544,
+      "oi_divergence": "Price and OI both flat \u2014 no clear divergence signal",
+      "volume_regime": "normal"
+    },
+    "indicators": {
+      "swing_highs_15m": 20,
+      "swing_lows_15m": 22,
+      "swing_highs_30m": 29,
+      "swing_lows_30m": 31,
+      "candle_range_15m": 2993.300000000003
+    },
+    "direction": "long",
+    "confidence": "medium",
+    "note": "Mild uptrend with extreme positive funding indicates crowded longs. Grid skewed deeper on buys to catch pullbacks to $66.6k-$68.9k support. Sells placed at HVN/LVN resistance above $69.5k. Spacing respects 1.5x ATR minimum.",
+    "buy_levels": [
+      68950,
+      67400,
+      67150,
+      66900,
+      66600
+    ],
+    "sell_levels": [
+      69500,
+      69950,
+      70450
+    ],
+    "paused": null,
+    "pause_reason": null
+  },
+  {
+    "_timestamp": "2026-04-06T08:48:49.853252+00:00",
+    "_type": "session_end",
+    "_tags": [
+      "session_summary"
+    ],
+    "_version": 1,
+    "session_duration_hours": 1.1,
+    "grid_direction": "long",
+    "realized_pnl": -0.81,
+    "equity_change": -0.0,
+    "trades": 11,
+    "fill_count": 0,
+    "win_rate": 0.273,
+    "roll_count": 5,
+    "range_width": 4450,
+    "issues": [
+      "orphan_sells(4)",
+      "excessive_rolls",
+      "low_win_rate"
+    ],
+    "peak_equity": 78.85437,
+    "max_drawdown_pct": 0.0103
+  },
+  {
+    "_timestamp": "2026-04-06T09:12:57.452294+00:00",
+    "_type": "trade_fill",
+    "_tags": [
+      "live_fill",
+      "sell",
+      "long"
+    ],
+    "_version": 1,
+    "trade_data": {
+      "side": "sell",
+      "price": 69500,
+      "size": 0.001435,
+      "level": 0,
+      "grid_direction": "long",
+      "time_since_deploy_min": 23.0
+    },
+    "session_context": {
+      "roll_count": 5,
+      "fill_count": 0,
+      "current_equity": 79.568806,
+      "current_price": 69502.3,
+      "range_low": 66600,
+      "range_high": 70450
+    },
+    "side": "sell",
+    "price": 69500,
+    "size": 0.001435,
+    "pnl": null
+  },
+  {
+    "_timestamp": "2026-04-06T09:12:58.017960+00:00",
+    "_type": "trade_fill",
+    "_tags": [
+      "completed_trade",
+      "long",
+      "win"
+    ],
+    "_version": 1,
+    "trade_data": {
+      "type": "completed_trade",
+      "buy_price": 69010.0,
+      "sell_price": 69500,
+      "size": 0.0021166666666666664,
+      "pnl": 1.04,
+      "trade_duration_min": 23.0,
+      "grid_direction": "long",
+      "is_winner": true
+    },
+    "session_context": {
+      "roll_count": 5,
+      "completed_trades": 12,
+      "session_pnl": -580.22,
+      "current_price": 69502.3
+    },
+    "side": null,
+    "price": null,
+    "size": 0.0021166666666666664,
+    "pnl": 1.04
+  },
+  {
+    "_timestamp": "2026-04-06T09:21:21.230645+00:00",
+    "_type": "trade_fill",
+    "_tags": [
+      "live_fill",
+      "sell",
+      "long"
+    ],
+    "_version": 1,
+    "trade_data": {
+      "side": "sell",
+      "price": 69950,
+      "size": 0.001435,
+      "level": 0,
+      "grid_direction": "long",
+      "time_since_deploy_min": 32.0
+    },
+    "session_context": {
+      "roll_count": 5,
+      "fill_count": 1,
+      "current_equity": 79.574277,
+      "current_price": 69933.2,
+      "range_low": 66600,
+      "range_high": 70450
+    },
+    "side": "sell",
+    "price": 69950,
+    "size": 0.001435,
+    "pnl": null
+  },
+  {
+    "_timestamp": "2026-04-06T09:21:21.797397+00:00",
+    "_type": "trade_fill",
+    "_tags": [
+      "completed_trade",
+      "long",
+      "win"
+    ],
+    "_version": 1,
+    "trade_data": {
+      "type": "completed_trade",
+      "buy_price": 69079.0,
+      "sell_price": 69950,
+      "size": 0.0021166666666666664,
+      "pnl": 1.84,
+      "trade_duration_min": 32.0,
+      "grid_direction": "long",
+      "is_winner": true
+    },
+    "session_context": {
+      "roll_count": 5,
+      "completed_trades": 13,
+      "session_pnl": -580.22,
+      "current_price": 69933.2
+    },
+    "side": null,
+    "price": null,
+    "size": 0.0021166666666666664,
+    "pnl": 1.84
+  },
+  {
+    "_timestamp": "2026-04-06T09:53:09.981237+00:00",
+    "_type": "analysis",
+    "_tags": [
+      "live",
+      "long",
+      "bullish_med"
+    ],
+    "_version": 1,
+    "analysis_result": {
+      "direction": "long",
+      "buy_levels": [
+        69500,
+        69000,
+        68500,
+        68000,
+        67500,
+        67000
+      ],
+      "sell_levels": [
+        70000,
+        70450,
+        70900,
+        71350
+      ],
+      "range_low": 67000,
+      "range_high": 71350,
+      "confidence": "medium",
+      "note": "Mild uptrend with extreme positive funding. Grid skewed long with deeper buy levels at HVN/support zones to catch pullbacks. Wider sell levels above to avoid liquidation squeeze. Range spans $4,350, exceeding 5x ATR minimum.",
+      "pause_reason": null
+    },
+    "market_context": {
+      "current_price": 69736.4,
+      "equity": 79.574277,
+      "regime": "bullish_med",
+      "atr": 230.18,
+      "funding_rate": 0.005544,
+      "oi_divergence": "Price and OI both flat \u2014 no clear divergence signal",
+      "volume_regime": "normal"
+    },
+    "indicators": {
+      "swing_highs_15m": 19,
+      "swing_lows_15m": 22,
+      "swing_highs_30m": 28,
+      "swing_lows_30m": 31,
+      "candle_range_15m": 3666.699999999997
+    },
+    "direction": "long",
+    "confidence": "medium",
+    "note": "Mild uptrend with extreme positive funding. Grid skewed long with deeper buy levels at HVN/support zones to catch pullbacks. Wider sell levels above to avoid liquidation squeeze. Range spans $4,350, exceeding 5x ATR minimum.",
+    "buy_levels": [
+      69500,
+      69000,
+      68500,
+      68000,
+      67500,
+      67000
+    ],
+    "sell_levels": [
+      70000,
+      70450,
+      70900,
+      71350
+    ],
+    "paused": null,
+    "pause_reason": null
+  },
+  {
+    "_timestamp": "2026-04-06T09:53:30.073792+00:00",
+    "_type": "session_end",
+    "_tags": [
+      "session_summary"
+    ],
+    "_version": 1,
+    "session_duration_hours": 1.1,
+    "grid_direction": "long",
+    "realized_pnl": -580.22,
+    "equity_change": 0.72,
+    "trades": 13,
+    "fill_count": 2,
+    "win_rate": 0.385,
+    "roll_count": 5,
+    "range_width": 3850,
+    "issues": [
+      "orphan_sells(6)",
+      "excessive_rolls",
+      "low_win_rate",
+      "significant_loss"
+    ],
+    "peak_equity": 79.574277,
+    "max_drawdown_pct": 7.3006
+  },
+  {
+    "_timestamp": "2026-04-06T11:22:44.315280+00:00",
+    "_type": "analysis",
+    "_tags": [
+      "live",
+      "pause",
+      "bullish_med"
+    ],
+    "_version": 1,
+    "analysis_result": {
+      "pause": true,
+      "pause_reason": "LLM returned invalid JSON: 'choices' | raw: \n         \n{\"error\":{\"message\":\"Upstream error from Alibaba: Request rate increased too quickly. To ensure system stability, please adjust your client logic to scale requests more smoothly over time.\",\"code\":502}}",
+      "buy_levels": [],
+      "sell_levels": [],
+      "range_low": 0,
+      "range_high": 0,
+      "confidence": "none",
+      "note": "",
+      "direction": "pause"
+    },
+    "market_context": {
+      "current_price": 69566.7,
+      "equity": 79.575474,
+      "regime": "bullish_med",
+      "atr": 205.4,
+      "funding_rate": 0.005544,
+      "oi_divergence": "Price and OI both flat \u2014 no clear divergence signal",
+      "volume_regime": "normal"
+    },
+    "indicators": {
+      "swing_highs_15m": 21,
+      "swing_lows_15m": 20,
+      "swing_highs_30m": 28,
+      "swing_lows_30m": 31,
+      "candle_range_15m": 3666.699999999997
+    },
+    "direction": "pause",
+    "confidence": "none",
+    "note": "",
+    "buy_levels": [],
+    "sell_levels": [],
+    "paused": true,
+    "pause_reason": "LLM returned invalid JSON: 'choices' | raw: \n         \n{\"error\":{\"message\":\"Upstream error from Alibaba: Request rate increased too quickly. To ensure system stability, please adjust your client logic to scale requests more smoothly over time.\",\"code\":502}}"
+  },
+  {
+    "_timestamp": "2026-04-06T12:07:31.724675+00:00",
+    "_type": "trade_fill",
+    "_tags": [
+      "live_fill",
+      "buy",
+      "long"
+    ],
+    "_version": 1,
+    "trade_data": {
+      "side": "buy",
+      "price": 69500,
+      "size": 0.001438,
+      "level": 0,
+      "grid_direction": "long",
+      "time_since_deploy_min": 133.0
+    },
+    "session_context": {
+      "roll_count": 5,
+      "fill_count": 0,
+      "current_equity": 80.215966,
+      "current_price": 69489.6,
+      "range_low": 67000,
+      "range_high": 71350
+    },
+    "side": "buy",
+    "price": 69500,
+    "size": 0.001438,
+    "pnl": null
+  },
+  {
+    "_timestamp": "2026-04-06T12:26:09.875813+00:00",
+    "_type": "analysis",
+    "_tags": [
+      "live",
+      "long",
+      "bullish_med"
+    ],
+    "_version": 1,
+    "analysis_result": {
+      "direction": "long",
+      "buy_levels": [
+        68950,
+        68700,
+        67400,
+        67100,
+        66850,
+        66600
+      ],
+      "sell_levels": [
+        69600,
+        69950,
+        70250,
+        70500
+      ],
+      "range_low": 66600,
+      "range_high": 70500,
+      "confidence": "medium",
+      "note": "Ranging structure with clear 15m/30m reversals. Extreme positive funding warrants reduced sizing. Grid spans $66,600-$70,500, respecting $208 min spacing and key HVN/LVN zones.",
+      "pause_reason": null
+    },
+    "market_context": {
+      "current_price": 69473.7,
+      "equity": 80.215966,
+      "regime": "bullish_med",
+      "atr": 185.77,
+      "funding_rate": 0.005544,
+      "oi_divergence": "Price and OI both flat \u2014 no clear divergence signal",
+      "volume_regime": "normal"
+    },
+    "indicators": {
+      "swing_highs_15m": 20,
+      "swing_lows_15m": 20,
+      "swing_highs_30m": 28,
+      "swing_lows_30m": 31,
+      "candle_range_15m": 3666.699999999997
+    },
+    "direction": "long",
+    "confidence": "medium",
+    "note": "Ranging structure with clear 15m/30m reversals. Extreme positive funding warrants reduced sizing. Grid spans $66,600-$70,500, respecting $208 min spacing and key HVN/LVN zones.",
+    "buy_levels": [
+      68950,
+      68700,
+      67400,
+      67100,
+      66850,
+      66600
+    ],
+    "sell_levels": [
+      69600,
+      69950,
+      70250,
+      70500
+    ],
+    "paused": null,
+    "pause_reason": null
+  },
+  {
+    "_timestamp": "2026-04-06T12:26:33.006093+00:00",
+    "_type": "session_end",
+    "_tags": [
+      "session_summary"
+    ],
+    "_version": 1,
+    "session_duration_hours": 2.5,
+    "grid_direction": "long",
+    "realized_pnl": -580.22,
+    "equity_change": 0.64,
+    "trades": 13,
+    "fill_count": 1,
+    "win_rate": 0.385,
+    "roll_count": 5,
+    "range_width": 4350,
+    "issues": [
+      "orphan_sells(6)",
+      "excessive_rolls",
+      "low_win_rate",
+      "significant_loss"
+    ],
+    "peak_equity": 80.215966,
+    "max_drawdown_pct": 7.2412
+  },
+  {
+    "_timestamp": "2026-04-06T13:29:14.105593+00:00",
+    "_type": "analysis",
+    "_tags": [
+      "live",
+      "pause",
+      "choppy"
+    ],
+    "_version": 1,
+    "analysis_result": {
+      "pause": true,
+      "pause_reason": "LLM HTTP error: Client error '429 Too Many Requests' for url 'https://openrouter.ai/api/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
+      "buy_levels": [],
+      "sell_levels": [],
+      "range_low": 0,
+      "range_high": 0,
+      "confidence": "none",
+      "note": "",
+      "direction": "pause"
+    },
+    "market_context": {
+      "current_price": 69412.9,
+      "equity": 80.215964,
+      "regime": "choppy",
+      "atr": 178.99,
+      "funding_rate": 0.005544,
+      "oi_divergence": "Price and OI both flat \u2014 no clear divergence signal",
+      "volume_regime": "normal"
+    },
+    "indicators": {
+      "swing_highs_15m": 19,
+      "swing_lows_15m": 20,
+      "swing_highs_30m": 28,
+      "swing_lows_30m": 31,
+      "candle_range_15m": 3666.699999999997
+    },
+    "direction": "pause",
+    "confidence": "none",
+    "note": "",
+    "buy_levels": [],
+    "sell_levels": [],
+    "paused": true,
+    "pause_reason": "LLM HTTP error: Client error '429 Too Many Requests' for url 'https://openrouter.ai/api/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429"
+  },
+  {
+    "_timestamp": "2026-04-06T14:23:10.227661+00:00",
+    "_type": "trade_fill",
+    "_tags": [
+      "live_fill",
+      "sell",
+      "long"
+    ],
+    "_version": 1,
+    "trade_data": {
+      "side": "sell",
+      "price": 69600,
+      "size": 0.001455,
+      "level": 0,
+      "grid_direction": "long",
+      "time_since_deploy_min": 116.0
+    },
+    "session_context": {
+      "roll_count": 5,
+      "fill_count": 0,
+      "current_equity": 80.212892,
+      "current_price": 69504.4,
+      "range_low": 66600,
+      "range_high": 70500
+    },
+    "side": "sell",
+    "price": 69600,
+    "size": 0.001455,
+    "pnl": null
+  },
+  {
+    "_timestamp": "2026-04-06T14:23:10.808461+00:00",
+    "_type": "trade_fill",
+    "_tags": [
+      "completed_trade",
+      "long",
+      "win"
+    ],
+    "_version": 1,
+    "trade_data": {
+      "type": "completed_trade",
+      "buy_price": 69148.0,
+      "sell_price": 69600,
+      "size": 0.0021166666666666664,
+      "pnl": 0.96,
+      "trade_duration_min": 116.0,
+      "grid_direction": "long",
+      "is_winner": true
+    },
+    "session_context": {
+      "roll_count": 5,
+      "completed_trades": 14,
+      "session_pnl": -680.16,
+      "current_price": 69504.4
+    },
+    "side": null,
+    "price": null,
+    "size": 0.0021166666666666664,
+    "pnl": 0.96
+  },
+  {
+    "_timestamp": "2026-04-06T14:33:04.890137+00:00",
+    "_type": "analysis",
+    "_tags": [
+      "live",
+      "long",
+      "bullish_low"
+    ],
+    "_version": 1,
+    "analysis_result": {
+      "direction": "long",
+      "buy_levels": [
+        66600,
+        66900,
+        67150,
+        67400,
+        69000
+      ],
+      "sell_levels": [
+        69600,
+        69950,
+        70250,
+        70500
+      ],
+      "range_low": 66600,
+      "range_high": 70500,
+      "confidence": "medium",
+      "note": "Symmetric grid in ranging market. Buys placed at validated 15m/30m swing supports below $69.5k, sells at recent swing highs and HVNs above. Spacing strictly >$200 to respect 1x ATR minimum and mitigate extreme funding squeeze risk. Total range $3.9k exceeds 5x ATR requirement.",
+      "pause_reason": null
+    },
+    "market_context": {
+      "current_price": 69526.8,
+      "equity": 80.212892,
+      "regime": "bullish_low",
+      "atr": 208.2,
+      "funding_rate": 0.005544,
+      "oi_divergence": "Price and OI both flat \u2014 no clear divergence signal",
+      "volume_regime": "normal"
+    },
+    "indicators": {
+      "swing_highs_15m": 19,
+      "swing_lows_15m": 19,
+      "swing_highs_30m": 28,
+      "swing_lows_30m": 31,
+      "candle_range_15m": 3666.699999999997
+    },
+    "direction": "long",
+    "confidence": "medium",
+    "note": "Symmetric grid in ranging market. Buys placed at validated 15m/30m swing supports below $69.5k, sells at recent swing highs and HVNs above. Spacing strictly >$200 to respect 1x ATR minimum and mitigate extreme funding squeeze risk. Total range $3.9k exceeds 5x ATR requirement.",
+    "buy_levels": [
+      66600,
+      66900,
+      67150,
+      67400,
+      69000
+    ],
+    "sell_levels": [
+      69600,
+      69950,
+      70250,
+      70500
+    ],
+    "paused": null,
+    "pause_reason": null
+  },
+  {
+    "_timestamp": "2026-04-06T14:33:27.699166+00:00",
+    "_type": "session_end",
+    "_tags": [
+      "session_summary"
+    ],
+    "_version": 1,
+    "session_duration_hours": 2.1,
+    "grid_direction": "long",
+    "realized_pnl": -680.16,
+    "equity_change": -0.0,
+    "trades": 14,
+    "fill_count": 1,
+    "win_rate": 0.429,
+    "roll_count": 5,
+    "range_width": 3900,
+    "issues": [
+      "orphan_sells(7)",
+      "excessive_rolls",
+      "low_win_rate",
+      "significant_loss"
+    ],
+    "peak_equity": 80.215966,
+    "max_drawdown_pct": 8.4791
+  },
+  {
+    "_timestamp": "2026-04-06T14:35:10.879316+00:00",
+    "_type": "trade_fill",
+    "_tags": [
+      "live_fill",
+      "sell",
+      "long"
+    ],
+    "_version": 1,
+    "trade_data": {
+      "side": "sell",
+      "price": 69600,
+      "size": 0.001454,
+      "level": 0,
+      "grid_direction": "long",
+      "time_since_deploy_min": 1.0
+    },
+    "session_context": {
+      "roll_count": 5,
+      "fill_count": 0,
+      "current_equity": 80.208855,
+      "current_price": 69599.6,
+      "range_low": 66600,
+      "range_high": 70500
+    },
+    "side": "sell",
+    "price": 69600,
+    "size": 0.001454,
+    "pnl": null
+  },
+  {
+    "_timestamp": "2026-04-06T14:35:11.457206+00:00",
+    "_type": "trade_fill",
+    "_tags": [
+      "completed_trade",
+      "long",
+      "win"
+    ],
+    "_version": 1,
+    "trade_data": {
+      "type": "completed_trade",
+      "buy_price": 69000,
+      "sell_price": 69600,
+      "size": 0.001436,
+      "pnl": 0.86,
+      "trade_duration_min": 1.0,
+      "grid_direction": "long",
+      "is_winner": true
+    },
+    "session_context": {
+      "roll_count": 5,
+      "completed_trades": 15,
+      "session_pnl": -680.16,
+      "current_price": 69599.6
+    },
+    "side": null,
+    "price": null,
+    "size": 0.001436,
+    "pnl": 0.86
+  },
+  {
+    "_timestamp": "2026-04-06T15:35:27.671827+00:00",
+    "_type": "analysis",
+    "_tags": [
+      "live",
+      "pause",
+      "bullish_low"
+    ],
+    "_version": 1,
+    "analysis_result": {
+      "pause": true,
+      "pause_reason": "LLM HTTP error: Client error '429 Too Many Requests' for url 'https://openrouter.ai/api/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
+      "buy_levels": [],
+      "sell_levels": [],
+      "range_low": 0,
+      "range_high": 0,
+      "confidence": "none",
+      "note": "",
+      "direction": "pause"
+    },
+    "market_context": {
+      "current_price": 69685.3,
+      "equity": 80.210269,
+      "regime": "bullish_low",
+      "atr": 240.36,
+      "funding_rate": 0.005544,
+      "oi_divergence": "Price and OI both flat \u2014 no clear divergence signal",
+      "volume_regime": "normal"
+    },
+    "indicators": {
+      "swing_highs_15m": 19,
+      "swing_lows_15m": 20,
+      "swing_highs_30m": 29,
+      "swing_lows_30m": 32,
+      "candle_range_15m": 3666.699999999997
+    },
+    "direction": "pause",
+    "confidence": "none",
+    "note": "",
+    "buy_levels": [],
+    "sell_levels": [],
+    "paused": true,
+    "pause_reason": "LLM HTTP error: Client error '429 Too Many Requests' for url 'https://openrouter.ai/api/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429"
   }
 ]

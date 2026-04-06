@@ -368,8 +368,19 @@ async def call_llm(prompt: str, cfg: dict) -> dict:
 
     try:
         async with httpx.AsyncClient(timeout=120) as client:
-            resp = await client.post(OPENROUTER_URL, json=payload, headers=headers)
-            resp.raise_for_status()
+            try:
+                resp = await client.post(OPENROUTER_URL, json=payload, headers=headers)
+                resp.raise_for_status()
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 429:
+                    # Rate limited - fallback to openrouter/free which routes across available models
+                    print(f"Rate limited on {model}, falling back to openrouter/free")
+                    payload["model"] = "openrouter/free"
+                    resp = await client.post(OPENROUTER_URL, json=payload, headers=headers)
+                    resp.raise_for_status()
+                    print("✅ Fallback successful")
+                else:
+                    raise
     except Exception as e:
         return {
             "pause": True,

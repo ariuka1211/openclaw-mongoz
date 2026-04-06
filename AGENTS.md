@@ -32,6 +32,7 @@
 2. `MEMORY.md` → long-term context
 3. `projects/btc-grid-bot/docs/cheatsheet.md` → grid bot quick reference
 4. Today's daily file in `memory/`
+5. **If user says "check in"** → read `memory/mental-health.md` for continuity
 
 **End (🔴 WRAP UP):**
 Show checklist, complete each:

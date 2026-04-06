@@ -84,5 +84,125 @@
     ],
     "peak_equity": 85.279449,
     "max_drawdown_pct": 0.0095
+  },
+  {
+    "_timestamp": "2026-04-05T20:37:52.043666+00:00",
+    "_type": "trade_fill",
+    "_tags": [
+      "live_fill",
+      "sell",
+      "long"
+    ],
+    "_version": 1,
+    "trade_data": {
+      "side": "sell",
+      "price": 67650,
+      "size": 0.001593,
+      "level": 0,
+      "grid_direction": "long",
+      "time_since_deploy_min": 78.0
+    },
+    "session_context": {
+      "roll_count": 5,
+      "fill_count": 0,
+      "current_equity": 85.187282,
+      "current_price": 67607.5,
+      "range_low": 66450,
+      "range_high": 68400
+    },
+    "side": "sell",
+    "price": 67650,
+    "size": 0.001593,
+    "pnl": null
+  },
+  {
+    "_timestamp": "2026-04-05T22:44:13.349372+00:00",
+    "_type": "trade_fill",
+    "_tags": [
+      "live_fill",
+      "sell",
+      "long"
+    ],
+    "_version": 1,
+    "trade_data": {
+      "side": "sell",
+      "price": 67900,
+      "size": 0.001593,
+      "level": 0,
+      "grid_direction": "long",
+      "time_since_deploy_min": 205.0
+    },
+    "session_context": {
+      "roll_count": 5,
+      "fill_count": 1,
+      "current_equity": 85.184351,
+      "current_price": 67886.7,
+      "range_low": 66450,
+      "range_high": 68400
+    },
+    "side": "sell",
+    "price": 67900,
+    "size": 0.001593,
+    "pnl": null
+  },
+  {
+    "_timestamp": "2026-04-05T22:46:27.351632+00:00",
+    "_type": "trade_fill",
+    "_tags": [
+      "live_fill",
+      "sell",
+      "long"
+    ],
+    "_version": 1,
+    "trade_data": {
+      "side": "sell",
+      "price": 68150,
+      "size": 0.001593,
+      "level": 0,
+      "grid_direction": "long",
+      "time_since_deploy_min": 207.0
+    },
+    "session_context": {
+      "roll_count": 5,
+      "fill_count": 2,
+      "current_equity": 85.180017,
+      "current_price": 68165.9,
+      "range_low": 66450,
+      "range_high": 68400
+    },
+    "side": "sell",
+    "price": 68150,
+    "size": 0.001593,
+    "pnl": null
+  },
+  {
+    "_timestamp": "2026-04-05T23:01:25.475221+00:00",
+    "_type": "trade_fill",
+    "_tags": [
+      "live_fill",
+      "sell",
+      "long"
+    ],
+    "_version": 1,
+    "trade_data": {
+      "side": "sell",
+      "price": 68400,
+      "size": 0.001593,
+      "level": 0,
+      "grid_direction": "long",
+      "time_since_deploy_min": 222.0
+    },
+    "session_context": {
+      "roll_count": 5,
+      "fill_count": 3,
+      "current_equity": 85.177618,
+      "current_price": 68402.0,
+      "range_low": 66450,
+      "range_high": 68400
+    },
+    "side": "sell",
+    "price": 68400,
+    "size": 0.001593,
+    "pnl": null
   }
 ]

@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import sys
+import time
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 
@@ -28,7 +29,11 @@ from api.lighter import LighterAPI
 from notifications.alerts import send_alert
 from analysis.analyst import run_analyst, fetch_candles
 from analysis.direction import check_direction
-from indicators import calc_ema_single, time_awareness_adjustment, funding_rate_adjustment
+from core.market_monitor import MarketMonitor, MarketSnapshot
+from core.trigger_engine import TriggerEngine, TriggerEvent
+from core.dynamic_grid import GridAdjuster
+from market.intel import gather_all_intel
+from indicators import calc_atr, calc_ema_single, time_awareness_adjustment, funding_rate_adjustment
 
 load_dotenv()
 
@@ -189,7 +194,122 @@ async def handle_resume(gm, api, cfg):
     await send_alert(f"🟢 Grid resumed ({direction_label} · same levels) · BTC @ ${price:,.0f}")
 
 
-async def startup(cfg: dict) -> tuple[LighterAPI, GridManager, dict]:
+async def handle_trigger_event(trigger_event, gm, adjuster, api, cfg, snapshot):
+    """Handle trigger events from the dynamic trigger system."""
+    from analysis.analyst import run_analyst, fetch_candles
+    from analysis.direction import check_direction
+    from indicators import calc_atr
+    
+    action = trigger_event.action
+    direction = trigger_event.direction
+    reason = trigger_event.reason
+    urgency = trigger_event.urgency
+    
+    log.info(f"🔔 Trigger fired: {action} ({urgency}) - {reason}")
+    
+    try:
+        if action == "roll_grid":
+            # Roll grid edge using dynamic adjuster
+            await send_alert(f"🔄 Rolling grid {direction} edge\nReason: {reason}")
+            
+            # Calculate new levels
+            current_price = snapshot.price
+            
+            # Get ATR for spacing
+            try:
+                candles_15m = await fetch_candles("15m", limit=50)
+                atr_data = calc_atr(candles_15m, period=14)
+                atr_value = atr_data.get("atr", current_price * 0.005)
+            except Exception:
+                atr_value = current_price * 0.005  # fallback
+            
+            new_levels = adjuster.calculate_roll_levels(
+                current_price, direction, atr=atr_value
+            )
+            
+            success = await adjuster.roll_edge(direction, new_levels)
+            
+            if success:
+                await send_alert(
+                    f"✅ Grid edge rolled {direction}\n"
+                    f"New levels: {new_levels}\n"
+                    f"Price: ${current_price:,.0f}"
+                )
+            else:
+                await send_alert(f"❌ Grid roll failed - {reason}")
+                
+        elif action == "ai_reanalysis":
+            # Call AI analyst for new grid levels  
+            await send_alert(f"🧠 AI reanalysis triggered\nReason: {reason}")
+            
+            try:
+                equity = await api.get_equity()
+                price = await api.get_btc_price()
+                
+                # Run AI analyst
+                new_levels = await run_analyst(cfg, equity=equity, btc_price=price, grid_manager=gm)
+                
+                if not new_levels.get("pause"):
+                    # Direction check
+                    direction_result = await check_direction(cfg, price)
+                    
+                    # Deploy new levels
+                    await gm.deploy(new_levels, equity, price, direction="long", 
+                                   signal_data={"analyst": new_levels, "direction_score": direction_result})
+                    
+                    await send_alert(
+                        f"✅ Grid redeployed by AI\n"
+                        f"Buy: {new_levels['buy_levels']}\n"
+                        f"Sell: {new_levels['sell_levels']}\n"
+                        f"Equity: ${equity:.2f}"
+                    )
+                else:
+                    await send_alert(f"⚠️ AI recommends pause: {new_levels.get('pause_reason', 'unknown')}")
+                    
+            except Exception as e:
+                await send_alert(f"❌ AI reanalysis failed: {e}")
+                log.error(f"AI reanalysis error: {e}")
+                
+        elif action == "ai_redeploy":
+            # Full AI redeploy (high urgency)
+            await send_alert(f"🚨 Full AI redeploy triggered\nReason: {reason}")
+            
+            try:
+                # Cancel all existing orders
+                await gm.cancel_all()
+                
+                equity = await api.get_equity()
+                price = await api.get_btc_price()
+                
+                # Run fresh AI analysis
+                new_levels = await run_analyst(cfg, equity=equity, btc_price=price, grid_manager=gm)
+                
+                if not new_levels.get("pause"):
+                    direction_result = await check_direction(cfg, price)
+                    
+                    await gm.deploy(new_levels, equity, price, direction="long",
+                                   signal_data={"analyst": new_levels, "direction_score": direction_result})
+                    
+                    await send_alert(
+                        f"✅ Full redeploy complete\n"
+                        f"Buy: {new_levels['buy_levels']}\n"
+                        f"Sell: {new_levels['sell_levels']}\n"
+                        f"Equity: ${equity:.2f}\n"
+                        f"Trigger: {urgency} urgency"
+                    )
+                else:
+                    await send_alert(f"⚠️ AI recommends pause after redeploy: {new_levels.get('pause_reason')}")
+                    
+            except Exception as e:
+                await send_alert(f"❌ Full redeploy failed: {e}")
+                log.error(f"AI redeploy error: {e}")
+                
+    except Exception as e:
+        log.error(f"Trigger handler error: {e}")
+        await send_alert(f"❌ Trigger handler error: {e}")
+
+
+async def startup(cfg: dict, monitor: MarketMonitor = None, trigger_engine: TriggerEngine = None, adjuster: GridAdjuster = None) -> tuple[LighterAPI, GridManager, dict]:
     api = LighterAPI(cfg)
     equity = await api.get_equity()
     price = await api.get_btc_price()
@@ -422,10 +542,25 @@ async def startup(cfg: dict) -> tuple[LighterAPI, GridManager, dict]:
 
 
 async def run_loop(api: LighterAPI, gm: GridManager, levels: dict, cfg: dict):
+    """Main monitoring loop with dynamic trigger system."""
+    
+    # Initialize trigger system
+    from core.market_monitor import MarketMonitor
+    from core.trigger_engine import TriggerEngine 
+    from core.dynamic_grid import GridAdjuster
+    from core.snapshot_bridge import convert_snapshot
+    
+    monitor = MarketMonitor(api, gm.state)
+    trigger_engine = TriggerEngine(cfg.get("triggers", {}))
+    adjuster = GridAdjuster(gm)
+    
     pnl_reported_today = False
-
     config_mtime = os.path.getmtime(Path(__file__).parent / "config.yml")
-
+    last_trigger_check = 0
+    trigger_interval = cfg.get("triggers", {}).get("monitor_interval_seconds", 120)
+    
+    log.info(f"Dynamic trigger system enabled · monitoring every {trigger_interval}s")
+    
     while True:
         # ── Config hot-reload ────────────────────────────────────
         config_path = Path(__file__).parent / "config.yml"
@@ -436,14 +571,18 @@ async def run_loop(api: LighterAPI, gm: GridManager, levels: dict, cfg: dict):
                 with open(config_path) as f:
                     cfg = yaml.safe_load(f)
                 new_poll = cfg["grid"].get("poll_interval_seconds")
+                trigger_interval = cfg.get("triggers", {}).get("monitor_interval_seconds", 120)
                 config_mtime = current_mtime
-                log.info(f"Config reloaded · poll: {old_poll}s → {new_poll}s")
+                log.info(f"Config reloaded · poll: {old_poll}s → {new_poll}s, trigger: {trigger_interval}s")
+                
+                # Recreate trigger engine with new config
+                trigger_engine = TriggerEngine(cfg.get("triggers", {}))
             except Exception as e:
                 log.warning(f"Config hot-reload failed: {e} — keeping old config")
 
         poll_interval = cfg["grid"].get("poll_interval_seconds", 30)
         await asyncio.sleep(poll_interval)
-
+        
         # Check for telegram bot commands (pause, cancel, resume)
         cmd = check_telegram_commands(gm)
         if cmd == "pause":
@@ -467,9 +606,37 @@ async def run_loop(api: LighterAPI, gm: GridManager, levels: dict, cfg: dict):
             continue
 
         try:
+            current_time = time.time()
             price = await api.get_btc_price()
+            
+            # Update monitor with current state
+            monitor.grid_state = gm.state
+            
+            # Standard fill checking
             await gm.check_fills(price)
-
+            
+            # ── Dynamic Trigger System ──────────────────────────
+            if current_time - last_trigger_check >= trigger_interval:
+                try:
+                    # Poll market conditions
+                    monitor_snapshot = monitor.poll()
+                    
+                    # Convert to trigger format
+                    trigger_snapshot = convert_snapshot(monitor_snapshot, gm.state)
+                    
+                    # Evaluate triggers
+                    trigger_event = trigger_engine.evaluate(trigger_snapshot)
+                    
+                    # Act on triggers
+                    if trigger_event.action != "none":
+                        await handle_trigger_event(trigger_event, gm, adjuster, api, cfg, monitor_snapshot)
+                    
+                    last_trigger_check = current_time
+                    
+                except Exception as e:
+                    log.error(f"Trigger system error: {e}")
+                    # Continue normal operation even if triggers fail
+            
             # Check if it's time for daily PnL report (23:30 UTC)
             now = datetime.now(timezone.utc)
             if now.hour == 23 and 30 <= now.minute <= 31 and not pnl_reported_today:

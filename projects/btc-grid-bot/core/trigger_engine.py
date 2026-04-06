@@ -68,6 +68,18 @@ class TriggerEngine:
         self.config = self._validate_config(config)
         self.last_triggers: Dict[str, float] = {}  # action -> timestamp
         self.recent_triggers: List[Dict] = []      # escalation tracking
+        self.last_escalation: float = 0               # last escalation timestamp
+        self.last_conditions_at_deploy: List[str] = []  # conditions at last deploy
+        self._last_evaluated_conditions: List[str] = []  # track what fired last time
+        
+    def reset_after_deploy(self, current_time: float, conditions: List[str] = None):
+        """Call this after a successful deploy to reset escalation counter."""
+        self.recent_triggers = []
+        self.last_conditions_at_deploy = conditions[:] if conditions else []
+        self._last_evaluated_conditions = []
+        # Set cooldown timestamps so we don't immediately trigger again
+        for action in self.config["cooldown_minutes"]:
+            self.last_triggers[action] = current_time
         
     def _validate_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
         """Validate and set defaults for configuration."""
@@ -325,28 +337,60 @@ class TriggerEngine:
         # Clean old triggers outside escalation window
         escalation_window_sec = self.config["escalation_window_minutes"] * 60
         cutoff_time = current_time - escalation_window_sec
-        self.recent_triggers = [t for t in self.recent_triggers if t["timestamp"] > cutoff_time]
+        self.recent_triggers = [t for t in self.recent_triggers if t.get("timestamp", 0) > cutoff_time]
         
-        # Add current triggers to recent list
-        for condition in conditions:
+        # Only count NEW conditions that weren't in last evaluation
+        # Prevents same conditions from causing repeated redeployments
+        current_names_set = {c["name"] for c in conditions}
+        prev_names_set = set(self._last_evaluated_conditions)
+        new_conditions = [c for c in conditions if c["name"] not in prev_names_set]
+        
+        # Add new triggers to recent list
+        for condition in new_conditions:
             self.recent_triggers.append({
                 "timestamp": current_time,
                 "condition": condition["name"],
                 "action": condition["action"]
             })
         
-        # Check for escalation (2+ triggers within window)
+        # Update last evaluated
+        self._last_evaluated_conditions = list(current_names_set)
+        
+        # Check for escalation (2+ NEW triggers within window)
         recent_condition_count = len([t for t in self.recent_triggers if t["timestamp"] > cutoff_time])
         
-        if recent_condition_count >= 2:
+        if recent_condition_count >= 2 and new_conditions:
+            # Check if we're in cooldown on escalation itself
+            time_since_escalation = (current_time - self.last_escalation) / 60
+            deploy_cooldown = self.config["cooldown_minutes"].get("ai_redeploy", 240)
+            if time_since_escalation < deploy_cooldown:
+                return {
+                    "action": "none",
+                    "urgency": "low",
+                    "priority": 999,
+                    "reason": f"Escalation cooldown: {deploy_cooldown - time_since_escalation:.0f}m remaining",
+                    "direction": None,
+                    "conditions_met": []
+                }
+            
             # Escalate to full AI redeployment
             return {
                 "action": "ai_redeploy",
                 "urgency": "high",
-                "priority": 0,  # Highest priority
-                "reason": f"Multiple triggers ({recent_condition_count}) within {self.config['escalation_window_minutes']} minutes",
+                "priority": 0,
+                "reason": f"Multiple NEW triggers ({recent_condition_count}): {', '.join(c['name'] for c in new_conditions)}",
                 "direction": None,
-                "conditions_met": [c["name"] for c in conditions]
+                "conditions_met": [c["name"] for c in new_conditions]
+            }
+        elif recent_condition_count >= 2 and not new_conditions:
+            # Same conditions persisting — don't escalate (bot already responded)
+            return {
+                "action": "none",
+                "urgency": "low",
+                "priority": 999,
+                "reason": f"Conditions stable post-deploy: {', '.join(c['name'] for c in conditions)}",
+                "direction": None,
+                "conditions_met": []
             }
         
         # No escalation - return highest priority condition
@@ -362,6 +406,8 @@ class TriggerEngine:
         # Update last trigger time
         if action != "none":
             self.last_triggers[action] = timestamp
+            if action == "ai_redeploy":
+                self.last_escalation = timestamp
         
         # Get cooldown for this action
         cooldown = self.config["cooldown_minutes"].get(action, 0)

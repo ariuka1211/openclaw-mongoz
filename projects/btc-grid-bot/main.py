@@ -194,7 +194,7 @@ async def handle_resume(gm, api, cfg):
     await send_alert(f"🟢 Grid resumed ({direction_label} · same levels) · BTC @ ${price:,.0f}")
 
 
-async def handle_trigger_event(trigger_event, gm, adjuster, api, cfg, snapshot):
+async def handle_trigger_event(trigger_event, gm, adjuster, api, cfg, snapshot, trigger_engine=None):
     """Handle trigger events from the dynamic trigger system."""
     from analysis.analyst import run_analyst, fetch_candles
     from analysis.direction import check_direction
@@ -629,7 +629,7 @@ async def run_loop(api: LighterAPI, gm: GridManager, levels: dict, cfg: dict):
                     
                     # Act on triggers
                     if trigger_event.action != "none":
-                        await handle_trigger_event(trigger_event, gm, adjuster, api, cfg, monitor_snapshot)
+                        await handle_trigger_event(trigger_event, gm, adjuster, api, cfg, monitor_snapshot, trigger_engine)
                     
                     last_trigger_check = current_time
                     

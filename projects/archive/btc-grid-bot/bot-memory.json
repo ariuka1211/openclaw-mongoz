@@ -1933,5 +1933,677 @@
     "price": 70044.0,
     "size": 0.0009666666666666666,
     "pnl": null
+  },
+  {
+    "_timestamp": "2026-04-06T16:20:49.420090+00:00",
+    "_type": "analysis",
+    "_tags": [
+      "live",
+      "long",
+      "bullish_low"
+    ],
+    "_version": 1,
+    "analysis_result": {
+      "direction": "long",
+      "buy_levels": [
+        69150,
+        68750,
+        67300,
+        66950,
+        66600
+      ],
+      "sell_levels": [
+        70250,
+        70450,
+        70750,
+        71050
+      ],
+      "range_low": 66600,
+      "range_high": 71050,
+      "confidence": "medium",
+      "note": "Mild uptrend skew with high positive funding suggests pullback risk. Grid placed to catch dips at $66.6k-$69.1k support cluster and take profits at $70.25k-$71.05k resistance/HVN/EMA50. Wider spacing below aligns with trend skew guidance.",
+      "pause_reason": null
+    },
+    "market_context": {
+      "current_price": 69892.3,
+      "equity": 79.289873,
+      "regime": "bullish_low",
+      "atr": 234.55,
+      "funding_rate": 0.000423,
+      "oi_divergence": "Price and OI both flat \u2014 no clear divergence signal",
+      "volume_regime": "normal"
+    },
+    "indicators": {
+      "swing_highs_15m": 18,
+      "swing_lows_15m": 19,
+      "swing_highs_30m": 28,
+      "swing_lows_30m": 32,
+      "candle_range_15m": 3666.699999999997
+    },
+    "direction": "long",
+    "confidence": "medium",
+    "note": "Mild uptrend skew with high positive funding suggests pullback risk. Grid placed to catch dips at $66.6k-$69.1k support cluster and take profits at $70.25k-$71.05k resistance/HVN/EMA50. Wider spacing below aligns with trend skew guidance.",
+    "buy_levels": [
+      69150,
+      68750,
+      67300,
+      66950,
+      66600
+    ],
+    "sell_levels": [
+      70250,
+      70450,
+      70750,
+      71050
+    ],
+    "paused": null,
+    "pause_reason": null
+  },
+  {
+    "_timestamp": "2026-04-06T16:22:01.074312+00:00",
+    "_type": "analysis",
+    "_tags": [
+      "live",
+      "long",
+      "bullish_low"
+    ],
+    "_version": 1,
+    "analysis_result": {
+      "direction": "long",
+      "buy_levels": [
+        68750,
+        69000,
+        69150,
+        68800
+      ],
+      "sell_levels": [
+        69600,
+        69800,
+        70300
+      ],
+      "range_low": 68750,
+      "range_high": 70300,
+      "confidence": "medium",
+      "note": "Supports at recent swing lows (68.777, 68.981, 69.162) and resistances at swing highs (69.600, 69.811, 70.273) provide clear reversal zones. Grid spans >5 ATRs and respects minimum spacing.",
+      "pause_reason": null
+    },
+    "market_context": {
+      "current_price": 69944.5,
+      "equity": 79.289873,
+      "regime": "bullish_low",
+      "atr": 237.4,
+      "funding_rate": 0.000423,
+      "oi_divergence": "Price and OI both flat \u2014 no clear divergence signal",
+      "volume_regime": "normal"
+    },
+    "indicators": {
+      "swing_highs_15m": 18,
+      "swing_lows_15m": 19,
+      "swing_highs_30m": 28,
+      "swing_lows_30m": 32,
+      "candle_range_15m": 3666.699999999997
+    },
+    "direction": "long",
+    "confidence": "medium",
+    "note": "Supports at recent swing lows (68.777, 68.981, 69.162) and resistances at swing highs (69.600, 69.811, 70.273) provide clear reversal zones. Grid spans >5 ATRs and respects minimum spacing.",
+    "buy_levels": [
+      68750,
+      69000,
+      69150,
+      68800
+    ],
+    "sell_levels": [
+      69600,
+      69800,
+      70300
+    ],
+    "paused": null,
+    "pause_reason": null
+  },
+  {
+    "_timestamp": "2026-04-06T16:24:29.095328+00:00",
+    "_type": "analysis",
+    "_tags": [
+      "live",
+      "pause",
+      "bullish_low"
+    ],
+    "_version": 1,
+    "analysis_result": {
+      "pause": true,
+      "pause_reason": "LLM returned invalid JSON: Expecting value: line 1 column 1 (char 0) | raw: \n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n    ",
+      "buy_levels": [],
+      "sell_levels": [],
+      "range_low": 0,
+      "range_high": 0,
+      "confidence": "none",
+      "note": "",
+      "direction": "pause"
+    },
+    "market_context": {
+      "current_price": 69968.6,
+      "equity": 79.289873,
+      "regime": "bullish_low",
+      "atr": 237.4,
+      "funding_rate": 0.000423,
+      "oi_divergence": "Price and OI both flat \u2014 no clear divergence signal",
+      "volume_regime": "normal"
+    },
+    "indicators": {
+      "swing_highs_15m": 18,
+      "swing_lows_15m": 19,
+      "swing_highs_30m": 28,
+      "swing_lows_30m": 32,
+      "candle_range_15m": 3666.699999999997
+    },
+    "direction": "pause",
+    "confidence": "none",
+    "note": "",
+    "buy_levels": [],
+    "sell_levels": [],
+    "paused": true,
+    "pause_reason": "LLM returned invalid JSON: Expecting value: line 1 column 1 (char 0) | raw: \n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n         \n\n    "
+  },
+  {
+    "_timestamp": "2026-04-06T16:26:26.056570+00:00",
+    "_type": "analysis",
+    "_tags": [
+      "live",
+      "long",
+      "bullish_low"
+    ],
+    "_version": 1,
+    "analysis_result": {
+      "direction": "long",
+      "buy_levels": [
+        66600,
+        66700,
+        67150,
+        69150
+      ],
+      "sell_levels": [
+        69600,
+        70250,
+        70450
+      ],
+      "range_low": 66600,
+      "range_high": 70450,
+      "confidence": "high",
+      "note": "Buy levels at recent swing lows below current price, sell levels at recent swing highs above. High funding rate reduces position sizing.",
+      "pause_reason": null
+    },
+    "market_context": {
+      "current_price": 69963.5,
+      "equity": 79.289873,
+      "regime": "bullish_low",
+      "atr": 237.4,
+      "funding_rate": 0.000423,
+      "oi_divergence": "Price and OI both flat \u2014 no clear divergence signal",
+      "volume_regime": "normal"
+    },
+    "indicators": {
+      "swing_highs_15m": 18,
+      "swing_lows_15m": 19,
+      "swing_highs_30m": 28,
+      "swing_lows_30m": 32,
+      "candle_range_15m": 3666.699999999997
+    },
+    "direction": "long",
+    "confidence": "high",
+    "note": "Buy levels at recent swing lows below current price, sell levels at recent swing highs above. High funding rate reduces position sizing.",
+    "buy_levels": [
+      66600,
+      66700,
+      67150,
+      69150
+    ],
+    "sell_levels": [
+      69600,
+      70250,
+      70450
+    ],
+    "paused": null,
+    "pause_reason": null
+  },
+  {
+    "_timestamp": "2026-04-06T16:30:22.281414+00:00",
+    "_type": "analysis",
+    "_tags": [
+      "live",
+      "pause",
+      "bullish_low"
+    ],
+    "_version": 1,
+    "analysis_result": {
+      "pause": true,
+      "pause_reason": "LLM returned invalid JSON: 'choices' | raw: \n         \n\n         \n\n         \n\n         \n\n         \n\n         \n{\"error\":{\"message\":\"Upstream error from Alibaba: Request rate increased too quickly. To ensure system stability, please adjust your client logic to scale requests more smoothly over time.\",\"code\":502}}",
+      "buy_levels": [],
+      "sell_levels": [],
+      "range_low": 0,
+      "range_high": 0,
+      "confidence": "none",
+      "note": "",
+      "direction": "pause"
+    },
+    "market_context": {
+      "current_price": 69857.0,
+      "equity": 79.289873,
+      "regime": "bullish_low",
+      "atr": 221.91,
+      "funding_rate": 0.000423,
+      "oi_divergence": "Price and OI both flat \u2014 no clear divergence signal",
+      "volume_regime": "normal"
+    },
+    "indicators": {
+      "swing_highs_15m": 18,
+      "swing_lows_15m": 19,
+      "swing_highs_30m": 28,
+      "swing_lows_30m": 31,
+      "candle_range_15m": 3666.699999999997
+    },
+    "direction": "pause",
+    "confidence": "none",
+    "note": "",
+    "buy_levels": [],
+    "sell_levels": [],
+    "paused": true,
+    "pause_reason": "LLM returned invalid JSON: 'choices' | raw: \n         \n\n         \n\n         \n\n         \n\n         \n\n         \n{\"error\":{\"message\":\"Upstream error from Alibaba: Request rate increased too quickly. To ensure system stability, please adjust your client logic to scale requests more smoothly over time.\",\"code\":502}}"
+  },
+  {
+    "_timestamp": "2026-04-06T16:31:21.754680+00:00",
+    "_type": "analysis",
+    "_tags": [
+      "live",
+      "long",
+      "bullish_low"
+    ],
+    "_version": 1,
+    "analysis_result": {
+      "direction": "long",
+      "buy_levels": [
+        66600,
+        67000,
+        67500,
+        68100
+      ],
+      "sell_levels": [
+        69600,
+        69900,
+        70200
+      ],
+      "range_low": 66600,
+      "range_high": 70200,
+      "confidence": "medium",
+      "note": "Price is consolidating within a range. The trend skew is mildly bullish, and volume profile shows support around 66600-67000. Selling pressure is present at 69600-70200. A long grid is appropriate to capture bounces within this range.",
+      "pause_reason": null
+    },
+    "market_context": {
+      "current_price": 69831.8,
+      "equity": 79.289873,
+      "regime": "bullish_low",
+      "atr": 224.85,
+      "funding_rate": 0.000423,
+      "oi_divergence": "Price and OI both flat \u2014 no clear divergence signal",
+      "volume_regime": "normal"
+    },
+    "indicators": {
+      "swing_highs_15m": 18,
+      "swing_lows_15m": 19,
+      "swing_highs_30m": 28,
+      "swing_lows_30m": 31,
+      "candle_range_15m": 3666.699999999997
+    },
+    "direction": "long",
+    "confidence": "medium",
+    "note": "Price is consolidating within a range. The trend skew is mildly bullish, and volume profile shows support around 66600-67000. Selling pressure is present at 69600-70200. A long grid is appropriate to capture bounces within this range.",
+    "buy_levels": [
+      66600,
+      67000,
+      67500,
+      68100
+    ],
+    "sell_levels": [
+      69600,
+      69900,
+      70200
+    ],
+    "paused": null,
+    "pause_reason": null
+  },
+  {
+    "_timestamp": "2026-04-06T16:32:41.587976+00:00",
+    "_type": "analysis",
+    "_tags": [
+      "live",
+      "long",
+      "bullish_low"
+    ],
+    "_version": 1,
+    "analysis_result": {
+      "direction": "long",
+      "buy_levels": [
+        83500,
+        84100,
+        84800
+      ],
+      "sell_levels": [
+        82400,
+        81900,
+        81200
+      ],
+      "range_low": 81200,
+      "range_high": 84800,
+      "confidence": "high",
+      "note": "Buy at support levels, sell at resistance levels with sideways volatility"
+    },
+    "market_context": {
+      "current_price": 69796.9,
+      "equity": 79.289873,
+      "regime": "bullish_low",
+      "atr": 227.13,
+      "funding_rate": 0.000423,
+      "oi_divergence": "Price and OI both flat \u2014 no clear divergence signal",
+      "volume_regime": "normal"
+    },
+    "indicators": {
+      "swing_highs_15m": 18,
+      "swing_lows_15m": 19,
+      "swing_highs_30m": 28,
+      "swing_lows_30m": 31,
+      "candle_range_15m": 3666.699999999997
+    },
+    "direction": "long",
+    "confidence": "high",
+    "note": "Buy at support levels, sell at resistance levels with sideways volatility",
+    "buy_levels": [
+      83500,
+      84100,
+      84800
+    ],
+    "sell_levels": [
+      82400,
+      81900,
+      81200
+    ],
+    "paused": null,
+    "pause_reason": null
+  },
+  {
+    "_timestamp": "2026-04-06T16:33:44.011779+00:00",
+    "_type": "analysis",
+    "_tags": [
+      "live",
+      "long",
+      "bullish_low"
+    ],
+    "_version": 1,
+    "analysis_result": {
+      "direction": "long",
+      "buy_levels": [
+        68800,
+        68550,
+        68300,
+        68050,
+        67800
+      ],
+      "sell_levels": [
+        70273,
+        69600,
+        69350,
+        69100,
+        68850
+      ],
+      "range_low": 67800,
+      "range_high": 70273,
+      "confidence": "high",
+      "note": "Bollinger Bands near upper band + swing highs at $70,273 suggest short-term reversal down; swing lows at $67,800 support bounce",
+      "pause_reason": null
+    },
+    "market_context": {
+      "current_price": 69857.8,
+      "equity": 79.289873,
+      "regime": "bullish_low",
+      "atr": 227.18,
+      "funding_rate": 0.000423,
+      "oi_divergence": "Price and OI both flat \u2014 no clear divergence signal",
+      "volume_regime": "normal"
+    },
+    "indicators": {
+      "swing_highs_15m": 18,
+      "swing_lows_15m": 19,
+      "swing_highs_30m": 28,
+      "swing_lows_30m": 31,
+      "candle_range_15m": 3666.699999999997
+    },
+    "direction": "long",
+    "confidence": "high",
+    "note": "Bollinger Bands near upper band + swing highs at $70,273 suggest short-term reversal down; swing lows at $67,800 support bounce",
+    "buy_levels": [
+      68800,
+      68550,
+      68300,
+      68050,
+      67800
+    ],
+    "sell_levels": [
+      70273,
+      69600,
+      69350,
+      69100,
+      68850
+    ],
+    "paused": null,
+    "pause_reason": null
+  },
+  {
+    "_timestamp": "2026-04-06T16:35:06.235641+00:00",
+    "_type": "analysis",
+    "_tags": [
+      "live",
+      "long",
+      "bullish_med"
+    ],
+    "_version": 1,
+    "analysis_result": {
+      "direction": "long",
+      "buy_levels": [
+        68500,
+        68000,
+        67500,
+        67000
+      ],
+      "sell_levels": [
+        70000,
+        70500,
+        71000,
+        71500
+      ],
+      "range_low": 67000,
+      "range_high": 71500,
+      "confidence": "high",
+      "note": "Long grid due to bullish_med regime and potential pullback to support levels. Buy at swing lows, sell at swing highs.",
+      "pause_reason": null
+    },
+    "market_context": {
+      "current_price": 69944.4,
+      "equity": 79.289873,
+      "regime": "bullish_med",
+      "atr": 231.76,
+      "funding_rate": 0.000423,
+      "oi_divergence": "Price and OI both flat \u2014 no clear divergence signal",
+      "volume_regime": "normal"
+    },
+    "indicators": {
+      "swing_highs_15m": 18,
+      "swing_lows_15m": 19,
+      "swing_highs_30m": 28,
+      "swing_lows_30m": 31,
+      "candle_range_15m": 3666.699999999997
+    },
+    "direction": "long",
+    "confidence": "high",
+    "note": "Long grid due to bullish_med regime and potential pullback to support levels. Buy at swing lows, sell at swing highs.",
+    "buy_levels": [
+      68500,
+      68000,
+      67500,
+      67000
+    ],
+    "sell_levels": [
+      70000,
+      70500,
+      71000,
+      71500
+    ],
+    "paused": null,
+    "pause_reason": null
+  },
+  {
+    "_timestamp": "2026-04-06T16:35:33.844005+00:00",
+    "_type": "session_end",
+    "_tags": [
+      "session_summary"
+    ],
+    "_version": 1,
+    "session_duration_hours": 2.0,
+    "grid_direction": "long",
+    "realized_pnl": -680.16,
+    "equity_change": -0.92,
+    "trades": 15,
+    "fill_count": 4,
+    "win_rate": 0.467,
+    "roll_count": 5,
+    "range_width": 140.0,
+    "issues": [
+      "orphan_sells(8)",
+      "excessive_rolls",
+      "low_win_rate",
+      "significant_loss"
+    ],
+    "peak_equity": 80.210269,
+    "max_drawdown_pct": 8.4797
+  },
+  {
+    "_timestamp": "2026-04-06T16:36:37.302044+00:00",
+    "_type": "trade_fill",
+    "_tags": [
+      "live_fill",
+      "sell",
+      "long"
+    ],
+    "_version": 1,
+    "trade_data": {
+      "side": "sell",
+      "price": 70000,
+      "size": 0.000767,
+      "level": 0,
+      "grid_direction": "long",
+      "time_since_deploy_min": 0.0
+    },
+    "session_context": {
+      "roll_count": 5,
+      "fill_count": 0,
+      "current_equity": 79.288827,
+      "current_price": 69963.8,
+      "range_low": 67000,
+      "range_high": 71500
+    },
+    "side": "sell",
+    "price": 70000,
+    "size": 0.000767,
+    "pnl": null
+  },
+  {
+    "_timestamp": "2026-04-06T16:36:37.869582+00:00",
+    "_type": "trade_fill",
+    "_tags": [
+      "completed_trade",
+      "long",
+      "win"
+    ],
+    "_version": 1,
+    "trade_data": {
+      "type": "completed_trade",
+      "buy_price": 69904.0,
+      "sell_price": 70000,
+      "size": 0.0009666666666666666,
+      "pnl": 0.09,
+      "trade_duration_min": 0.0,
+      "grid_direction": "long",
+      "is_winner": true
+    },
+    "session_context": {
+      "roll_count": 5,
+      "completed_trades": 16,
+      "session_pnl": -883.08,
+      "current_price": 69963.8
+    },
+    "side": null,
+    "price": null,
+    "size": 0.0009666666666666666,
+    "pnl": 0.09
+  },
+  {
+    "_timestamp": "2026-04-06T17:06:20.840278+00:00",
+    "_type": "analysis",
+    "_tags": [
+      "live",
+      "long",
+      "bullish_med"
+    ],
+    "_version": 1,
+    "analysis_result": {
+      "direction": "long",
+      "buy_levels": [
+        69150,
+        68800,
+        67300,
+        66700
+      ],
+      "sell_levels": [
+        69950,
+        70250,
+        70450,
+        70800
+      ],
+      "range_low": 66700,
+      "range_high": 70800,
+      "confidence": "medium",
+      "note": "Symmetric grid centered on BB mid ($69,635). Buys placed at recent swing lows and volume support zones. Sells aligned with swing highs and HVN $70,450. High positive funding suggests crowded longs, so grid spacing is conservative to avoid liquidation wicks.",
+      "pause_reason": null
+    },
+    "market_context": {
+      "current_price": 69529.9,
+      "equity": 79.288243,
+      "regime": "bullish_med",
+      "atr": 271.11,
+      "funding_rate": 0.000423,
+      "oi_divergence": "Price and OI both flat \u2014 no clear divergence signal",
+      "volume_regime": "normal"
+    },
+    "indicators": {
+      "swing_highs_15m": 18,
+      "swing_lows_15m": 19,
+      "swing_highs_30m": 28,
+      "swing_lows_30m": 31,
+      "candle_range_15m": 3738.100000000006
+    },
+    "direction": "long",
+    "confidence": "medium",
+    "note": "Symmetric grid centered on BB mid ($69,635). Buys placed at recent swing lows and volume support zones. Sells aligned with swing highs and HVN $70,450. High positive funding suggests crowded longs, so grid spacing is conservative to avoid liquidation wicks.",
+    "buy_levels": [
+      69150,
+      68800,
+      67300,
+      66700
+    ],
+    "sell_levels": [
+      69950,
+      70250,
+      70450,
+      70800
+    ],
+    "paused": null,
+    "pause_reason": null
   }
 ]

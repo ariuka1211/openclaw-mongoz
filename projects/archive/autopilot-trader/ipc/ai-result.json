@@ -1,0 +1,80 @@
+{
+  "timestamp": "2026-03-29T18:51:24.756547+00:00",
+  "processed_decision_id": null,
+  "processed_timestamp": "2026-03-29T18:43:44.039944+00:00",
+  "decision_action": "refresh",
+  "decision_symbol": null,
+  "success": true,
+  "positions": [
+    {
+      "market_id": 110,
+      "symbol": "NVDA",
+      "side": "short",
+      "entry_price": 166.169,
+      "current_price": 167.19500000000002,
+      "size": 0.03,
+      "leverage": 10.0,
+      "position_size_usd": 4.98507
+    },
+    {
+      "market_id": 111,
+      "symbol": "PLTR",
+      "side": "short",
+      "entry_price": 141.239,
+      "current_price": 141.369,
+      "size": 0.031,
+      "leverage": 10.0,
+      "position_size_usd": 4.378409
+    },
+    {
+      "market_id": 50,
+      "symbol": "ARB",
+      "side": "short",
+      "entry_price": 0.08853,
+      "current_price": 0.08892,
+      "size": 69.9,
+      "leverage": 10.0,
+      "position_size_usd": 6.1882470000000005
+    },
+    {
+      "market_id": 5,
+      "symbol": "WIF",
+      "side": "short",
+      "entry_price": 0.17218,
+      "current_price": 0.17198999999999998,
+      "size": 35.9,
+      "leverage": 10.0,
+      "position_size_usd": 6.181261999999999
+    },
+    {
+      "market_id": 45,
+      "symbol": "PUMP",
+      "side": "short",
+      "entry_price": 0.001705,
+      "current_price": 0.0017109999999999998,
+      "size": 2539.0,
+      "leverage": 10.0,
+      "position_size_usd": 4.328995
+    },
+    {
+      "market_id": 120,
+      "symbol": "LIT",
+      "side": "short",
+      "entry_price": 0.8324,
+      "current_price": 0.8282999999999999,
+      "size": 5.94,
+      "leverage": 10.0,
+      "position_size_usd": 4.944456000000001
+    },
+    {
+      "market_id": 68,
+      "symbol": "MORPHO",
+      "side": "short",
+      "entry_price": 1.48408,
+      "current_price": 1.4826000000000001,
+      "size": 3.3,
+      "leverage": 10.0,
+      "position_size_usd": 4.897464
+    }
+  ]
+}

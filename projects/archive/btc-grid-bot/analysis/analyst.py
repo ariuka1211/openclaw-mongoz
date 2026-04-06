@@ -356,7 +356,8 @@ async def call_llm(prompt: str, cfg: dict) -> dict:
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
         "HTTP-Referer": "https://openclaw.ai",
-        "X-Title": "OpenClaw",
+        "X-OpenRouter-Title": "OpenClaw",
+        "X-OpenRouter-Categories": "cli-agent",
     }
 
     payload = {
@@ -366,21 +367,31 @@ async def call_llm(prompt: str, cfg: dict) -> dict:
         "messages": [{"role": "user", "content": prompt}],
     }
 
+    # Fallback model chain: primary → openrouter/free → Gemini (non-Alibaba)
+    FALLBACK_MODELS = [
+        "openrouter/free",
+        "google/gemini-2.0-flash-exp:free",  # Different upstream provider
+    ]
+
     try:
         async with httpx.AsyncClient(timeout=120) as client:
-            try:
-                resp = await client.post(OPENROUTER_URL, json=payload, headers=headers)
-                resp.raise_for_status()
-            except httpx.HTTPStatusError as e:
-                if e.response.status_code == 429:
-                    # Rate limited - fallback to openrouter/free which routes across available models
-                    print(f"Rate limited on {model}, falling back to openrouter/free")
-                    payload["model"] = "openrouter/free"
+            for attempt, fallback_model in enumerate([None] + FALLBACK_MODELS):
+                try:
+                    if fallback_model:
+                        payload["model"] = fallback_model
                     resp = await client.post(OPENROUTER_URL, json=payload, headers=headers)
                     resp.raise_for_status()
-                    print("✅ Fallback successful")
-                else:
-                    raise
+                    if attempt > 0:
+                        print(f"✅ Fallback to {payload['model']} succeeded")
+                    break  # Success, exit retry loop
+                except httpx.HTTPStatusError as e:
+                    if e.response.status_code in (429, 502) and fallback_model != FALLBACK_MODELS[-1]:
+                        # Rate limited or upstream error — try next fallback
+                        print(f"⚠️ {e.response.status_code} on {payload.get('model', model)}, trying next fallback...")
+                        continue
+                    else:
+                        # Last fallback also failed, or non-retryable error
+                        raise
     except Exception as e:
         return {
             "pause": True,

@@ -1,0 +1,13 @@
+{
+  "decision_id": "626d5f82",
+  "prev_decision_id": "06dbf1dd",
+  "timestamp": "2026-03-29T18:42:36.190626+00:00",
+  "action": "open",
+  "symbol": "MORPHO",
+  "direction": "short",
+  "size_pct_equity": 8.0,
+  "stop_loss_pct": 2.0,
+  "reasoning": "MORPHO has the highest scanner score of 73 for short with favorable funding (+0.161% shorts collect) and negative momentum (-2.2%), indicating strong bearish signals. Short win rate is 47%, and during US session, learned pattern 'short_eu_us' (confidence 0.6) supports shorting. No open positions, so using available slot with conservative sizing due to moderate win rate and recent mixed outcomes.",
+  "confidence": 0.7,
+  "requested_size_usd": 4.94835616
+}

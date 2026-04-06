@@ -1,8 +1,8 @@
 # BTC Smart Grid Bot — Plan
 
-> Last updated: 2026-03-31 (rev 3 — Layer 1 only, clean scope)
+> Last updated: 2026-04-05 (rev 5 — live, operational)
 > Author: John + Maaraa
-> Status: Ready to build
+> Status: ✅ Live — running since 2026-04-03 with daily resets
 
 ---
 
@@ -241,25 +241,52 @@ if current_price < range_low OR current_price > range_high:
 
 ---
 
-## File Structure
+## File Structure (current — see `docs/architecture.md` for full module map)
 
 ```
 projects/btc-grid-bot/
+├── main.py                      # Entry point + daily reset loop
+├── config.yml                   # All settings
+├──
+├── analysis/
+│   ├── analyst.py               # AI Analyst (OKX + LLM + market intel + indicators)
+│   └── direction.py             # Direction score (EMA + price action)
+├── api/
+│   └── lighter.py               # Lighter DEX WebSocket API wrapper
+├── core/
+│   ├── grid_manager.py          # Order placement, fills, rolls, pause, recovery
+│   ├── calculator.py            # Capital safety check with ATR + volatility sizing
+│   ├── capital.py               # CapitalMixin (equity checks, position-aware sizing)
+│   ├── order_manager.py         # OrderMixin (place, cancel, track orders)
+│   ├── memory_layer.py          # Session-end logging, AI feedback loop
+│   └── intelligence.py          # PatternAnalyzer (historical recommendations)
+├── indicators/                  # 12 technical indicator modules
+│   ├── atr.py, adx.py, ema.py, bollinger.py, volume.py
+│   ├── regime.py, trend_skew.py, oi_divergence.py, direction_score.py
+│   ├── funding.py, time_adj.py, composite.py, helpers.py, format_indicators.py
+│   └── __init__.py              # Re-exports all indicators
+├── market/
+│   └── intel.py                 # Coinalyze client (funding, OI, liquidations)
+├── notifications/
+│   ├── alerts.py                # send_alert() → Telegram
+│   └── telegram_bot.py          # Interactive bot (/pause, /resume, /cancel, /status)
+├── state/                       # Runtime state (gitignored)
+│   ├── grid_state.json
+│   └── deployments/
+├── tools/
+│   └── stress_test.py           # Stress test runner
+├── memory_query.py              # CLI: query historical patterns
+├── intelligence_dashboard.py    # Dashboard: visualize trading patterns
+├── test_direction.py            # Direction score tests
 ├── docs/
-│   └── plan.md              # this file
-├── config.yml               # all settings
-├── main.py                  # entry point + daily reset loop
-├── analyst.py               # OKX data fetch + LLM → grid levels
-├── grid.py                  # place/cancel/track orders on Lighter
-├── calculator.py            # capital safety check
-├── lighter_api.py           # Lighter API wrapper (adapted from v1)
-├── telegram.py              # alerts
-├── state/
-│   └── grid_state.json      # runtime state (gitignored)
-└── tests/
-    ├── test_analyst.py
-    ├── test_grid.py
-    └── test_calculator.py
+│   ├── plan.md                  # This file
+│   ├── architecture.md          # Full architecture map + data flow
+│   ├── cheatsheet.md            # Quick reference
+│   └── phase2-short-grid.md     # Short grid documentation
+├── .env                         # Secrets (gitignored)
+└── LEGACY SHIMS (import redirects only, kept for backward compat):
+    analyst.py, calculator.py, grid.py, lighter_api.py,
+    market_intel.py, tg_alerts.py, indicators.py
 ```
 
 ---
@@ -302,44 +329,71 @@ telegram:
 
 ## Implementation Phases
 
-### Phase 0 — Capital Calculator
-- [ ] `calculator.py` — reads equity from Lighter, computes safe sizing
-- [ ] Prints safety table to terminal
-- [ ] Returns `size_per_level` for use by grid manager
-- [ ] Run standalone: `python calculator.py`
+### Phase 0 — Capital Calculator ✅
+- [x] `core/calculator.py` — reads equity from Lighter, computes safe sizing
+- [x] Prints safety table to terminal
+- [x] Returns `size_per_level` for use by grid manager
+- [x] Run standalone: `python calculator.py`
 
-### Phase 1 — Foundation
-- [ ] Project structure + `config.yml`
-- [ ] `lighter_api.py` — adapted from v1 (get equity, place order, cancel order, get open orders)
-- [ ] `state/grid_state.json` — read/write order state
-- [ ] `telegram.py` — alerts
+### Phase 1 — Foundation ✅
+- [x] Project structure + `config.yml`
+- [x] `api/lighter.py` — adapted from v1 (get equity, place order, cancel order, get open orders)
+- [x] `state/grid_state.json` — read/write order state
+- [x] `notifications/alerts.py` — alerts
 
-### Phase 2 — Grid Manager
-- [ ] `grid.py` — place buy/sell levels, tag orders
-- [ ] Fill detection loop (poll every 30s)
-- [ ] Fill → replacement order logic
-- [ ] Pause logic (price outside range)
-- [ ] Manual test: place one level, verify fill detection works
+### Phase 2 — Grid Manager ✅
+- [x] `core/grid_manager.py` — place buy/sell levels, tag orders
+- [x] Fill detection loop (poll every 30s)
+- [x] Fill → replacement order logic
+- [x] Pause logic (price outside range)
+- [x] Manual test: place one level, verify fill detection works
 
-### Phase 3 — AI Analyst
-- [ ] `analyst.py` — fetch OKX candles
-- [ ] Build LLM prompt from candles
-- [ ] Parse LLM response → validated level list
-- [ ] Fallback: use previous levels if LLM fails
-- [ ] Manual test: run analyst, inspect output levels
+### Phase 3 — AI Analyst ✅
+- [x] `analysis/analyst.py` — fetch OKX candles
+- [x] Build LLM prompt from candles
+- [x] Parse LLM response → validated level list
+- [x] Fallback: use previous levels if LLM fails
+- [x] Manual test: run analyst, inspect output levels
 
-### Phase 4 — Main Loop
-- [ ] `main.py` — ties everything together
-- [ ] Daily reset scheduler (06:00 UTC)
-- [ ] Daily PnL report (23:30 UTC)
-- [ ] Daily loss limit check
-- [ ] systemd service: `btc-grid.service`
+### Phase 4 — Main Loop ✅
+- [x] `main.py` — ties everything together
+- [x] Daily reset scheduler (06:00 UTC)
+- [x] Daily PnL report (23:30 UTC)
+- [x] Daily loss limit check
+- [x] systemd service: `btc-grid-bot.service`
 
-### Phase 5 — Hardening
-- [ ] Tests for calculator, analyst, grid logic
-- [ ] Edge cases: gap fill, LLM timeout, Lighter API error
-- [ ] `/status` Telegram command
-- [ ] Run live on small size for 1 week, review PnL
+### Phase 5 — Hardening ✅
+- [x] Edge cases: gap fill, LLM timeout, Lighter API error
+- [x] Orphan sell detection and handling
+- [x] BTC position recovery logic (dust / small / large)
+- [x] Config hot-reload
+- [x] Loss lockout with 24h cooldown
+- [x] Telegram `/status` via state file
+- [x] Running live since 2026-04-03
+
+### Phase 6 — Intelligence (added post-launch) ✅
+- [x] 12 technical indicator modules (ATR, ADX, EMA, BB, volume, regime, OI divergence, etc.)
+- [x] Direction score engine (long/short/pause recommendations)
+- [x] Market intel: Coinalyze integration (funding rates, open interest, liquidations)
+- [x] Volatility-adaptive sizing (ATR-based)
+- [x] Time-of-day adjustment (Asian/London/NY sessions)
+- [x] Funding rate multiplier
+- [x] Auto-compounding position sizing
+- [x] Trailing stop loss (4% from peak, 8% static floor)
+
+### Phase 7 — Memory Layer ✅
+- [x] `core/memory_layer.py` — session-end logging with JSON fallback
+- [x] `core/intelligence.py` — PatternAnalyzer (direction bias, timing, roll costs, regime)
+- [x] `memory_query.py` — CLI: `python3 memory_query.py`
+- [x] `intelligence_dashboard.py` — Dashboard: `python3 intelligence_dashboard.py --days 14`
+- [x] AI feedback loop — analyst adjusts confidence based on historical patterns
+- [x] Auto-stores session PnL, trades, rolls, issues before each deploy
+
+### Phase 8 — Telegram Integration ✅
+- [x] `notifications/telegram_bot.py` — interactive bot with commands
+- [x] `/pause`, `/resume`, `/cancel`, `/status` commands
+- [x] Command file communication (`state/bot_command.json`)
+- [x] Service: `btc-grid-telegram`
 
 ---
 

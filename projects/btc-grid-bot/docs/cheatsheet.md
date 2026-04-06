@@ -1,47 +1,82 @@
-# BTC Grid Bot — Quick Reference
-
-> Last updated: 2026-04-01  
-> Project: btc-grid-bot  
-> Location: `/root/.openclaw/workspace/projects/btc-grid-bot/`
+# BTC Grid Bot — Quick Reference (Updated 2026-04-05)
 
 ---
 
 ## 🚀 Quick Start
 
 ```bash
-# Run the bot
-cd /root/.openclaw/workspace/projects/btc-grid-bot/
-./run.sh
-
 # Check status
 sudo systemctl status btc-grid-bot
+sudo systemctl status btc-grid-telegram
 
 # View logs
-journalctl -u btc-grid-bot -f
+sudo journalctl -u btc-grid-bot -f --since "10 min ago"
+
+# Restart service
+sudo systemctl restart btc-grid-bot
 ```
 
 ---
 
-## 📁 File Structure
+## 📁 Current File Structure
 
 ```
-btc-grid-bot/
-├── main.py                 # Entry point + daily reset loop
-├── config.yml              # All settings (see below)
-├── analyst.py              # AI Analyst (06:00 UTC)
-├── grid.py                 # Grid Manager (orders/fills)
-├── calculator.py           # Capital safety check
-├── lighter_api.py          # Lighter API wrapper
-├── telegram.py             # Telegram alerts
-├── market_intel.py         # OKX data fetch
-├── indicators.py           # Technical indicators
-├── state/                  # Runtime state (gitignored)
-│   └── grid_state.json
-├── logs/                   # Log files
+projects/btc-grid-bot/
+├── main.py                  # Entry point + daily reset loop
+├── config.yml               # All settings (see below)
+│
+├── analysis/
+│   ├── analyst.py           # AI Analyst (06:00 UTC) — OKX + market intel + indicators → LLM
+│   └── direction.py         # Direction score (EMA + price action)
+├── api/
+│   └── lighter.py           # Lighter DEX WebSocket API wrapper
+├── core/
+│   ├── grid_manager.py      # Order placement, fills, rolls, pause, recovery
+│   ├── calculator.py        # Capital safety check with ATR + volatility sizing
+│   ├── capital.py           # CapitalMixin (equity, position-aware sizing)
+│   ├── order_manager.py     # OrderMixin (place, cancel, track)
+│   ├── memory_layer.py      # Session-end logging + AI feedback loop
+│   └── intelligence.py      # PatternAnalyzer (historical recommendations)
+├── indicators/              # 12 modules: ATR, ADX, EMA, BB, volume, regime, OI, etc.
+├── market/
+│   └── intel.py             # Coinalyze (funding, OI, liquidations)
+├── notifications/
+│   ├── alerts.py            # send_alert() → Telegram
+│   └── telegram_bot.py      # Interactive bot (/pause, /resume, /cancel, /status)
+├── state/                   # Runtime state (gitignored)
+│   ├── grid_state.json
+│   └── deployments/
+│
+├── memory_query.py          # CLI: python3 memory_query.py
+├── intelligence_dashboard.py # Dashboard: python3 intelligence_dashboard.py --days 14
 └── docs/
-    ├── plan.md            # Full project plan
-    └── cheatsheet.md      # You are here
+    ├── plan.md              # Full project plan (phases + checkboxes)
+    ├── architecture.md      # Module map + data flow diagrams
+    └── cheatsheet.md        # You are here
 ```
+
+---
+
+## 🧠 Architecture (simplified)
+
+```
+Daily Reset (06:00 UTC):
+  OKX candles (15m/30m)  →  AI Analyst  →  Grid Levels  →  Grid Manager
+  Market Intel (Coinalyze) ↗               ↗               ↗
+  Technical Indicators   ↗               ↗                ↗
+  Memory Layer           ↗               ↗                ↗
+
+Monitor Loop (every 30s):
+  Check fills → Replace orders → Trailing loss check → PnL alert (23:30)
+
+Telegram Commands:
+  /pause   → Cancel all orders
+  /resume  → Redeploy same levels (no AI)
+  /cancel  → Emergency cancel + pause
+  /status  → Current grid state
+```
+
+**See `docs/architecture.md` for full module map and data flow.**
 
 ---
 
@@ -53,7 +88,7 @@ bot:
   margin_mode: cross
 
 capital:
-  starting_equity: 1000
+  starting_equity: 1000        # Historical reference
   max_exposure_multiplier: 3.0
   margin_reserve_pct: 0.20
 
@@ -64,7 +99,8 @@ grid:
   poll_interval_seconds: 30
 
 risk:
-  daily_loss_limit_pct: 0.08
+  daily_loss_limit_pct: 0.08   # Static floor: -8% from reset
+  trailing_loss_pct: 0.04      # Trailing stop: -4% from peak
 
 llm:
   model: "anthropic/claude-3.5-sonnet"
@@ -73,203 +109,173 @@ llm:
 
 data:
   timeframes: ["15m", "30m"]
-  candles_lookback: 200
+  candles_lookback: 200        # ~48h of 15m candles
 
 telegram:
   daily_pnl_time_utc: "23:30"
 ```
 
-**Edit config:**
-```bash
-nano config.yml
-```
-
 ---
 
-## 🧠 AI Analyst (`analyst.py`)
+## 📊 Grid Manager
 
-**Run daily at 06:00 UTC:**
-```bash
-python analyst.py
-```
-
-**Outputs JSON:**
-```json
-{
-  "date": "2026-04-01",
-  "buy_levels": [81200, 81800, 82400],
-  "sell_levels": [83100, 83700, 84200],
-  "range_low": 81200,
-  "range_high": 84200,
-  "confidence": "high",
-  "note": "82,400 is key pivot.",
-  "pause": false
-}
-```
-
-**Test manually:**
-```bash
-python analyst.py --test
-```
-
----
-
-## 🧮 Capital Calculator (`calculator.py`)
-
-**Run before placing orders:**
-```bash
-python calculator.py
-```
-
-**Safety check formula:**
-```
-max_notional = equity × 3.0
-reserved = equity × 0.20
-available = max_notional - reserved
-size_per_level = available / (num_buy + num_sell) / btc_price
-```
-
-**Test with custom equity:**
-```bash
-python calculator.py --equity 1500
-```
-
----
-
-## 📊 Grid Manager (`grid.py`)
-
-**Place grid orders:**
+### Place grid orders
 ```python
-from grid import GridManager
+from core.grid_manager import GridManager
 
-gm = GridManager()
-gm.place_grid(buy_levels, sell_levels)
+# main.py does this automatically in startup()
+gm = GridManager(cfg, api)
+await gm.deploy(levels, equity, price, direction="long")
 ```
 
-**Check fills (run every 30s):**
+### Monitor fills
 ```python
-gm.check_fills()
+await gm.check_fills(price)
+# Buy filled → place sell one level up
+# Sell filled → place buy one level down
+# Orphan sell (no BTC) → log, skip replacement
 ```
 
-**Pause if price outside range:**
+### Pause if price outside range
 ```python
 if price < range_low or price > range_high:
-    gm.pause()
+    gm._pause("Price outside grid range")
+```
+
+### Position recovery
+```python
+# Detected BTC position at startup:
+#   <1% equity → dust, cleanup and deploy fresh
+#   1-10%      → build grid around existing position
+#   >10%       → close position via recovery mode
 ```
 
 ---
 
-## 🔄 Main Loop (`main.py`)
+## 🧮 Capital Calculator
 
-**Scheduler:**
-- 06:00 UTC: Daily reset (cancel + new grid)
-- 23:30 UTC: Daily PnL report
-- Every 30s: Check fills
-- Equity drop >8%: Cancel all, alert
+```python
+from core.calculator import calculate_grid
 
-**Run as service:**
-```bash
-sudo systemctl start btc-grid-bot
-sudo systemctl enable btc-grid-bot
+calc = calculate_grid(
+    equity, price, num_buy, num_sell,
+    max_exposure_mult=3.0,
+    margin_reserve_pct=0.20,
+    atr_pct=atr_value,        # Scales with volatility
+    volatility=vol_cfg,       # Volatility adjustments
+    compounding_mult=1.05,    # Auto-compound sizing
+    time_adj=1.0,             # Session multiplier
+    funding_adj=1.0,          # Funding rate multiplier
+    direction="long",         # Affects sizing
+)
+# Returns {"safe": True, "size_per_level": 0.001593, ...}
 ```
 
-**Service file:** `/root/.openclaw/workspace/projects/btc-grid-bot/btc-grid-bot.service`
+---
+
+## 🔒 Risk Management
+
+| Rule | Value | Action |
+|------|-------|--------|
+| Max leverage | 3× equity | Sizing limiter |
+| Margin reserve | 20% | Never used |
+| Static loss limit | -8% from reset | Cancel all, 24h lockout |
+| Trailing loss | -4% from peak | Cancels all, 24h lockout |
+| Daily reset | 06:00 UTC | Full grid rebuild |
+
+---
+
+## 📈 Memory Layer
+
+### Session logging (automatic)
+Before each deploy, `_log_session_end()` saves to `state/bot-memory.json`:
+- Session PnL, trades, rolls, issues
+- Equity at reset, realized PnL
+- Direction score, confidence
+- Grid range, fill count
+
+### Query historical patterns
+```bash
+python3 memory_query.py              # Latest session
+python3 memory_query.py --last 5     # Last 5 sessions
+```
+
+### Intelligence dashboard
+```bash
+python3 intelligence_dashboard.py --days 14
+# Outputs: direction bias, timing patterns, roll costs,
+#          regime performance, losing streak analysis
+```
+
+### AI feedback loop
+Analyst pulls memory intel each run → adjusts confidence based on what's been working:
+```python
+# In analysis/analyst.py
+from core.memory_layer import MemoryLayer
+intel = MemoryLayer().get_recs()
+# Applies directional bias correction, timing adjustments
+```
 
 ---
 
 ## 🚨 Telegram Alerts
 
-**Key alerts:**
-- `📊 Grid reset. Range $X–$Y · N buy + N sell · BTC @ $Z`
-- `✅ Buy filled @ $X · Size · Sell placed @ $Y`
-- `✅ Sell filled @ $X · Size · Buy placed @ $Y`
-- `⚠️ BTC @ $X — below/above grid. Paused until 06:00 UTC.`
-- `🚨 Equity down 8%. All orders cancelled. Manual restart required.`
+| Event | Message |
+|-------|---------|
+| Grid deployed | `✅ Grid deployed (LONG) · BTC @ $X · Direction score: +3 (high)` |
+| Buy filled | `✅ Buy filled @ $X · Sell placed @ $Y` |
+| Sell filled | `✅ Sell filled @ $X · Buy placed @ $Y` |
+| Orphan sell | `⚠️ Sell filled without BTC — orphan fill at $X` |
+| Grid paused | `⏸ Grid paused — price outside range` |
+| Loss limit | `🚨 LOSS LIMIT REACHED! 🔒 Locked for 24h` |
+| Daily PnL | `📊 Daily PnL Report · Win rate: X% · Equity: $Y` |
+| Volume spike | `📊 Volume spike: 3.2x avg, direction=bullish` |
 
-**Send custom alert:**
-```python
-from telegram import send_alert
-send_alert("Your message here")
+### Telegram Commands
+```
+/pause    → Cancel all orders, pause grid
+/resume   → Redeploy same levels (no new AI analysis)
+/cancel   → Emergency cancel all + pause
+/status   → Current grid state, equity, pending orders
 ```
 
 ---
 
-## 🔧 Common Operations
-
-**Restart bot:**
-```bash
-sudo systemctl restart btc-grid-bot
-```
-
-**Check bot status:**
-```bash
-sudo systemctl status btc-grid-bot
-```
-
-**View recent logs:**
-```bash
-tail -f /var/log/btc-grid-bot.log
-```
-
-**Manual grid reset:**
-```bash
-python main.py --reset
-```
-
-**Force pause:**
-```bash
-echo "pause" > state/grid_state.json
-```
-
-**Force resume:**
-```bash
-echo "running" > state/grid_state.json
-```
-
----
-
-## 🐛 Troubleshooting
+## 🔧 Troubleshooting
 
 | Issue | Check |
 |-------|-------|
 | Bot not running | `systemctl status btc-grid-bot` |
-| No orders placed | Check API keys in config, Lighter connection |
-| AI fails | Check LLM credentials, candle data fetch |
-| Orders not filling | BTC price outside grid range |
-| Balance issues | `calculator.py` safety check failed |
+| No orders placed | Check API keys in `.env`, Lighter connection |
+| AI fails | Check OpenRouter credentials, OKX candle fetch |
+| Orders not filling | Price outside grid range, or bot paused |
+| Orphan sells | Price moved through sells faster than buys could fill — bot handles this, no action needed |
+| Loss lockout | Check `state/loss_lockout.json` — auto-unlocks after 24h |
 
-**API Keys:** Stored in `.env` file (gitignored)
-
-**State file:** `state/grid_state.json` (contains current grid levels, order IDs, pause status)
-
----
-
-## 📈 Performance Metrics
-
-**Track in logs:**
-- Daily PnL
-- Number of fills
-- Win rate
-- Max drawdown
-
-**View daily PnL:**
+**Log files:**
 ```bash
-grep "Daily PnL" /var/log/btc-grid-bot.log | tail -5
+# Recent bot logs
+sudo journalctl -u btc-grid-bot --since "1 hour ago"
+
+# Fills only
+sudo journalctl -u btc-grid-bot --since "today" | grep -i fill
+
+# Errors only
+sudo journalctl -u btc-grid-bot --since "today" | grep -i error
 ```
 
----
-
-## 🔒 Security Notes
-
-- Never commit `.env` or `state/` to git
-- Use cross margin with 20% reserve
-- Daily loss limit: 8% equity drop auto-stop
-- Grid pauses if price breaks range
+**State files:**
+- `state/grid_state.json` — current grid state
+- `state/bot-memory.json` — session-end logs
+- `state/loss_lockout.json` — if locked out
+- `state/deployments/` — historical deployment logs
 
 ---
 
-## 📚 Full Documentation
+## 🔒 Security
 
-- Project Plan: `/root/.openclaw/workspace/projects/btc-grid-bot/docs/plan.md`
-- This Cheatsheet: `/root/.openclaw/workspace/projects/btc-grid-bot/docs/cheatsheet.md`
-- AGENTS.md: `/root/.openclaw/workspace/AGENTS.md`
+- `.env` contains secrets — never committed
+- `state/` runtime files — never committed
+- Cross margin with 20% reserve
+- Lighter API only (no external order routing)
+- OKX candles only (public API, no keys needed)

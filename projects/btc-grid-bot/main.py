@@ -257,6 +257,10 @@ async def handle_trigger_event(trigger_event, gm, adjuster, api, cfg, snapshot, 
                     await gm.deploy(new_levels, equity, price, direction="long", 
                                    signal_data={"analyst": new_levels, "direction_score": direction_result})
                     
+                    # Reset trigger engine cooldowns after redeployment 
+                    if trigger_engine:
+                        trigger_engine.reset_after_deploy(time.time())
+                    
                     await send_alert(
                         f"✅ Grid redeployed by AI\n"
                         f"Buy: {new_levels['buy_levels']}\n"
@@ -289,6 +293,10 @@ async def handle_trigger_event(trigger_event, gm, adjuster, api, cfg, snapshot, 
                     
                     await gm.deploy(new_levels, equity, price, direction="long",
                                    signal_data={"analyst": new_levels, "direction_score": direction_result})
+                    
+                    # Reset trigger engine cooldowns after redeployment
+                    if trigger_engine:
+                        trigger_engine.reset_after_deploy(time.time())
                     
                     await send_alert(
                         f"✅ Full redeploy complete\n"
@@ -553,6 +561,10 @@ async def run_loop(api: LighterAPI, gm: GridManager, levels: dict, cfg: dict):
     monitor = MarketMonitor(api, gm.state)
     trigger_engine = TriggerEngine(cfg.get("triggers", {}))
     adjuster = GridAdjuster(gm)
+    
+    # Reset trigger engine cooldowns after startup deploy
+    # This prevents immediate triggers from stale state (fills from before restart)
+    trigger_engine.reset_after_deploy(time.time())
     
     pnl_reported_today = False
     config_mtime = os.path.getmtime(Path(__file__).parent / "config.yml")

@@ -624,5 +624,205 @@
     ],
     "paused": null,
     "pause_reason": null
+  },
+  {
+    "_timestamp": "2026-04-06T04:24:39.423661+00:00",
+    "_type": "session_end",
+    "_tags": [
+      "session_summary"
+    ],
+    "_version": 1,
+    "session_duration_hours": 0.1,
+    "grid_direction": "long",
+    "realized_pnl": -0.81,
+    "equity_change": 0.0,
+    "trades": 11,
+    "fill_count": 0,
+    "win_rate": 0.273,
+    "roll_count": 5,
+    "range_width": 4450,
+    "issues": [
+      "orphan_sells(4)",
+      "excessive_rolls",
+      "low_win_rate"
+    ],
+    "peak_equity": 78.859049,
+    "max_drawdown_pct": 0.0103
+  },
+  {
+    "_timestamp": "2026-04-06T04:26:46.516063+00:00",
+    "_type": "analysis",
+    "_tags": [
+      "live",
+      "long",
+      "bullish_low"
+    ],
+    "_version": 1,
+    "analysis_result": {
+      "direction": "long",
+      "buy_levels": [
+        68750,
+        67500,
+        67200,
+        66950,
+        66600
+      ],
+      "sell_levels": [
+        69450,
+        69950,
+        70450,
+        70900
+      ],
+      "range_low": 66600,
+      "range_high": 70900,
+      "confidence": "medium",
+      "note": "Ranging structure with extreme positive funding. Symmetric grid aligned with confirmed swing reversals and volume nodes. Size auto-reduced 60% to mitigate long squeeze risk. Levels spaced >$207 to filter chop.",
+      "pause_reason": null
+    },
+    "market_context": {
+      "current_price": 68954.1,
+      "equity": 78.859049,
+      "regime": "bullish_low",
+      "atr": 206.65,
+      "funding_rate": 0.007073,
+      "oi_divergence": "Price and OI both flat \u2014 no clear divergence signal",
+      "volume_regime": "normal"
+    },
+    "indicators": {
+      "swing_highs_15m": 20,
+      "swing_lows_15m": 22,
+      "swing_highs_30m": 28,
+      "swing_lows_30m": 30,
+      "candle_range_15m": 2993.300000000003
+    },
+    "direction": "long",
+    "confidence": "medium",
+    "note": "Ranging structure with extreme positive funding. Symmetric grid aligned with confirmed swing reversals and volume nodes. Size auto-reduced 60% to mitigate long squeeze risk. Levels spaced >$207 to filter chop.",
+    "buy_levels": [
+      68750,
+      67500,
+      67200,
+      66950,
+      66600
+    ],
+    "sell_levels": [
+      69450,
+      69950,
+      70450,
+      70900
+    ],
+    "paused": null,
+    "pause_reason": null
+  },
+  {
+    "_timestamp": "2026-04-06T04:27:14.341414+00:00",
+    "_type": "session_end",
+    "_tags": [
+      "session_summary"
+    ],
+    "_version": 1,
+    "session_duration_hours": 0.1,
+    "grid_direction": "long",
+    "realized_pnl": -0.81,
+    "equity_change": 0.0,
+    "trades": 11,
+    "fill_count": 0,
+    "win_rate": 0.273,
+    "roll_count": 5,
+    "range_width": 4450,
+    "issues": [
+      "orphan_sells(4)",
+      "excessive_rolls",
+      "low_win_rate"
+    ],
+    "peak_equity": 78.859049,
+    "max_drawdown_pct": 0.0103
+  },
+  {
+    "_timestamp": "2026-04-06T04:30:39.259315+00:00",
+    "_type": "analysis",
+    "_tags": [
+      "live",
+      "long",
+      "bullish_low"
+    ],
+    "_version": 1,
+    "analysis_result": {
+      "direction": "long",
+      "buy_levels": [
+        68750,
+        67350,
+        66950,
+        66600
+      ],
+      "sell_levels": [
+        69350,
+        69600,
+        70450,
+        71100
+      ],
+      "range_low": 66600,
+      "range_high": 71100,
+      "confidence": "medium",
+      "note": "Ranging market with symmetric structure. Extreme positive funding (+0.7%) increases squeeze risk, so grid is widened with >$200 spacing. Levels anchored to confirmed swing reversals, BB bands, and HVNs.",
+      "pause_reason": null
+    },
+    "market_context": {
+      "current_price": 68938.2,
+      "equity": 78.859049,
+      "regime": "bullish_low",
+      "atr": 206.93,
+      "funding_rate": 0.007073,
+      "oi_divergence": "Price and OI both flat \u2014 no clear divergence signal",
+      "volume_regime": "normal"
+    },
+    "indicators": {
+      "swing_highs_15m": 20,
+      "swing_lows_15m": 22,
+      "swing_highs_30m": 28,
+      "swing_lows_30m": 30,
+      "candle_range_15m": 2993.300000000003
+    },
+    "direction": "long",
+    "confidence": "medium",
+    "note": "Ranging market with symmetric structure. Extreme positive funding (+0.7%) increases squeeze risk, so grid is widened with >$200 spacing. Levels anchored to confirmed swing reversals, BB bands, and HVNs.",
+    "buy_levels": [
+      68750,
+      67350,
+      66950,
+      66600
+    ],
+    "sell_levels": [
+      69350,
+      69600,
+      70450,
+      71100
+    ],
+    "paused": null,
+    "pause_reason": null
+  },
+  {
+    "_timestamp": "2026-04-06T04:31:01.655164+00:00",
+    "_type": "session_end",
+    "_tags": [
+      "session_summary"
+    ],
+    "_version": 1,
+    "session_duration_hours": 0.1,
+    "grid_direction": "long",
+    "realized_pnl": -0.81,
+    "equity_change": 0.0,
+    "trades": 11,
+    "fill_count": 0,
+    "win_rate": 0.273,
+    "roll_count": 5,
+    "range_width": 4300,
+    "issues": [
+      "orphan_sells(4)",
+      "excessive_rolls",
+      "low_win_rate"
+    ],
+    "peak_equity": 78.859049,
+    "max_drawdown_pct": 0.0103
   }
 ]

@@ -10,6 +10,10 @@
 ## Rules
 See **AGENTS.md** — 7 safety rules, session flow, code flow. Key: ask before acting, spawn subagents, verify work, no polling loops, stop = stop.
 
+### Auto-Ingest Rule (Second Brain)
+When John sends a link or article, automatically save it to `projects/second-brain/raw/` and ingest into wiki (source summary, entities, concepts, cross-links, update index, log) — **no asking, no reminding needed**. Report what was created after ingestion.
+This rule applies across ALL sessions, not just this one. Next session's me must honor it.
+
 
 <!-- promoted from memory/2026-03-21.md on 2026-03-25 -->
 ### Archived: 2026-03-21

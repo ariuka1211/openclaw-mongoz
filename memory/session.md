@@ -2,58 +2,28 @@
 
 ## What Happened Today
 
-### Phase 1.1 Complete — Lightpanda + Stealth Browser
-- **Lightpanda v1.0.0-nightly.5424** installed (CDP-compatible, no rendering)
-- **stealth-browser-mcp v0.1.4** installed in venv
-- **Playwright + Chromium** reinstalled for actual screenshots (Lightpanda can't render)
-- **Coinglass heatmap** confirmed working at `/pro/futures/LiquidationHeatMap` (no login needed)
+### LLM Wiki / Second Brain Exploration
+- Discovered and discussed Karpathy's viral LLM Wiki pattern (41K bookmarks, gist with 2.1K stars)
+- Installed Nick Spisak's second-brain implementation (`npx skills add NicholasSpisak/second-brain`)
+- Set up full vault at `projects/second-brain/` with AGENTS.md, folder structure, cli tools (summarize, qmd, Lightpanda)
+- Ingested 8+ sources about LLM wiki pattern into wiki (13 pages: 6 sources, 2 entities, 5 concepts)
+- All sources cross-linked with wikilinks, index.md and log.md updated
+- Discovered My-Brain-Is-Full-Crew (8 agents + 13 skills for overwhelmed users) — relevant for ADHD but requires Claude Max ($200/mo)
+- **Key insight:** maintenance discipline is the real bottleneck, not the tool. Luke's critique is the most important: "Building the wiki is a weekend project. Keeping it alive is a second job."
+- **John's insight:** OpenClaw is single-agent, subagents unreliable, needs deterministic triggers not faith in memory
+- Auto-ingest rule added to MEMORY.md (save to raw/ and ingest when John sends links)
+- Decision: keep it manual for now — John says "ingest" when he sends links, I handle it
 
-### V2 Codebase Cleanup
-- Trashed: ad-hoc scripts (close_btc*, debug, final_close, verify_close)
-- Trashed: duplicate configs (config.example.yml, config.production.yml, config.webhook-test.yml)
-- Trashed: setup artifacts (smoke_test.py, monitor.sh, TRADINGVIEW_SETUP.md, trades.db, .service file)
-- Trashed: failed test screenshots, __pycache__, .pytest_cache
-- Trashed: workspace-level junk (data/, state/, docs/, lighter-copilot/, freqtrade/)
-- Trashed in v2: test_lightpanda_screenshot.py, sources/webhook_receiver.py, v2/ (old design docs), requirements-webhook.txt
-
-### OpenClaw Updated
-- 2026.4.1 → 2026.4.5
-- 2 orphan session files archived
-- New models auto-configured: qwen3.6-plus:free, claude-sonnet-4.6
-
-### Code Quality Enforcement
-- **Ruff** installed + configured (ruff.toml)
-- **.ruff_custom.py** — 5 custom anti-pattern rules (V001-V005)
-  - V001: Ban mock echo tests
-  - V002: Ban hardcoded trading values
-  - V003: Ban bare except clauses
-  - V004: Require typing on critical functions
-  - V005: Ban print statements
-- **Git pre-commit hook** — blocks commits with violations
-- **GitHub Actions** (`.github/workflows/code-quality.yml`) — lint + anti-pattern + test on every push/PR
-- 189 existing violations found (to be fixed as code changes, not retroactively)
-
-### Memory System Research
-- Investigated memvid vs mnemoria vs OpenClaw builtin memory
-- Grid bot used memvid-sdk with JSON fallback
-- **Decision: install Mnemoria post-V2**, added as Phase 6 in plan-orderflow.md
-- Keep markdown memory for daily notes/handoff, use Mnemoria for structured trading decisions
-
-## Services Status
+### Services Status
 - ALL STOPPED — btc-grid-bot, scanner, bot, ai-decisions
 
-## Archive Status
-- Grid bot → `projects/archive/btc-grid-bot/`
-- V1 autopilot → `projects/archive/autopilot-trader/`
+### Next Steps
+1. Phase 1.2 — Orderbook Data Collector (Lighter WS stream) — still pending
+2. Continue building V2 orderflow bot when ready
+3. Second brain wiki — keep it alive by ingesting links when John sends them
 
-## Next Steps
-1. Phase 1.2 — Orderbook Data Collector (Lighter WS stream)
-2. Phase 1.3 — Liquidation Heatmap Collector (Coinglass via Playwright + stealth)
-3. Phase 1.4 — Price/Volume Data merge
-
-## Key Lessons
-- Never claim verification without actually checking the evidence (screenshot incident)
-- Lightpanda = DOM extraction only, no rendering
-- Playwright required for screenshots (Coinglass heatmaps)
-- Context length degradation causes hallucinated verification claims
-- Ruff/pre-commit/CI to prevent future AI slop from entering codebase
+### Key Lessons
+- Karpathy's pattern is elegant but requires discipline most people (especially ADHD) don't have
+- My-Brain-Is-Full-Crew is the right solution philosophically but wrong platform (Claude Max required)
+- Best we can do on OpenClaw: zero-friction ingestion (send link → I save + process)
+- Subagents are unreliable for critical tasks — better to do things in main session

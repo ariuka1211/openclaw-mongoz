@@ -1,0 +1,53 @@
+{
+  "browserbase": {
+    "apiKey": "bb_live_pWCC50dAT24TvssmuHToAXx4iQY",
+    "defaultTimeout": 3000,
+    "endpoint": "https://api.browserbase.com/v1/fetch",
+    "headers": {
+      "Content-Type": "application/json",
+      "x-bb-api-key": "bb_live_pWCC50dAT24TvssmuHToAXx4iQY"
+    }
+  },
+  "agentBrowser": {
+    "defaultDevice": "iPhone 16 Pro",
+    "sessionDir": "~/.agent-browser/sessions",
+    "headless": true,
+    "installCommand": "npm install -g agent-browser && agent-browser install"
+  },
+  "gsdBrowser": {
+    "chromePath": "/usr/bin/google-chrome",
+    "downloadPath": "./downloads",
+    "binaryPath": "/root/.openclaw/workspace/gsd-browser",
+    "wrapperScript": "/root/.openclaw/workspace/chrome-wrapper.sh"
+  },
+  "playwright": {
+    "stealthMode": true,
+    "blockAds": true,
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+    "installPath": "/root/.openclaw/workspace/projects/autopilot-trader-v2/.venv/"
+  },
+  "selection": {
+    "preferLocal": false,
+    "costPriority": "speed",
+    "defaultTool": "auto",
+    "rules": {
+      "simple_fetch": "browserbase",
+      "complex_automation": "agent-browser",
+      "stealth_required": "playwright",
+      "mobile_testing": "agent-browser",
+      "cost_sensitive": "gsd-browser"
+    }
+  },
+  "timeouts": {
+    "browserbase": 5000,
+    "agentBrowser": 30000,
+    "gsdBrowser": 45000,
+    "playwright": 25000
+  },
+  "fallbacks": {
+    "browserbase": ["agent-browser", "gsd-browser"],
+    "agent-browser": ["browserbase", "playwright"],
+    "gsd-browser": ["browserbase", "agent-browser"],
+    "playwright": ["agent-browser", "gsd-browser"]
+  }
+}

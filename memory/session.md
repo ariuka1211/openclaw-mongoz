@@ -1,61 +1,50 @@
-# Session Handoff — 2026-04-07
+# Session Handoff — 2026-04-08
 
-## What Happened Today — Browser Automation Unification
+## What Happened Today — VPS GUI + BrowserOS Setup
 
-### Browser Tool Evaluation & Skill Creation
-- **Evaluated 4 browser tools**: Browserbase, Agent Browser, GSD Browser, Playwright
-- **Created unified browser automation skill** at `~/.openclaw/workspace/skills/browser-automation/`
-- **Built smart tool selector**: `browser-automation.py` auto-picks best tool per task
-- **Comprehensive documentation**: SKILL.md + references for each tool
+### VPS Cleanup
+- Cleaned npm cache, pip cache, Docker images — freed ~5GB
+- Killed VSCode server, disabled dashboard
+- RAM: 2.3GB used (down from baseline)
 
-### Key Findings
+### GUI Installation
+- Installed XFCE desktop
+- Tried noVNC — Chrome extension conflict (Backpack wallet)
+- Tried Guacamole — failed to start (Tomcat port conflict)
+- Settled on: x11vnc + websockify on port 6080
 
-**Browserbase (Winner for Data Extraction):**
-- ✅ Speed: 0.92s (6x faster than alternatives)
-- ✅ CoinGlass: Successfully captured full HTML (24KB)  
-- ✅ Zero setup, pure API calls
-- ⚠️ Auth: `x-bb-api-key` header (NOT `Authorization: Bearer`)
-- ⚠️ Data values show `$--` placeholders (client-side JS loading)
+### BrowserOS Installation
+- Installed BrowserOS .deb package from https://github.com/browseros-ai/BrowserOS
+- Runs headless (--headless --no-sandbox --disable-gpu)
+- CDP on port 9100, MCP server on port 9200
+- 19 processes, ~700MB RAM
 
-**Agent Browser (Complex Automation):**
-- ✅ Installed: npm + Chrome 147.x at `/root/.agent-browser/`
-- ✅ AI-first design: `snapshot -i` → refs (`@e1`) → interact
-- ✅ Form filling, login flows, mobile testing (iOS Safari)
-- ❌ CoinGlass blocked (404), Google captcha'd
-- Use for: Multi-step workflows, authentication, complex forms
+### Control Method
+- **Playwright via CDP** → BrowserOS on port 9100
+- Speed: ~8 seconds per page load
+- Works reliably
+- MCP server broken (Klavis API dependency issue)
 
-**Tool Selection Logic:**
-- Simple fetch → Browserbase (fastest)
-- Complex workflow → Agent Browser (AI-driven) 
-- Stealth required → Playwright (anti-detection)
-- Local/free → GSD Browser (backup)
+### Screenshots Sent
+- CoinGlass liquidation heatmap
+- Binance proof screenshot
+- Issue: Telegram won't accept /tmp/ files, must use ~/.openclaw/workspace/
 
-### Files Created
-```
-skills/browser-automation/
-├── SKILL.md                 # Unified interface docs
-├── scripts/browser-automation.py  # Smart tool selector
-├── configs/browser-automation.json # All tool configs
-└── references/              # Tool-specific guides
-    ├── browserbase-api.md
-    ├── agent-browser-advanced.md
-    └── [others]
-```
-
-### Services Status  
-- ALL STOPPED — btc-grid-bot, scanner, bot, ai-decisions
+### Services Running
+| Service | Port | Status |
+|---------|------|--------|
+| openclaw-gateway | - | Running |
+| BrowserOS (headless) | 9100 CDP | Running |
+| x11vnc | 5900 | Running |
+| websockify/noVNC | 6080 | Running |
 
 ### Next Steps
-1. **Phase 1.2** — Orderbook Data Collector (still pending)
-2. **Real liquidation data** — Need CoinGlass API or alternative (current scraping gets placeholders)
-3. **Continue V2 bot development** when ready
+- Use headless when automating
+- Use noVNC (port 6080) for manual GUI access
+- When John wants GUI: restart x11vnc + noVNC
 
 ### Key Lessons
-- **Tool sprawl solved**: Single skill replaces 4 scattered tools
-- **Browserbase best for trading data**: Fast, reliable, bypasses bot detection
-- **Agent Browser for complex tasks**: Forms, login, multi-step automation
-- **CoinGlass anti-bot**: Blocks headless browsers, API preferable to scraping
-- **Auto-selection works**: Tool choice logic tested and validated
-
-### Auto-Ingest Rule (Second Brain)
-When John sends a link or article, automatically save it to `projects/second-brain/raw/` and ingest into wiki — **no asking, no reminding needed**.
+- BrowserOS works great via Playwright → CDP
+- Telegram: save screenshots to ~/.openclaw/workspace/ before sending
+- Headless saves ~300MB RAM vs GUI mode
+- noVNC works through browser, no client needed

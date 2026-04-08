@@ -29,16 +29,22 @@
 
 **Start:**
 1. `memory/session.md` → handoff
-2. `MEMORY.md` → long-term context
+2. `MEMORY.md` → long-term context  
 3. `projects/btc-grid-bot/docs/cheatsheet.md` → grid bot quick reference
 4. Today's daily file in `memory/`
-5. **If user says "check in"** → read `memory/mental-health.md` for continuity
+5. **Auto-context loading** — Use `session_memory_auto.py` to search memvid for relevant context based on session.md topics
+6. **If user says "check in"** → read `memory/mental-health.md` for continuity
+
+**During Session:**
+- When user asks about past work/decisions → `search_context("user's topic")` 
+- Track conversations automatically with `track_exchange(user_msg, assistant_msg)`
 
 **End (🔴 WRAP UP):**
 Show checklist, complete each:
 ```
 ⬜ Overwrite memory/session.md
 ⬜ Append to memory/YYYY-MM-DD.md
+⬜ Auto-ingest session: `wrap_up_session("Session YYYY-MM-DD")`
 ⬜ git add -A && commit && push to main
 ```
 
@@ -62,7 +68,7 @@ Show checklist, complete each:
 ## TOOLS
 
 - **Web:** Tavily → DuckDuckGo fallback → Exa for deep research
-- **YouTube:** `curl defuddle.md/YOUR_URL` → clean transcript
+- **YouTube/URLs:** `curl defuddle.md/URL` → clean markdown or transcript (web tool, not CLI)
 - **Twitter:** `curl -s "https://api.vxtwitter.com/USER/status/ID"` or swap `x.com` → `fxtwitter.com`
 
 ---

@@ -31,19 +31,16 @@
 1. `memory/session.md` → handoff
 2. `MEMORY.md` → long-term context  
 3. Today's daily file in `memory/`
-4. **Auto-context loading** — Use `session_memory_auto.py` to search memvid for relevant context based on session.md topics
-5. **If user says "check in"** → read `memory/mental-health.md` for continuity
+4. **If user says "check in"** → read `memory/mental-health.md` for continuity
 
 **During Session:**
-- When user asks about past work/decisions → `search_context("user's topic")` 
-- Track conversations automatically with `track_exchange(user_msg, assistant_msg)`
+- When user asks about past work/decisions → use `memory_search`
 
 **End (🔴 WRAP UP):**
 Show checklist, complete each:
 ```
 ⬜ Overwrite memory/session.md
 ⬜ Append to memory/YYYY-MM-DD.md
-⬜ Auto-ingest session: `wrap_up_session("Session YYYY-MM-DD")`
 ⬜ git add -A && commit && push to main
 ```
 
@@ -64,17 +61,28 @@ Show checklist, complete each:
 
 ---
 
+## 🧠 SECOND BRAIN (auto-ingest)
+
+When John sends a link or article, **automatically**:
+1. Save to `projects/second-brain/raw/`
+2. Ingest into wiki — source summary, entities, concepts, cross-links, update index, log
+3. Report what was created
+
+**No asking, no reminding needed.** This applies across ALL sessions. Next session's me must honor it.
+
+---
+
 ## TOOLS
 
-- **Web:** Tavily → DuckDuckGo fallback → Exa for deep research
-- **YouTube/URLs:** `curl defuddle.md/URL` → clean markdown or transcript (web tool, not CLI)
-- **Twitter:** `curl -s "https://api.vxtwitter.com/USER/status/ID"` or swap `x.com` → `fxtwitter.com`
+- **Web:** Tavily → DuckDuckGo (`web_search`) fallback → Exa for deep research
+- **YouTube/URLs:** `web_fetch` first → `defuddle.md/URL` fallback for clean markdown
+- **Twitter:** swap `x.com` → `fxtwitter.com` in URL, then `web_fetch`
 
 ---
 
 ## KEY LESSONS
 
-- Subagents add code that reads vars but never inits `__init__`. Use `__slots__`. Restart services after merge.
+- Subagents often add `self.attr = value` in methods without initializing in `__init__`. Use `__slots__` or verify `__init__` completeness during diff review. Restart services after merge.
 - Trading-specific: `projects/autopilot-trader/docs/trading-lessons.md`
 - **Never claim "done" without running the verification checklist.** "Done" means grep + diff + tests all pass.
 - **Never change intentionally-written code** unless the task explicitly says so. Default: touch only what you're asked to touch.

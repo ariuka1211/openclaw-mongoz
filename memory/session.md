@@ -1,48 +1,53 @@
-# Session Handoff — 2026-04-09
+# Session Handoff — 2026-04-09 (afternoon)
 
-## Session Topic: VPS Cleanup Day
+## Session Topic: AGENTS.md Cleanup + BrowserOS Setup + System Cleanup
 
 ### What was done
-Major cleanup across the entire VPS — sessions, QMD index, and workspace folder.
 
-### Changes Made
+**AGENTS.md cleanup**
+- Removed Grid Bot reference (archived, not active)
+- Removed Watchdog reference (scripts deleted March 25)
+- Moved Second Brain auto-ingest rule from MEMORY.md → AGENTS.md (new dedicated section)
+- Removed stale session flow steps: `session_memory_auto.py`, `track_exchange()`, `wrap_up_session()`
+- Replaced with `memory_search` for During Session
+- Rewrote TOOLS section: Tavily (primary) → DuckDuckGo fallback → Exa, `defuddle.md` for URLs, fxtwitter for Twitter
+- Clarified `__slots__` key lesson with root cause explanation
 
-**sessions/ folder (99 MB → 1.1 MB)**
-- Deleted 180 `.deleted` files (28 MB)
-- Deleted 116 `.reset` files (58 MB)
-- Deleted 66 completed subagent `.jsonl` files (8 MB)
-- Deleted orphan `.jsonl`, `.bak` files
-- Pruned sessions.json: 90 entries → 13 entries, 2 MB → 248 KB
-- Removed 4 stale `modelOverride` entries (xiaomi/mimo-v2-omni)
-- Removed 27 stale `authProfileOverride` fields (openrouter:default)
-- Removed duplicate `:run:` cron entry
+**MEMORY.md cleanup**
+- Removed Grid Bot, Watchdog, Second Brain rule (all moved or deleted)
 
-**qmd/ folder (16 MB → 9.5 MB)**
-- Deleted `.bak-20260324` (5 MB)
-- Deleted empty `qmd.db`
-- Purged 59 inactive docs from SQLite index
-- Vacuumed SQLite, checkpointed WAL (9.3 MB → 0)
-- Synced duplicate `index.yml` (added missing ignore rules)
+**API Keys added to `.env`**
+- `TAVILY_API_KEY` — verified working
+- `EXA_API_KEY` — verified working
 
-**workspace/ folder (~55 MB recovered)**
-- Deleted 9 screenshot PNGs (14 MB)
-- Deleted stale duplicates: `models.json` (140 KB OpenRouter dump), `auth-profiles.json` (old GitHub token), `workspace-memory.mv2` (20 MB)
-- Deleted `gsd-browser` binary (10 MB), `chrome-wrapper.sh`, `browser-tool-audit.md`
-- Deleted `coinglass_result.json`, `BROWSERBASE_API_KEY`, `memvid-integration-COMPLETE.md`
-- Deleted `memvid_integration.py`, `session_memory_auto.py` (already in projects/)
-- Removed `__pycache__/`, `modal-test/` (test venv), `browser-rod/` (moved to skill)
-- Removed `node_modules/` + package files, `projects/automiloyt-trader-v2/` (typo dir)
-- Removed dead symlink dir `projects/skills/`
-- **Recovered browser-rod/ and gsd-browser from git, moved to `skills/browser-automation/tools/`**
-- Updated `skills/browser-automation/SKILL.md` with new tool paths
+**BrowserOS setup**
+- Confirmed BrowserOS installed at `/usr/bin/browseros` (v146.0.7821.31)
+- Created systemd service `/etc/systemd/system/browseros.service` — enabled, auto-starts on boot
+- Profile: `/root/.config/browser-os` (persistent cookies/sessions)
+- CDP: `ws://127.0.0.1:9101`
+- BrowserOS MCP server: `http://127.0.0.1:9201/mcp` (53 browser tools + 40+ app integrations)
+- Added `mcpServers.browseros` to `/root/.openclaw/openclaw.json`
+- ⚠️ **Needs `openclaw gateway restart` to activate MCP**
+- ⚠️ **Google not signed in** — needs manual sign-in via Guacamole GUI once, then persistent
+
+**Browser cleanup**
+- Uninstalled `google-chrome-stable` and `chromium-browser`
+- Removed Playwright's bundled Chromium from v2 `.venv`
+
+**System cleanup**
+- Stopped and disabled `tomcat10` (Guacamole/VNC) — `systemctl start tomcat10` to re-enable when needed
+- Deleted `autopilot-trader-v2/.venv` (239 MB)
+- Cleaned Go module cache (`/root/go`: 916 MB → 20 KB)
+- Disk: 31 GB → 30 GB used
 
 ### Current State
-- Default model: `modal/zai-org/GLM-5.1-FP8` ✅ (no stale overrides)
-- sessions.json: 13 clean entries (your DM, telegram groups, cron jobs, 1 subagent)
-- Workspace: clean — only core files, real projects, and organized skills
-- `projects/autopilot-trader-v2/.venv/` still 239 MB — can nuke when ready
-- `.git/` is 50 MB — could benefit from BFG/filter-branch to purge old PNGs from history
+- BrowserOS running as service, MCP configured but not yet active (needs gateway restart)
+- All API keys in workspace `.env`: Lighter, Proxy, Telegram, OpenRouter, Webhook, Tavily, Exa
+- Disk: 30 GB / 96 GB (31%)
+- RAM: 2.8 GB used / 7.8 GB total, no swap
 
-### Not Touched
-- `projects/archive/` (192 MB) — left alone per John's request
-- Git history cleanup (bigger operation, needs review)
+### Not Done
+- `openclaw gateway restart` (John to run)
+- Google sign-in in BrowserOS (needs Guacamole + stay signed in)
+- v2 `.venv` rebuild (when ready to run v2)
+- Git history cleanup (BFG for old PNGs — deferred)

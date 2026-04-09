@@ -1,54 +1,52 @@
-# Session Handoff — 2026-04-09 (afternoon wrap-up)
+# Session Handoff — 2026-04-09 (4:39 PM MDT)
 
-## Session Topic: VPS Cleanup Round 2 + Browser Skill Rewrite + Research
+## Session Topic: Model Fix + BrowserOS Repair + Tweet Fetch
 
 ### What was done
 
-**VPS Cleanup (continued from morning)**
-- Removed: Docker CE + containerd + plugins (~364 MB)
-- Removed: PyTorch torch (~1.2 GB, not used by any project)
-- Removed: Golang 1.22 (~340 MB, browser-rod was the only Go code and was deleted)
-- Removed: LLVM 18 + 20, Clang 18, bpftrace (~340 MB, eBPF tracing + GPU drivers — unused)
-- Removed: WebKitGTK + Yelp + Evolution desktop libs (~89 MB)
-- Removed: Pocketsphinx (~70 MB), CMake (~36 MB)
-- Removed: archive/autopilot-trader/bot/venv (~156 MB)
-- Removed: browser-rod Go tool + gsd-browser binary (replaced by BrowserOS)
-- Kept: guacd (Guacamole proxy), ibus, OpenJDK 21 (all needed for GUI access via Guacamole)
-- Total freed this session: ~2.8 GB | Disk: 30 GB → 26 GB (31% → 27%)
-- Note: Whisper broke (needed torch) — reinstalled CPU-only torch (~190 MB) + ffmpeg
+**GLM-5.1 Model Fix (ROOT CAUSE)**
+- Found the Modal API key `ak-mDirc91XkBXKyWjCtMmt1k:as-YfYEZt4TXbWmZPpyg1YQQ0` was **invalid** (401)
+- Replaced with `modalresearch_EH6ohwJx4bkrryhbyiiaWbf3XSMSUqIEOM9fkZrDr9U` in `models.json`
+- Confirmed working: 1.3s response time via direct curl test
+- This was why every /new session fell back to Sonnet — GLM timed out due to dead token
+- Increased timeout from 300s → 600s in openclaw.json
+- Sonnet restored as fallback (John explicitly wanted it)
+- Removed Sonnet from fallbacks briefly, then added it back per John's request
 
-**Subagent model update**
-- Changed from `kilocode/kilo-auto/free` → `modal/zai-org/GLM-5.1-FP8` (same as main)
+**BrowserOS Repair**
+- Original binary at `/usr/bin/browseros` was gone (likely removed during cleanup)
+- Downloaded fresh BrowserOS AppImage (273.6 MB) via `browseros-cli install`
+- Extracted to `/opt/browseros/squashfs-root/` (no FUSE on VPS)
+- Added Xvfb as virtual display (headless VPS needs it)
+- Fixed systemd service to point to `/opt/browseros/squashfs-root/opt/browseros/browseros`
+- BrowserOS now running on port 9200 (MCP), 9101 (CDP)
+- Updated openclaw.json: MCP URL changed from 9201 → 9200
+- **Verified working**: sent Coinglass liquidation heatmap screenshot to John
 
-**Browser-automation skill rewrite**
-- Deleted all stale files: scripts/browser-automation.py, configs/browser-automation.json, references/agent-browser-advanced.md, references/browserbase-api.md, tools/, examples/
-- Rewrote SKILL.md (~127 lines) centered on BrowserOS MCP as primary tool
-- Added references/browseros-patterns.md (advanced patterns: auth flows, infinite scroll, iframes, etc.)
-- Verified: 0 dead tool references, valid frontmatter, all old files deleted
+**Tweet Fetch (gittrend0x)**
+- fxtwitter/vxtwitter both failed on the X link
+- Used `agent-browser` CLI as a hack to fetch the tweet content
+- Later confirmed BrowserOS MCP tools work natively
+- 5 trending GitHub projects: camel-ai/owl, letta-ai/agent-file, simstudioai/sim, iflytek/astron-agent, mcp-use/mcp-use
 
-**New project files created**
-- `projects/advisor-executor-architecture/plan.md` — full plan for advisor/executor split with tool-level enforcement
-- `projects/useful-tools.md` — curated research findings: Camofox, Browser Use, TLS fingerprinting, Advisor-Executor pattern, GSD, Clicky, Dialagram
-
-### Research / Links Saved
-- Anthropic advisor strategy: Opus as advisor + Sonnet/Haiku as executor
-- Browser Use (browser-use.com): Python SDK + cloud for AI browser agents with stealth/CAPTCHA
-- Camofox: Firefox fork with C++-level TLS fingerprint spoofing (for anti-bot sites)
-- TLS fingerprinting concept: ClientHello = #1 way bots are detected
-- Qwen 3.6 Plus: was free on OpenRouter (qwen/qwen3.6-plus-04-02:free) — now DEPRECATED, paid only
-- Dialagram/Nexum Router: free OpenAI-compatible proxy for Qwen 3.5/GLM-5/DeepSeek at dialagram.me/router
-- GSD (Get Shit Done): spec-driven dev system for AI coding agents, solves context rot
-- Clicky: macOS AI tutor menu bar app, points cursor at UI elements, uses Claude+AssemblyAI+ElevenLabs
+**sessions.json Cleanup**
+- Found sticky model override in sessions.json (`model: claude-sonnet-4.6`) surviving /new
+- Removed the override fields; the root cause was the dead API key causing timeouts → fallback
 
 ### Current State
-- Disk: 26 GB / 96 GB (27%)
-- BrowserOS: running, systemd service, MCP active
-- Whisper: working (CPU torch + ffmpeg installed)
-- Subagents: now GLM-5.1
-- Google sign-in: still pending (needs Guacamole GUI)
+- **Model**: GLM-5.1 (working, fast, proper API key)
+- **Fallback**: Sonnet 4.6 → Gemma 4 31B
+- **BrowserOS**: Running, systemd service, MCP on port 9200, CDP on 9101
+- **Disk**: ~27% (BrowserOS AppImage added ~274 MB)
+- **Pending**: Google sign-in via Guacamole (not urgent)
 
-### Pending
-- Google sign-in via Guacamole (start tomcat10 when ready for GUI)
-- Implement advisor-executor architecture (plan saved, do later)
-- Consider adding swap (no swap configured, OOM risk)
-- Git history cleanup with BFG (deferred)
+### Key Files Changed
+- `/root/.openclaw/agents/main/agent/models.json` — fixed Modal API key
+- `/root/.openclaw/openclaw.json` — MCP port 9201→9200, timeout 600s, fallbacks updated
+- `/etc/systemd/system/browseros.service` — new service file for extracted AppImage
+- `/opt/browseros/` — extracted BrowserOS binary
+
+### ⚠️ Known Issues
+- BrowserOS runs on port 9200 now (was 9201 before). If anything references 9201, it'll fail.
+- The AppImage at `/usr/bin/browseros` is the raw AppImage (won't run without FUSE). The actual binary is at `/opt/browseros/squashfs-root/opt/browseros/browseros`
+- `agent-browser` npm package is installed globally — it's a SEPARATE tool from BrowserOS, don't confuse them

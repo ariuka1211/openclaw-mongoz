@@ -189,24 +189,39 @@ browser-automation monitor "my-trading-bot.com/health" "body" \
 
 ## Tool Installation
 
-The skill auto-installs missing tools on first use:
+Installed tools live in `tools/` within this skill directory:
 
+```
+skills/browser-automation/tools/
+├── browser-rod/     # Go CDP client (go-rod) — CoinGlass, GLM, Modal, screenshots, etc.
+└── gsd-browser     # GSD Browser binary (local/free Chrome automation)
+```
+
+### System-wide tools (already installed):
+- **Playwright** v1.59.1 + Chromium — `playwright` CLI at `/usr/local/bin/playwright`
+- **Google Chrome** — `/usr/bin/google-chrome`
+- **Chromium** — `/usr/bin/chromium-browser`
+- **Go Rod** module — `/root/go/pkg/mod/github.com/go-rod/rod@v0.116.2/`
+
+### Browserbase (API only, no local install needed)
+API key stored in `configs/browser-automation.json`
+
+### Agent Browser (recommended for complex tasks)
 ```bash
-# Browserbase (no installation needed - API only)
-# API key stored in configs/browserbase.env
-
-# Agent Browser (recommended for complex tasks)
 npm install -g agent-browser
 agent-browser install
-
-# GSD Browser (free alternative) 
-curl -L -o gsd-browser https://github.com/gsd-build/gsd-browser/releases/download/v0.1.3/gsd-browser-linux-x64
-chmod +x gsd-browser
-
-# Playwright (stealth mode)
-pip install playwright playwright-stealth
-playwright install chromium
 ```
+
+### browser-rod (Go CDP client)
+Build and run from `tools/browser-rod/`:
+```bash
+cd tools/browser-rod
+go run ./cmd/liq    # CoinGlass liquidations
+go run ./cmd/glm    # GLM endpoint
+.go run ./cmd/modal  # Modal API
+go run ./cmd/screenshot  # Screenshot tool
+```
+Available subcommands: `blog`, `debug`, `endpoint`, `glm`, `liq`, `modal`, `screenshot`, `search`, `test`, `x`
 
 ## Advanced Features
 
@@ -310,10 +325,8 @@ The skill integrates with OpenClaw's existing tools:
 For detailed tool-specific documentation:
 - **Browserbase API**: See `references/browserbase-api.md`
 - **Agent Browser Guide**: See `references/agent-browser-advanced.md`
-- **Playwright Stealth**: See `references/playwright-stealth.md`
-- **GSD Browser**: See `references/gsd-browser-config.md`
-- **Mobile Testing**: See `references/mobile-testing.md`
-- **Performance Tuning**: See `references/performance.md`
+- **browser-rod (Go CDP)**: See `tools/browser-rod/README.md`
+- **GSD Browser**: Binary at `tools/gsd-browser`
 
 ## Troubleshooting
 

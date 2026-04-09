@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "updatedAt": "2026-04-09T17:05:45.173Z",
+  "entries": {
+    "memory:memory/2026-03-24.md:3:6": {
+      "key": "memory:memory/2026-03-24.md:3:6",
+      "path": "memory/2026-03-24.md",
+      "startLine": 3,
+      "endLine": 6,
+      "source": "memory",
+      "snippet": "@@ -3,4 @@ (2 before, 271 after) ## Session Context - Trading bot audit complete (yesterday) — all critical issues resolved - Investigated HyperAlphaArena for useful components - Implemented token tracking system for ai-trader",
+      "recallCount": 1,
+      "dailyCount": 0,
+      "totalScore": 0.76,
+      "maxScore": 0.76,
+      "firstRecalledAt": "2026-04-09T17:05:45.173Z",
+      "lastRecalledAt": "2026-04-09T17:05:45.173Z",
+      "queryHashes": [
+        "768dc50025e1"
+      ],
+      "recallDays": [
+        "2026-04-09"
+      ],
+      "conceptTags": [
+        "ai-trader",
+        "3,4",
+        "context",
+        "trading",
+        "bot",
+        "audit",
+        "complete",
+        "yesterday"
+      ]
+    }
+  }
+}

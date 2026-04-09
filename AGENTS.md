@@ -30,10 +30,9 @@
 **Start:**
 1. `memory/session.md` → handoff
 2. `MEMORY.md` → long-term context  
-3. `projects/btc-grid-bot/docs/cheatsheet.md` → grid bot quick reference
-4. Today's daily file in `memory/`
-5. **Auto-context loading** — Use `session_memory_auto.py` to search memvid for relevant context based on session.md topics
-6. **If user says "check in"** → read `memory/mental-health.md` for continuity
+3. Today's daily file in `memory/`
+4. **Auto-context loading** — Use `session_memory_auto.py` to search memvid for relevant context based on session.md topics
+5. **If user says "check in"** → read `memory/mental-health.md` for continuity
 
 **During Session:**
 - When user asks about past work/decisions → `search_context("user's topic")` 
